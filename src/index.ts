@@ -132,11 +132,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "get_semantic_tree_optimized",
-        description: "Extract the Semantic Tree but aggressively prune nodes that do not match the agent's intent to save tokens.",
+        description: "Extract the Semantic Tree using a specialized lens (UX, Security, Performance) and intent pruning.",
         inputSchema: {
           type: "object",
           properties: {
             intent: { type: "string", description: "Your current goal (e.g. 'checkout', 'login', 'read article'). Used to prune irrelevant DOM elements." },
+            lens: { type: "string", enum: ["UX", "Security", "Performance"], description: "The Semantic Lens to view the page through." }
           },
           required: ["intent"],
         },
@@ -206,6 +207,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["reason"],
         },
+      },
+      {
+        name: "debug_failure",
+        description: "Save a time-travel Playwright trace of the current session to debug hallucination or errors.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            sessionId: { type: "string", description: "A unique identifier for this debug trace" },
+          },
+          required: ["sessionId"],
+        },
       }
     ],
   };
@@ -220,8 +232,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (request.params.name === "get_semantic_tree_optimized") {
-      const { intent } = request.params.arguments as { intent: string };
-      const tree = await browser.getSemanticTree(intent);
+      const { intent, lens } = request.params.arguments as any;
+      const tree = await browser.getSemanticTree(intent, lens || "UX");
       return { content: [{ type: "text", text: JSON.stringify(tree, null, 2) }] };
     }
 
@@ -259,6 +271,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { reason } = request.params.arguments as { reason: string };
       await browser.requestHumanIntervention(reason);
       return { content: [{ type: "text", text: `Human solved the issue and returned control. Resume your task.` }] };
+    }
+
+    if (request.params.name === "debug_failure") {
+      const { sessionId } = request.params.arguments as { sessionId: string };
+      const tracePath = await browser.debugFailure(sessionId);
+      return { content: [{ type: "text", text: `Saved Playwright trace to ${tracePath}. To view it, run 'npx playwright show-trace ${tracePath}' on the host machine.` }] };
     }
 
     throw new Error(`Tool not found: ${request.params.name}`);

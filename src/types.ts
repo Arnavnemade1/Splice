@@ -1,11 +1,21 @@
+export type SemanticLens = 'UX' | 'Security' | 'Performance';
+
 export interface SemanticNode {
-  id: string; // Unique, stable ID assigned to the element
-  type: string; // Element type classification (e.g., button, link, text, heading)
-  text?: string; // Visible text content
-  value?: string; // Input value if applicable
-  attributes?: Record<string, string>; // Meaningful attributes (e.g., placeholder, type, href)
-  children?: SemanticNode[]; // Nested semantic nodes
-  score?: number; // Importance score based on intent
+  id: string;
+  type: string;
+  text?: string;
+  value?: string;
+  attributes?: Record<string, string>;
+  children?: SemanticNode[];
+  score?: number;
+  
+  // Lens-specific metadata
+  securityFlags?: string[]; // E.g., 'hidden-input', 'external-script', 'insecure-form'
+  performanceMetrics?: {
+    nodeCount?: number;
+    depth?: number;
+    isLargeImage?: boolean;
+  };
 }
 
 export interface TelemetryLog {

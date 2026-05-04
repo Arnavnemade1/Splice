@@ -42,6 +42,8 @@ export class BrowserManager {
     const context = await this.browser.newContext(storageState ? { storageState } : undefined);
     const page = await context.newPage();
     
+    await context.tracing.start({ screenshots: true, snapshots: true });
+    
     const telemetry = new TelemetryInterceptor(page);
     telemetry.start();
 
@@ -61,9 +63,9 @@ export class BrowserManager {
     await page.goto(url, { waitUntil: 'networkidle' });
   }
 
-  async getSemanticTree(intent?: string): Promise<SemanticNode> {
+  async getSemanticTree(intent?: string, lens: any = 'UX'): Promise<SemanticNode> {
     const page = this.getActivePage();
-    const result = await SemanticExtractor.extract(page, intent);
+    const result = await SemanticExtractor.extract(page, intent, lens);
     
     this.metrics.tokensSavedEstimate += result.tokensSaved;
     return result.tree;
@@ -191,6 +193,19 @@ export class BrowserManager {
     fs.unlinkSync(statePath); // cleanup
 
     console.error(`--- INTERVENTION COMPLETE. AGENT RESUMING ---`);
+  }
+
+  async debugFailure(sessionId: string) {
+    const context = this.contexts.get(this.activeBranch);
+    if (!context) throw new Error("Active branch not found");
+    
+    const tracePath = path.join(this.snapshotsDir, `trace-${sessionId}.zip`);
+    await context.tracing.stop({ path: tracePath });
+    
+    // Restart tracing so the session can continue if needed
+    await context.tracing.start({ screenshots: true, snapshots: true });
+    
+    return tracePath;
   }
 
   async close() {

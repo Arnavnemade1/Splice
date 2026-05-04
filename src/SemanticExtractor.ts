@@ -1,9 +1,9 @@
 import type { Page } from 'playwright';
-import type { SemanticNode } from './types.js';
+import type { SemanticNode, SemanticLens } from './types.js';
 
 export class SemanticExtractor {
-  static async extract(page: Page, intent?: string): Promise<{ tree: SemanticNode, tokensSaved: number }> {
-    const rawTree = await page.evaluate(() => {
+  static async extract(page: Page, intent?: string, lens: SemanticLens = 'UX'): Promise<{ tree: SemanticNode, tokensSaved: number }> {
+    const rawTree = await page.evaluate((lensName) => {
       let idCounter = 0;
 
       function generateId(element: Element): string {
@@ -26,16 +26,22 @@ export class SemanticExtractor {
                rect.height > 0;
       }
 
-      function processNode(node: Element): SemanticNode[] {
-        if (!isVisible(node)) return [];
-
+      function processNode(node: Element, depth: number = 0): SemanticNode[] {
+        const isNodeVisible = isVisible(node);
         const tagName = node.tagName.toLowerCase();
-        const excludeTags = ['script', 'style', 'noscript', 'meta', 'link', 'head', 'svg', 'iframe', 'canvas'];
+        
+        // Lens specific visibility rules
+        if (!isNodeVisible && lensName !== 'Security') {
+          return []; // Security lens cares about hidden inputs/scripts
+        }
+
+        const excludeTags = ['style', 'noscript', 'meta', 'link', 'head', 'svg', 'iframe', 'canvas'];
         if (excludeTags.includes(tagName)) return [];
+        if (tagName === 'script' && lensName !== 'Security') return []; // Only Security cares about scripts
 
         const children: SemanticNode[] = [];
         for (const child of Array.from(node.children)) {
-          children.push(...processNode(child));
+          children.push(...processNode(child, depth + 1));
         }
 
         const isInteractive = ['a', 'button', 'input', 'select', 'textarea'].includes(tagName) || 
@@ -54,11 +60,51 @@ export class SemanticExtractor {
 
         const hasAria = node.hasAttribute('aria-label') || node.hasAttribute('aria-labelledby');
 
-        if (isInteractive || (isTextElement && directText.length > 0) || tagName === 'img' || hasAria) {
+        // Extraction conditions based on lens
+        let shouldExtract = false;
+        const securityFlags: string[] = [];
+        const performanceMetrics: any = {};
+
+        if (lensName === 'Security') {
+          if (tagName === 'script' && node.hasAttribute('src')) {
+            securityFlags.push('external-script');
+            shouldExtract = true;
+          }
+          if (tagName === 'input' && (node as HTMLInputElement).type === 'password') {
+            securityFlags.push('password-input');
+            shouldExtract = true;
+          }
+          if (tagName === 'input' && (node as HTMLInputElement).type === 'hidden') {
+            securityFlags.push('hidden-input');
+            shouldExtract = true;
+          }
+          if (tagName === 'form') {
+            const action = node.getAttribute('action') || '';
+            if (action.startsWith('http://')) securityFlags.push('insecure-form');
+            shouldExtract = true;
+          }
+        } else if (lensName === 'Performance') {
+          if (tagName === 'img') {
+            const rect = node.getBoundingClientRect();
+            if (rect.width * rect.height > 100000) performanceMetrics.isLargeImage = true;
+            shouldExtract = true;
+          }
+          if (depth > 20) {
+            performanceMetrics.depth = depth;
+            shouldExtract = true;
+          }
+        } else {
+          // Default UX Lens
+          if (isInteractive || (isTextElement && directText.length > 0) || tagName === 'img' || hasAria) {
+            shouldExtract = true;
+          }
+        }
+
+        if (shouldExtract) {
           const id = generateId(node);
           const semanticNode: SemanticNode = {
             id,
-            type: isInteractive ? 'interactive' : 'content',
+            type: isInteractive ? 'interactive' : (tagName === 'script' || tagName === 'form' ? 'technical' : 'content'),
             attributes: {
               tagName: tagName
             }
@@ -71,10 +117,14 @@ export class SemanticExtractor {
           if (tagName === 'input' && node.getAttribute('type')) semanticNode.attributes!['type'] = node.getAttribute('type')!;
           if (node.getAttribute('role')) semanticNode.attributes!['role'] = node.getAttribute('role')!;
           if (tagName === 'img' && node.getAttribute('alt')) semanticNode.attributes!['alt'] = node.getAttribute('alt')!;
+          if (tagName === 'script' && node.getAttribute('src')) semanticNode.attributes!['src'] = node.getAttribute('src')!;
           
           if (tagName === 'input' || tagName === 'textarea') {
             semanticNode.value = (node as HTMLInputElement).value;
           }
+
+          if (securityFlags.length > 0) semanticNode.securityFlags = securityFlags;
+          if (Object.keys(performanceMetrics).length > 0) semanticNode.performanceMetrics = performanceMetrics;
 
           if (children.length > 0) {
             semanticNode.children = children;
@@ -91,7 +141,7 @@ export class SemanticExtractor {
         type: 'root',
         children: bodySemanticNodes
       } as SemanticNode;
-    });
+    }, lens);
 
     if (!intent) {
       return { tree: rawTree, tokensSaved: 0 };
@@ -107,7 +157,8 @@ export class SemanticExtractor {
         node.attributes?.['aria-label'] || '',
         node.attributes?.['placeholder'] || '',
         node.attributes?.['href'] || '',
-        node.attributes?.['alt'] || ''
+        node.attributes?.['alt'] || '',
+        ...(node.securityFlags || []),
       ].join(' ').toLowerCase();
 
       for (const kw of keywords) {
@@ -140,7 +191,6 @@ export class SemanticExtractor {
         node.children = node.children.map(pruneNode).filter((n): n is SemanticNode => n !== null);
       }
       
-      // Clean up score property so it doesn't waste tokens
       delete node.score;
       return node;
     }
@@ -149,7 +199,6 @@ export class SemanticExtractor {
     const optimizedTree = pruneNode(rawTree) || { id: 'root', type: 'root', children: [] };
     const optimizedStr = JSON.stringify(optimizedTree);
     
-    // Estimate tokens (4 chars = 1 token roughly)
     const tokensSaved = Math.max(0, Math.floor((rawStr.length - optimizedStr.length) / 4));
 
     return { tree: optimizedTree, tokensSaved };

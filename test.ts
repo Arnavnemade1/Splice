@@ -8,27 +8,19 @@ async function main() {
   console.log("Navigating to example.com...");
   await browser.navigate("https://example.com");
 
-  console.log("Extracting OPTIMIZED semantic tree (Intent: 'domain information')...");
-  const tree = await browser.getSemanticTree("domain information");
-  console.log(JSON.stringify(tree, null, 2));
+  console.log("\n--- Testing Security Lens ---");
+  const securityTree = await browser.getSemanticTree("password", "Security");
+  console.log("Security Tree Nodes:", JSON.stringify(securityTree, null, 2));
 
-  console.log("Getting telemetry logs...");
-  const logs = browser.getTelemetryLogs();
-  console.log(`Logs found: ${logs.length}`);
+  console.log("\n--- Testing Performance Lens ---");
+  const perfTree = await browser.getSemanticTree("", "Performance");
+  console.log("Performance Tree Nodes:", perfTree.children?.length || 0);
 
-  console.log(`Metrics: ${JSON.stringify(browser.metrics)}`);
+  console.log("\n--- Testing Debug Trace ---");
+  const tracePath = await browser.debugFailure("test-session-1");
+  console.log(`Saved debug trace to: ${tracePath}`);
 
-  console.log("Testing branching...");
-  const branchId = await browser.forkState();
-  console.log(`Created branch: ${branchId}`);
-  await browser.commitBranch(branchId);
-  console.log(`Committed branch: ${branchId}`);
-
-  console.log("Testing snapshot save...");
-  const snapshotPath = await browser.saveSnapshot("test-snapshot");
-  console.log(`Saved snapshot to ${snapshotPath}`);
-
-  console.log("Closing browser...");
+  console.log("\nClosing browser...");
   await browser.close();
 }
 
