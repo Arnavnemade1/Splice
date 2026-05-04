@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/logo.png" alt="Splice Logo" width="120" />
 
-  <h1>Splice Enterprise</h1>
+  <h1>Splice</h1>
 
   <p><strong>The Agent-Native Browser Infrastructure.</strong><br/>
   Not a browser for humans. A browsing engine for AI.</p>
