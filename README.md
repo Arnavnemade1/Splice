@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/logo.png" alt="Splice Logo" width="300" />
   
-  # Splice Enterprise
+  # Splice
   **The Vercel for Agentic Browsing**
   
   [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
