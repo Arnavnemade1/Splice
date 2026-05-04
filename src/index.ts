@@ -245,6 +245,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["elementId"],
         },
+      },
+      {
+        name: "generate_observability_report",
+        description: "Generate a high-aesthetic HTML dashboard containing the latest micro-snapshots, vision logs, and speculative metrics.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
       }
     ],
   };
@@ -316,6 +324,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { elementId } = request.params.arguments as { elementId: string };
       const base64Str = await browser.captureNodeScreenshot(elementId);
       return { content: [{ type: "text", text: base64Str }] };
+    }
+
+    if (request.params.name === "generate_observability_report") {
+      const reportPath = await browser.generateObservabilityReport();
+      return { content: [{ type: "text", text: `Observability Dashboard generated at: ${reportPath}. Open this file in your browser to visualize the agent's processes.` }] };
     }
 
     throw new Error(`Tool not found: ${request.params.name}`);

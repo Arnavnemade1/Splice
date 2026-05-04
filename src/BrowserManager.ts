@@ -259,6 +259,38 @@ export class BrowserManager {
     return tracePath;
   }
 
+  async generateObservabilityReport(): Promise<string> {
+    const snaps = fs.readdirSync(this.snapshotsDir)
+      .filter(f => f.startsWith('micro-snap-'))
+      .map(f => JSON.parse(fs.readFileSync(path.join(this.snapshotsDir, f), 'utf8')))
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 50);
+
+    const templatePath = path.join(process.cwd(), 'dashboard', 'index.html');
+    let html = fs.readFileSync(templatePath, 'utf8');
+
+    // Inject data into the script tag
+    const dataInjection = `
+        const microSnapshots = ${JSON.stringify(snaps)};
+        const metrics = ${JSON.stringify(this.metrics)};
+        
+        const timeline = document.getElementById('timeline');
+        timeline.innerHTML = microSnapshots.map((s, i) => \`
+            <div class="snapshot-card \${i === 0 ? 'active' : ''}">
+                <div class="snap-type">\${s.type.toUpperCase()}</div>
+                <div class="snap-details">\${s.url || s.elementId || ''} \${s.action || ''}</div>
+                <div class="snap-time">\${new Date(s.timestamp).toLocaleTimeString()}</div>
+            </div>
+        \`).join('');
+    `;
+
+    html = html.replace('// In a real implementation', dataInjection);
+
+    const reportPath = path.join(this.snapshotsDir, `report-${Date.now()}.html`);
+    fs.writeFileSync(reportPath, html);
+    return reportPath;
+  }
+
   async close() {
     if (this.browser) {
       await this.browser.close();
