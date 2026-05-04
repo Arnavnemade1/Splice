@@ -2,7 +2,7 @@ import type { Page } from 'playwright';
 import type { SemanticNode, SemanticLens } from './types.js';
 
 export class SemanticExtractor {
-  static async extract(page: Page, intent?: string, lens: SemanticLens = 'UX'): Promise<{ tree: SemanticNode, tokensSaved: number }> {
+  static async extract(page: Page, intent?: string, lens: SemanticLens = 'UX', maxTokens?: number): Promise<{ tree: SemanticNode, tokensSaved: number }> {
     const rawTree = await page.evaluate((lensName) => {
       let idCounter = 0;
 
@@ -197,10 +197,45 @@ export class SemanticExtractor {
 
     const rawStr = JSON.stringify(rawTree);
     const optimizedTree = pruneNode(rawTree) || { id: 'root', type: 'root', children: [] };
-    const optimizedStr = JSON.stringify(optimizedTree);
+    let optimizedStr = JSON.stringify(optimizedTree);
+    
+    // --- Token Budget Enforcement ---
+    function enforceBudget(tree: SemanticNode, limit: number): SemanticNode {
+      function estimateTokens(node: SemanticNode): number {
+        return Math.max(1, Math.floor(JSON.stringify(node).length / 4));
+      }
+
+      if (estimateTokens(tree) <= limit) return tree;
+
+      // 1. Truncate long text
+      function truncateText(n: SemanticNode) {
+        if (n.text && n.text.length > 150) n.text = n.text.substring(0, 150) + '...[truncated]';
+        if (n.children) n.children.forEach(truncateText);
+      }
+      truncateText(tree);
+      if (estimateTokens(tree) <= limit) return tree;
+
+      // 2. Truncate massive lists
+      function truncateLists(n: SemanticNode) {
+        if (n.children && n.children.length > 10) {
+          n.children = n.children.slice(0, 10);
+          n.children.push({ id: `truncated-${n.id}`, type: 'system', text: `...[children truncated to fit maxTokens]` });
+        }
+        if (n.children) n.children.forEach(truncateLists);
+      }
+      truncateLists(tree);
+
+      return tree;
+    }
+
+    let finalTree = optimizedTree;
+    if (maxTokens && maxTokens > 0) {
+      finalTree = enforceBudget(optimizedTree, maxTokens);
+      optimizedStr = JSON.stringify(finalTree);
+    }
     
     const tokensSaved = Math.max(0, Math.floor((rawStr.length - optimizedStr.length) / 4));
 
-    return { tree: optimizedTree, tokensSaved };
+    return { tree: finalTree, tokensSaved };
   }
 }

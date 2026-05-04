@@ -63,9 +63,9 @@ export class BrowserManager {
     await page.goto(url, { waitUntil: 'networkidle' });
   }
 
-  async getSemanticTree(intent?: string, lens: any = 'UX'): Promise<SemanticNode> {
+  async getSemanticTree(intent?: string, lens: any = 'UX', maxTokens?: number): Promise<SemanticNode> {
     const page = this.getActivePage();
-    const result = await SemanticExtractor.extract(page, intent, lens);
+    const result = await SemanticExtractor.extract(page, intent, lens, maxTokens);
     
     this.metrics.tokensSavedEstimate += result.tokensSaved;
     return result.tree;

@@ -137,7 +137,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             intent: { type: "string", description: "Your current goal (e.g. 'checkout', 'login', 'read article'). Used to prune irrelevant DOM elements." },
-            lens: { type: "string", enum: ["UX", "Security", "Performance"], description: "The Semantic Lens to view the page through." }
+            lens: { type: "string", enum: ["UX", "Security", "Performance"], description: "The Semantic Lens to view the page through." },
+            maxTokens: { type: "number", description: "The maximum number of tokens to return. Triggers aggressive truncation if exceeded." }
           },
           required: ["intent"],
         },
@@ -232,8 +233,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (request.params.name === "get_semantic_tree_optimized") {
-      const { intent, lens } = request.params.arguments as any;
-      const tree = await browser.getSemanticTree(intent, lens || "UX");
+      const { intent, lens, maxTokens } = request.params.arguments as any;
+      const tree = await browser.getSemanticTree(intent, lens || "UX", maxTokens);
       return { content: [{ type: "text", text: JSON.stringify(tree, null, 2) }] };
     }
 
