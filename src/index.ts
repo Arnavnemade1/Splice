@@ -253,6 +253,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {},
         },
+      },
+      {
+        name: "capture_annotated_screenshot",
+        description: "Vibe Coding: Capture a base64 screenshot where every interactive element has a bright bounding box and ID label. Perfect for visually locating elements without reading JSON.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "execute_script",
+        description: "God-Mode: Execute arbitrary JavaScript in the browser context. Use this as an escape hatch for complex DOM manipulation or bypassing rigid tool constraints.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            script: { type: "string", description: "The JavaScript code to execute. Must return a serializable value or undefined." },
+          },
+          required: ["script"],
+        },
       }
     ],
   };
@@ -329,6 +348,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     if (request.params.name === "generate_observability_report") {
       const reportPath = await browser.generateObservabilityReport();
       return { content: [{ type: "text", text: `Observability Dashboard generated at: ${reportPath}. Open this file in your browser to visualize the agent's processes.` }] };
+    }
+
+    if (request.params.name === "capture_annotated_screenshot") {
+      const base64Str = await browser.captureAnnotatedScreenshot();
+      return { content: [{ type: "text", text: base64Str }] };
+    }
+
+    if (request.params.name === "execute_script") {
+      const { script } = request.params.arguments as { script: string };
+      const result = await browser.executeScript(script);
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     }
 
     throw new Error(`Tool not found: ${request.params.name}`);

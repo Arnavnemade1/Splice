@@ -139,10 +139,12 @@ export class BrowserManager {
     const selector = `[data-splice-id="${elementId}"]`;
     const element = page.locator(selector).first();
     
-    const isVisible = await element.isVisible();
-    if (!isVisible) {
+    // Resilient Interaction (Auto-Wait up to 3 seconds)
+    try {
+      await element.waitFor({ state: 'visible', timeout: 3000 });
+    } catch (e) {
       this.metrics.preventedErrors++;
-      throw new Error(`Element ${elementId} not found or not visible. (Conflict Prevented)`);
+      throw new Error(`Element ${elementId} not found or not visible after 3s. (Conflict Prevented)`);
     }
 
     switch (action) {
@@ -165,6 +167,74 @@ export class BrowserManager {
     }
     
     this.saveMicroSnapshot('interact', { action, elementId, value, agentId });
+  }
+
+  async executeScript(script: string): Promise<any> {
+    const page = this.getActivePage();
+    try {
+      const result = await page.evaluate(script);
+      this.saveMicroSnapshot('execute_script', { script: script.substring(0, 100) });
+      return result;
+    } catch (e: any) {
+      throw new Error(`Script execution failed: ${e.message}`);
+    }
+  }
+
+  async captureAnnotatedScreenshot(): Promise<string> {
+    const page = this.getActivePage();
+    
+    // Inject CSS & Boxes
+    await page.evaluate(() => {
+      const elements = document.querySelectorAll('[data-splice-id]');
+      elements.forEach((el) => {
+        const id = el.getAttribute('data-splice-id');
+        if (!id) return;
+        
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
+
+        // Draw bounding box
+        const box = document.createElement('div');
+        box.className = 'splice-vision-box';
+        box.style.position = 'absolute';
+        box.style.left = `${rect.left + window.scrollX}px`;
+        box.style.top = `${rect.top + window.scrollY}px`;
+        box.style.width = `${rect.width}px`;
+        box.style.height = `${rect.height}px`;
+        box.style.border = '2px solid #00ffaa';
+        box.style.pointerEvents = 'none';
+        box.style.zIndex = '999998';
+        box.style.boxShadow = '0 0 10px rgba(0, 255, 170, 0.5)';
+
+        // Draw label
+        const label = document.createElement('div');
+        label.className = 'splice-vision-box';
+        label.innerText = `[${id}]`;
+        label.style.position = 'absolute';
+        label.style.left = `${rect.left + window.scrollX}px`;
+        label.style.top = `${rect.top + window.scrollY - 20}px`;
+        label.style.background = '#00ffaa';
+        label.style.color = '#000';
+        label.style.fontSize = '12px';
+        label.style.fontWeight = 'bold';
+        label.style.padding = '2px 4px';
+        label.style.borderRadius = '4px 4px 0 0';
+        label.style.pointerEvents = 'none';
+        label.style.zIndex = '999999';
+
+        document.body.appendChild(box);
+        document.body.appendChild(label);
+      });
+    });
+
+    const buffer = await page.screenshot({ fullPage: true });
+    
+    // Cleanup so they don't break functionality
+    await page.evaluate(() => {
+      document.querySelectorAll('.splice-vision-box').forEach(el => el.remove());
+    });
+
+    return buffer.toString('base64');
   }
 
   async forkState(): Promise<string> {
@@ -266,7 +336,7 @@ export class BrowserManager {
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, 50);
 
-    const templatePath = path.join(process.cwd(), 'dashboard', 'index.html');
+    const templatePath = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'dashboard', 'index.html');
     let html = fs.readFileSync(templatePath, 'utf8');
 
     // Inject data into the script tag
