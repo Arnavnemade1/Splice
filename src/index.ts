@@ -137,7 +137,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             intent: { type: "string", description: "Your current goal (e.g. 'checkout', 'login', 'read article'). Used to prune irrelevant DOM elements." },
-            lens: { type: "string", enum: ["UX", "Security", "Performance"], description: "The Semantic Lens to view the page through." },
+            lens: { type: "string", enum: ["UX", "Security", "Performance", "Vision"], description: "The Semantic Lens to view the page through." },
             maxTokens: { type: "number", description: "The maximum number of tokens to return. Triggers aggressive truncation if exceeded." }
           },
           required: ["intent"],
@@ -163,6 +163,21 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {},
+        },
+      },
+      {
+        name: "speculative_fork",
+        description: "Proactively fork branches and navigate to a list of URLs in the background to reduce latency when you later navigate to them.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            urls: {
+              type: "array",
+              items: { type: "string" },
+              description: "Array of URLs to speculatively pre-load."
+            }
+          },
+          required: ["urls"],
         },
       },
       {
@@ -219,6 +234,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           },
           required: ["sessionId"],
         },
+      },
+      {
+        name: "capture_node_screenshot",
+        description: "Vision Lens: Capture a base64 encoded screenshot of a specific element to pass to a vision model.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            elementId: { type: "string", description: "The data-splice-id of the element to capture" },
+          },
+          required: ["elementId"],
+        },
       }
     ],
   };
@@ -250,6 +276,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return { content: [{ type: "text", text: `Created new branch: ${branchId}. Switch using commit_branch.` }] };
     }
 
+    if (request.params.name === "speculative_fork") {
+      const { urls } = request.params.arguments as { urls: string[] };
+      await browser.speculativeFork(urls);
+      return { content: [{ type: "text", text: `Speculatively forked and pre-loaded ${urls.length} branches in the background.` }] };
+    }
+
     if (request.params.name === "commit_branch") {
       const { branchId } = request.params.arguments as { branchId: string };
       await browser.commitBranch(branchId);
@@ -278,6 +310,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { sessionId } = request.params.arguments as { sessionId: string };
       const tracePath = await browser.debugFailure(sessionId);
       return { content: [{ type: "text", text: `Saved Playwright trace to ${tracePath}. To view it, run 'npx playwright show-trace ${tracePath}' on the host machine.` }] };
+    }
+
+    if (request.params.name === "capture_node_screenshot") {
+      const { elementId } = request.params.arguments as { elementId: string };
+      const base64Str = await browser.captureNodeScreenshot(elementId);
+      return { content: [{ type: "text", text: base64Str }] };
     }
 
     throw new Error(`Tool not found: ${request.params.name}`);

@@ -1,4 +1,4 @@
-export type SemanticLens = 'UX' | 'Security' | 'Performance';
+export type SemanticLens = 'UX' | 'Security' | 'Performance' | 'Vision';
 
 export interface SemanticNode {
   id: string;
