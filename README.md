@@ -13,19 +13,19 @@
 
 > **Stop paying the "Human Tax".** Standard browsers are built for eyeballs. Splice is built for AI. It translates the visual web into high-density, semantic data streams, saving developers thousands of dollars in LLM context costs while providing deterministic control over complex agentic workflows.
 
-## ✨ The Enterprise Edge
+## The Enterprise Edge
 
 Why use Splice instead of raw Playwright or standard headless Chrome?
 
-- ⚡️ **Token-Efficiency Engine**: A dynamic `ImportanceScorer` prunes up to 95% of irrelevant DOM noise (footers, ads, tracking pixels) based on your agent's current intent.
-- 🌳 **Shadow-Testing & Branching**: Let your agents `fork_state()` to test risky forms in parallel background tabs without polluting the primary session.
-- 💾 **Deterministic Snapshot Resumption**: Save encrypted auth cookies and local storage to disk. Instantly `load_snapshot()` to teleport agents past repetitive login walls.
-- 🚦 **Multi-Agent Conflict Resolution**: Prevents agents from colliding. If Agent A hides a modal, Agent B gets a clean `Conflict Prevented` error instead of silently failing.
-- 🛡️ **Human-in-the-Loop CAPTCHA**: Hits a Cloudflare block? Splice pauses the agent and pops open a focused Chromium window on your host machine. Solve it, close it, and the agent resumes. No webhooks needed.
+- **Token-Efficiency Engine**: A dynamic `ImportanceScorer` prunes up to 95% of irrelevant DOM noise (footers, ads, tracking pixels) based on your agent's current intent.
+- **Shadow-Testing & Branching**: Let your agents `fork_state()` to test risky forms in parallel background tabs without polluting the primary session.
+- **Deterministic Snapshot Resumption**: Save encrypted auth cookies and local storage to disk. Instantly `load_snapshot()` to teleport agents past repetitive login walls.
+- **Multi-Agent Conflict Resolution**: Prevents agents from colliding. If Agent A hides a modal, Agent B gets a clean `Conflict Prevented` error instead of silently failing.
+- **Human-in-the-Loop CAPTCHA**: Hits a Cloudflare block? Splice pauses the agent and pops open a focused Chromium window on your host machine. Solve it, close it, and the agent resumes. No webhooks needed.
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 - Node.js >= 18
@@ -50,7 +50,7 @@ npx tsc
 
 ---
 
-## 🔌 Connecting to an Agent (MCP)
+## Connecting to an Agent (MCP)
 
 To hook Splice into your agent's workflow, add it to your MCP client configuration (e.g., `claude_desktop_config.json`):
 
@@ -70,11 +70,11 @@ To hook Splice into your agent's workflow, add it to your MCP client configurati
 
 ---
 
-## 🛠️ The Toolset
+## The Toolset
 
 Once connected, your agent gains access to the following superpowers:
 
-### ⚡️ Tools
+### Tools
 - `navigate(url)`: Drive to any web page.
 - `get_semantic_tree_optimized(intent)`: Returns a highly compressed JSON tree pruned specifically for the current goal (e.g. "checkout").
 - `interact(elementId, action)`: Click, type, or focus deterministically using stable semantic IDs (no guessing CSS selectors).
@@ -82,19 +82,19 @@ Once connected, your agent gains access to the following superpowers:
 - `save_snapshot(name)` & `load_snapshot(name)`: Instantly serialize and resume authenticated states.
 - `request_human_intervention(reason)`: Pause execution and open a host window for manual CAPTCHA solving.
 
-### 📊 Resources
+### Resources
 - `splice://current-page/semantic-tree`: The raw, unoptimized semantic DOM.
 - `splice://current-page/telemetry`: The live ledger of all intercepted XHR/Fetch network requests and console logs.
 - `splice://session/health-dashboard`: Real-time metrics showing how many tokens and errors Splice has saved you this session.
 
 ---
 
-## 📈 ROI Tracking
+## ROI Tracking
 
 Splice isn't just a tool; it's an infrastructure layer that proves its value. Monitor the `health-dashboard` resource to see real-time metrics on:
-- 🪙 **Tokens Saved**: The exact delta between the raw DOM and the intent-optimized tree.
-- 🛑 **Errors Prevented**: How many destructive agent collisions were avoided.
-- 🧩 **CAPTCHAs Bypassed**: Successful human-in-the-loop rescues.
+- **Tokens Saved**: The exact delta between the raw DOM and the intent-optimized tree.
+- **Errors Prevented**: How many destructive agent collisions were avoided.
+- **CAPTCHAs Bypassed**: Successful human-in-the-loop rescues.
 
 <br />
 
