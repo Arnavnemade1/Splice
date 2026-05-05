@@ -133,8 +133,15 @@ export class BrowserManager {
   async navigate(url: string) {
     const speculativeBranchId = `speculative-${Buffer.from(url).toString('base64').substring(0, 10)}`;
     if (this.contexts.has(speculativeBranchId)) {
-      console.log(`[Speculative Execution] Cache hit for ${url}. Instantly switching branch.`);
+      console.error(`[Speculative Execution] Cache hit for ${url}. Instantly switching branch.`);
       this.activeBranch = speculativeBranchId;
+      // Wait for the pre-loaded page to be ready
+      try {
+        const page = this.getActivePage();
+        await page.waitForLoadState('domcontentloaded', { timeout: 5000 });
+        // Settle delay to avoid context destruction issues on immediate subsequent calls
+        await new Promise(r => setTimeout(r, 200));
+      } catch { /* Already loaded */ }
       this.pushLiveFeed('navigate', `Cache hit → ${url}`);
       return;
     }
@@ -244,6 +251,8 @@ export class BrowserManager {
   async executeScript(script: string): Promise<any> {
     const page = this.getActivePage();
     try {
+      // Ensure the page is in a stable state before executing
+      await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
       const result = await page.evaluate(script);
       this.saveMicroSnapshot('execute_script', { script: script.substring(0, 100) });
       return result;
@@ -417,7 +426,11 @@ export class BrowserManager {
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, 50);
 
-    const templatePath = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'dashboard', 'index.html');
+    const templatePath = path.join(process.cwd(), 'dashboard', 'index.html');
+    if (!fs.existsSync(templatePath)) {
+      // Fallback for when running from a different context or if cwd is not root
+      throw new Error(`Observability template not found at ${templatePath}. Ensure you are running Splice from the project root.`);
+    }
     let html = fs.readFileSync(templatePath, 'utf8');
 
     const dataInjection = `
