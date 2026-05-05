@@ -9,6 +9,8 @@ chromium.use(stealth());
 import { TelemetryInterceptor } from './TelemetryInterceptor.js';
 import { SemanticExtractor } from './SemanticExtractor.js';
 import { CryptoManager } from './CryptoManager.js';
+import { SecurityAuditor } from './SecurityAuditor.js';
+import type { AuditOptions } from './SecurityAuditor.js';
 import type { SemanticNode, SessionMetrics } from './types.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -454,7 +456,7 @@ export class BrowserManager {
       const filePath = path.join(this.snapshotsDir, file);
       const { mtimeMs } = fs.statSync(filePath);
       const isOld = mtimeMs < cutoff;
-      const isSafeToDelete = file.startsWith('micro-snap-') || file.startsWith('trace-') || file.startsWith('report-');
+      const isSafeToDelete = file.startsWith('micro-snap-') || file.startsWith('trace-') || file.startsWith('report-') || file.startsWith('audit-');
       if (isOld && isSafeToDelete) {
         fs.unlinkSync(filePath);
         removed++;
@@ -463,6 +465,19 @@ export class BrowserManager {
 
     this.pushLiveFeed('maintenance_cleanup', `Removed ${removed} files older than ${olderThanDays}d`);
     return { removed, olderThanDays };
+  }
+
+  async runSecurityAudit(targetUrl: string, options: AuditOptions = {}) {
+    const page = this.getActivePage();
+    const auditor = new SecurityAuditor(page);
+    const report = await auditor.audit(targetUrl, options);
+
+    // Persist the report as an encrypted audit file
+    const auditPath = path.join(this.snapshotsDir, `audit-${Date.now()}.json`);
+    this.vault.writeEncrypted(auditPath, JSON.stringify(report, null, 2));
+
+    this.pushLiveFeed('security_audit', `Crawled ${report.crawledUrls.length} pages — ${report.totals.critical} critical, ${report.totals.warning} warnings`);
+    return report;
   }
 
   async close() {

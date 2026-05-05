@@ -293,6 +293,37 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             olderThanDays: { type: "number", description: "Delete files older than this many days (default: 7)" },
           },
         },
+      },
+      {
+        name: "run_security_audit",
+        description: "Agent QA Lab: Run a comprehensive security audit against a URL. Checks security headers, XSS surfaces, CSRF tokens, sensitive data exposure, and third-party dependencies. Automatically crawls linked pages and returns a structured, machine-readable report with actionable AI feedback.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            targetUrl: {
+              type: "string",
+              description: "The URL of the app to audit (e.g. http://localhost:3000)"
+            },
+            safeMode: {
+              type: "boolean",
+              description: "If true (default), skip active form probing. Set to false for full active XSS scanning in dev environments only."
+            },
+            crawl: {
+              type: "boolean",
+              description: "If true (default), automatically follow same-domain links and audit each page."
+            },
+            maxCrawlDepth: {
+              type: "number",
+              description: "Maximum number of pages to crawl (default: 5)."
+            },
+            checks: {
+              type: "array",
+              items: { type: "string", enum: ["headers", "xss", "auth", "data", "deps"] },
+              description: "Which checks to run. Defaults to all: headers, xss, auth, data, deps."
+            }
+          },
+          required: ["targetUrl"]
+        }
       }
     ],
   };
@@ -392,6 +423,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { olderThanDays } = (request.params.arguments as any) || {};
       const result = await browser.maintenanceCleanup(olderThanDays ?? 7);
       return { content: [{ type: "text", text: `Cleanup complete. Removed ${result.removed} files older than ${result.olderThanDays} days.` }] };
+    }
+
+    if (request.params.name === "run_security_audit") {
+      const { targetUrl, safeMode, crawl, maxCrawlDepth, checks } = request.params.arguments as any;
+      const report = await browser.runSecurityAudit(targetUrl, {
+        safeMode: safeMode !== false, // default true
+        crawl: crawl !== false,       // default true
+        maxCrawlDepth: maxCrawlDepth ?? 5,
+        checks
+      });
+
+      // Return the agent-facing feedback as the primary response, with full JSON appended
+      const agentText = [
+        `=== SPLICE SECURITY AUDIT REPORT ===`,
+        `Target: ${report.url}`,
+        `Crawled: ${report.crawledUrls.length} page(s): ${report.crawledUrls.join(', ')}`,
+        `Safe Mode: ${report.safeMode}`,
+        ``,
+        `SUMMARY: ${report.agentFeedback.summary}`,
+        `Results: ${report.totals.critical} critical | ${report.totals.warning} warnings | ${report.totals.info} info | ${report.totals.passed} passed`,
+        ``,
+        report.agentFeedback.criticalActions.length > 0 ? `CRITICAL — FIX IMMEDIATELY:\n${report.agentFeedback.criticalActions.join('\n')}` : '',
+        report.agentFeedback.warningActions.length > 0  ? `\nWARNINGS — ADDRESS BEFORE LAUNCH:\n${report.agentFeedback.warningActions.join('\n')}` : '',
+        `\nPASSED CHECKS:\n${report.agentFeedback.passed.join('\n')}`,
+        ``,
+        `=== FULL JSON REPORT ===`,
+        JSON.stringify(report, null, 2)
+      ].filter(Boolean).join('\n');
+
+      return { content: [{ type: "text", text: agentText }] };
     }
 
     throw new Error(`Tool not found: ${request.params.name}`);
