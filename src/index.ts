@@ -44,6 +44,12 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
         name: "Health & Performance Dashboard",
         mimeType: "application/json",
         description: "Tracks tokens saved, errors prevented, and CAPTCHAs handled in this session.",
+      },
+      {
+        uri: "splice://session/live-feed",
+        name: "Live Heartbeat Feed",
+        mimeType: "application/json",
+        description: "A real-time rolling window of the last 5 agent actions and 5 console logs — the agent's heartbeat.",
       }
     ],
   };
@@ -102,13 +108,13 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
 
   if (request.params.uri === "splice://session/health-dashboard") {
     return {
-      contents: [
-        {
-          uri: request.params.uri,
-          mimeType: "application/json",
-          text: JSON.stringify(browser.metrics, null, 2),
-        },
-      ],
+      contents: [{ uri: request.params.uri, mimeType: "application/json", text: JSON.stringify(browser.metrics, null, 2) }],
+    };
+  }
+
+  if (request.params.uri === "splice://session/live-feed") {
+    return {
+      contents: [{ uri: request.params.uri, mimeType: "application/json", text: JSON.stringify(browser.getLiveFeed(), null, 2) }],
     };
   }
 
@@ -248,29 +254,44 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "generate_observability_report",
-        description: "Generate a high-aesthetic HTML dashboard containing the latest micro-snapshots, vision logs, and speculative metrics.",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
+        description: "Generate a high-aesthetic HTML dashboard with auto-refresh every 5s showing micro-snapshots and metrics.",
+        inputSchema: { type: "object", properties: {} },
       },
       {
         name: "capture_annotated_screenshot",
-        description: "Vibe Coding: Capture a base64 screenshot where every interactive element has a bright bounding box and ID label. Perfect for visually locating elements without reading JSON.",
-        inputSchema: {
-          type: "object",
-          properties: {},
-        },
+        description: "Vibe Coding: Capture a base64 screenshot where every interactive element has a bright bounding box and ID label.",
+        inputSchema: { type: "object", properties: {} },
       },
       {
         name: "execute_script",
-        description: "God-Mode: Execute arbitrary JavaScript in the browser context. Use this as an escape hatch for complex DOM manipulation or bypassing rigid tool constraints.",
+        description: "God-Mode: Execute arbitrary JavaScript in the browser context.",
         inputSchema: {
           type: "object",
           properties: {
-            script: { type: "string", description: "The JavaScript code to execute. Must return a serializable value or undefined." },
+            script: { type: "string", description: "JavaScript to execute. Must return a serializable value or undefined." },
           },
           required: ["script"],
+        },
+      },
+      {
+        name: "toggle_watch_mode",
+        description: "Toggle between headless (invisible) and headful (visible) browser. When enabled, a real Chrome window appears so you can watch the agent work.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            enabled: { type: "boolean", description: "true = visible browser, false = headless" },
+          },
+          required: ["enabled"],
+        },
+      },
+      {
+        name: "maintenance_cleanup",
+        description: "Delete old snapshots, traces, and report files to free disk space.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            olderThanDays: { type: "number", description: "Delete files older than this many days (default: 7)" },
+          },
         },
       }
     ],
@@ -359,6 +380,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { script } = request.params.arguments as { script: string };
       const result = await browser.executeScript(script);
       return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+
+    if (request.params.name === "toggle_watch_mode") {
+      const { enabled } = request.params.arguments as { enabled: boolean };
+      await browser.toggleWatchMode(enabled);
+      return { content: [{ type: "text", text: `Watch Mode is now ${enabled ? 'ENABLED — a browser window should be visible on your screen.' : 'DISABLED — running headless.'}` }] };
+    }
+
+    if (request.params.name === "maintenance_cleanup") {
+      const { olderThanDays } = (request.params.arguments as any) || {};
+      const result = await browser.maintenanceCleanup(olderThanDays ?? 7);
+      return { content: [{ type: "text", text: `Cleanup complete. Removed ${result.removed} files older than ${result.olderThanDays} days.` }] };
     }
 
     throw new Error(`Tool not found: ${request.params.name}`);

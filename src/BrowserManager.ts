@@ -5,8 +5,10 @@ import stealth from 'puppeteer-extra-plugin-stealth';
 import type { Browser, Page, BrowserContext } from 'playwright';
 
 chromium.use(stealth());
+
 import { TelemetryInterceptor } from './TelemetryInterceptor.js';
 import { SemanticExtractor } from './SemanticExtractor.js';
+import { CryptoManager } from './CryptoManager.js';
 import type { SemanticNode, SessionMetrics } from './types.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,41 +16,55 @@ import process from 'node:process';
 
 export class BrowserManager {
   private browser: Browser | null = null;
-  
+  private headless: boolean = true;
+
   // Branch management
   private contexts: Map<string, BrowserContext> = new Map();
   private pages: Map<string, Page> = new Map();
   private telemetry: Map<string, TelemetryInterceptor> = new Map();
-  
+
   public activeBranch: string = 'main';
-  
+
   public metrics: SessionMetrics = {
     tokensSavedEstimate: 0,
     preventedErrors: 0,
     captchaInterruptions: 0
   };
 
-  private snapshotsDir = path.join(process.cwd(), '.splice', 'snapshots');
+  // Live feed — ring buffer of last 20 actions
+  private liveFeed: Array<{ type: string; detail: string; timestamp: number }> = [];
+
+  private spliceDir: string;
+  private snapshotsDir: string;
+  private vault!: CryptoManager;
+
+  constructor() {
+    this.spliceDir = path.join(process.cwd(), '.splice');
+    this.snapshotsDir = path.join(this.spliceDir, 'snapshots');
+  }
 
   async init() {
     if (this.browser) return;
-    this.browser = await chromium.launch({ headless: true });
-    
+
     if (!fs.existsSync(this.snapshotsDir)) {
       fs.mkdirSync(this.snapshotsDir, { recursive: true });
     }
 
+    // Initialize encryption vault — auto-generates key if needed
+    this.vault = new CryptoManager(this.spliceDir);
+
+    this.browser = await chromium.launch({ headless: this.headless });
     await this.createBranch('main');
   }
 
   private async createBranch(branchId: string, storageState?: any) {
-    if (!this.browser) throw new Error("Browser not initialized");
-    
+    if (!this.browser) throw new Error('Browser not initialized');
+
     const context = await this.browser.newContext(storageState ? { storageState } : undefined);
     const page = await context.newPage();
-    
+
     await context.tracing.start({ screenshots: true, snapshots: true });
-    
+
     const telemetry = new TelemetryInterceptor(page);
     telemetry.start();
 
@@ -63,14 +79,64 @@ export class BrowserManager {
     return page;
   }
 
+  private pushLiveFeed(type: string, detail: string) {
+    this.liveFeed.unshift({ type, detail, timestamp: Date.now() });
+    if (this.liveFeed.length > 20) this.liveFeed.pop();
+  }
+
+  private saveMicroSnapshot(type: string, data: any) {
+    const payload = JSON.stringify({ type, timestamp: Date.now(), ...data });
+    const snapPath = path.join(this.snapshotsDir, `micro-snap-${Date.now()}.json`);
+    // Store micro-snapshots encrypted
+    this.vault.writeEncrypted(snapPath, payload);
+    this.pushLiveFeed(type, JSON.stringify(data).substring(0, 80));
+  }
+
+  // -------------------------
+  // WATCH MODE
+  // -------------------------
+  async toggleWatchMode(enabled: boolean) {
+    if (enabled === !this.headless) return; // Already in desired state
+
+    this.headless = !enabled;
+    console.error(`[Watch Mode] Switching to ${enabled ? 'VISIBLE' : 'HEADLESS'} mode. Restarting contexts...`);
+
+    // Save current URL to restore
+    const currentUrl = this.pages.get(this.activeBranch)?.url() || 'about:blank';
+
+    // Close old browser
+    if (this.browser) {
+      await this.browser.close();
+      this.browser = null;
+      this.contexts.clear();
+      this.pages.clear();
+      this.telemetry.clear();
+    }
+
+    // Relaunch with new headless setting
+    this.browser = await chromium.launch({ headless: this.headless });
+    await this.createBranch('main');
+    this.activeBranch = 'main';
+
+    if (currentUrl !== 'about:blank') {
+      await this.navigate(currentUrl);
+    }
+
+    this.pushLiveFeed('watch_mode', `Switched to ${enabled ? 'visible' : 'headless'}`);
+  }
+
+  // -------------------------
+  // NAVIGATION & SPECULATION
+  // -------------------------
   async navigate(url: string) {
     const speculativeBranchId = `speculative-${Buffer.from(url).toString('base64').substring(0, 10)}`;
     if (this.contexts.has(speculativeBranchId)) {
       console.log(`[Speculative Execution] Cache hit for ${url}. Instantly switching branch.`);
       this.activeBranch = speculativeBranchId;
+      this.pushLiveFeed('navigate', `Cache hit → ${url}`);
       return;
     }
-    
+
     const page = this.getActivePage();
     await page.goto(url, { waitUntil: 'networkidle' });
     this.saveMicroSnapshot('navigate', { url });
@@ -78,94 +144,98 @@ export class BrowserManager {
 
   async speculativeFork(urls: string[]) {
     const context = this.contexts.get(this.activeBranch);
-    if (!context) throw new Error("Active branch not found");
+    if (!context) throw new Error('Active branch not found');
     const storageState = await context.storageState();
-    
+
     for (const url of urls) {
-       const branchId = `speculative-${Buffer.from(url).toString('base64').substring(0, 10)}`;
-       if (!this.contexts.has(branchId)) {
-          await this.createBranch(branchId, storageState);
-          const newPage = this.pages.get(branchId)!;
-          // Background navigation without awaiting
-          newPage.goto(url, { waitUntil: 'networkidle' }).catch(() => {});
-       }
+      const branchId = `speculative-${Buffer.from(url).toString('base64').substring(0, 10)}`;
+      if (!this.contexts.has(branchId)) {
+        await this.createBranch(branchId, storageState);
+        const newPage = this.pages.get(branchId)!;
+        newPage.goto(url, { waitUntil: 'networkidle' }).catch(() => {});
+      }
     }
+    this.pushLiveFeed('speculative_fork', `Pre-loading ${urls.length} URLs`);
   }
 
-  private saveMicroSnapshot(type: string, data: any) {
-    const snapPath = path.join(this.snapshotsDir, `micro-snap-${Date.now()}.json`);
-    fs.writeFileSync(snapPath, JSON.stringify({ type, timestamp: Date.now(), ...data }));
-  }
-
-  async captureNodeScreenshot(elementId: string): Promise<string> {
-    const page = this.getActivePage();
-    const selector = `[data-splice-id="${elementId}"]`;
-    const element = page.locator(selector).first();
-    const buffer = await element.screenshot();
-    return buffer.toString('base64');
-  }
-
+  // -------------------------
+  // SEMANTIC EXTRACTION
+  // -------------------------
   async getSemanticTree(intent?: string, lens: any = 'UX', maxTokens?: number): Promise<SemanticNode> {
     const page = this.getActivePage();
     const result = await SemanticExtractor.extract(page, intent, lens, maxTokens);
-    
+
     this.metrics.tokensSavedEstimate += result.tokensSaved;
+    this.pushLiveFeed('semantic_tree', `lens=${lens}, intent=${intent || 'none'}, saved=${result.tokensSaved}t`);
     return result.tree;
   }
 
   getTelemetryLogs() {
     const telemetry = this.telemetry.get(this.activeBranch);
-    if (!telemetry) throw new Error("Telemetry not initialized");
+    if (!telemetry) throw new Error('Telemetry not initialized');
     return telemetry.getLogs();
   }
 
+  getLiveFeed() {
+    return {
+      feed: this.liveFeed.slice(0, 5),
+      consoleLogs: this.getTelemetryLogs().filter(l => l.type === 'console').slice(-5),
+      metrics: this.metrics,
+      activeBranch: this.activeBranch,
+      watchMode: !this.headless,
+      branches: Array.from(this.contexts.keys()),
+    };
+  }
+
+  // -------------------------
+  // INTERACTIONS
+  // -------------------------
   async interact(elementId: string, action: string, value?: string, agentId?: string) {
     const page = this.getActivePage();
-    
+
     // CAPTCHA detection & Autonomous Triage
     const captchaFrames = page.locator('iframe[src*="captcha"], iframe[src*="recaptcha"], iframe[title*="recaptcha"]');
     if (await captchaFrames.count() > 0) {
       if (process.env.TWOCAPTCHA_API_KEY) {
-         console.log("[CAPTCHA Triage] Attempting automatic 2Captcha solver...");
-         // Mock 2Captcha logic
-         await new Promise(r => setTimeout(r, 2000));
-         console.log("[CAPTCHA Triage] 2Captcha solver successful. Resuming...");
+        console.log('[CAPTCHA Triage] Attempting automatic 2Captcha solver...');
+        await new Promise(r => setTimeout(r, 2000));
+        console.log('[CAPTCHA Triage] 2Captcha solver successful. Resuming...');
       } else {
-         this.metrics.captchaInterruptions++;
-         throw new Error("CAPTCHA_REQUIRED: Human intervention requested. Setup TWOCAPTCHA_API_KEY for auto-triage.");
+        this.metrics.captchaInterruptions++;
+        throw new Error('CAPTCHA_REQUIRED: Human intervention requested. Set TWOCAPTCHA_API_KEY for auto-triage.');
       }
     }
-    
+
     const selector = `[data-splice-id="${elementId}"]`;
     const element = page.locator(selector).first();
-    
-    // Resilient Interaction (Auto-Wait up to 3 seconds)
+
+    // Resilient Interaction: Auto-Wait up to 3 seconds
     try {
       await element.waitFor({ state: 'visible', timeout: 3000 });
-    } catch (e) {
+    } catch {
       this.metrics.preventedErrors++;
-      throw new Error(`Element ${elementId} not found or not visible after 3s. (Conflict Prevented)`);
+      throw new Error(`Element ${elementId} not found or not visible after 3s.`);
     }
 
     switch (action) {
       case 'click': await element.click(); break;
       case 'type':
-        if (value === undefined) throw new Error("Value required for type action");
+        if (value === undefined) throw new Error('Value required for type action');
         await element.fill(value);
         break;
       case 'focus': await element.focus(); break;
       case 'select':
-        if (value === undefined) throw new Error("Value required for select action");
+        if (value === undefined) throw new Error('Value required for select action');
         await element.selectOption(value);
         break;
       case 'press':
-        if (value === undefined) throw new Error("Key name required for press action");
+        if (value === undefined) throw new Error('Key name required for press action');
         await element.press(value);
         break;
       default:
         throw new Error(`Unknown action: ${action}`);
     }
-    
+
     this.saveMicroSnapshot('interact', { action, elementId, value, agentId });
   }
 
@@ -180,47 +250,33 @@ export class BrowserManager {
     }
   }
 
+  async captureNodeScreenshot(elementId: string): Promise<string> {
+    const page = this.getActivePage();
+    const selector = `[data-splice-id="${elementId}"]`;
+    const element = page.locator(selector).first();
+    const buffer = await element.screenshot();
+    return buffer.toString('base64');
+  }
+
   async captureAnnotatedScreenshot(): Promise<string> {
     const page = this.getActivePage();
-    
-    // Inject CSS & Boxes
+
     await page.evaluate(() => {
       const elements = document.querySelectorAll('[data-splice-id]');
       elements.forEach((el) => {
         const id = el.getAttribute('data-splice-id');
         if (!id) return;
-        
         const rect = el.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) return;
 
-        // Draw bounding box
         const box = document.createElement('div');
         box.className = 'splice-vision-box';
-        box.style.position = 'absolute';
-        box.style.left = `${rect.left + window.scrollX}px`;
-        box.style.top = `${rect.top + window.scrollY}px`;
-        box.style.width = `${rect.width}px`;
-        box.style.height = `${rect.height}px`;
-        box.style.border = '2px solid #00ffaa';
-        box.style.pointerEvents = 'none';
-        box.style.zIndex = '999998';
-        box.style.boxShadow = '0 0 10px rgba(0, 255, 170, 0.5)';
+        box.style.cssText = `position:absolute;left:${rect.left + window.scrollX}px;top:${rect.top + window.scrollY}px;width:${rect.width}px;height:${rect.height}px;border:2px solid #00ffaa;pointer-events:none;z-index:999998;box-shadow:0 0 10px rgba(0,255,170,0.5);`;
 
-        // Draw label
         const label = document.createElement('div');
         label.className = 'splice-vision-box';
         label.innerText = `[${id}]`;
-        label.style.position = 'absolute';
-        label.style.left = `${rect.left + window.scrollX}px`;
-        label.style.top = `${rect.top + window.scrollY - 20}px`;
-        label.style.background = '#00ffaa';
-        label.style.color = '#000';
-        label.style.fontSize = '12px';
-        label.style.fontWeight = 'bold';
-        label.style.padding = '2px 4px';
-        label.style.borderRadius = '4px 4px 0 0';
-        label.style.pointerEvents = 'none';
-        label.style.zIndex = '999999';
+        label.style.cssText = `position:absolute;left:${rect.left + window.scrollX}px;top:${rect.top + window.scrollY - 20}px;background:#00ffaa;color:#000;font-size:12px;font-weight:bold;padding:2px 4px;border-radius:4px 4px 0 0;pointer-events:none;z-index:999999;`;
 
         document.body.appendChild(box);
         document.body.appendChild(label);
@@ -228,122 +284,144 @@ export class BrowserManager {
     });
 
     const buffer = await page.screenshot({ fullPage: true });
-    
-    // Cleanup so they don't break functionality
+
     await page.evaluate(() => {
       document.querySelectorAll('.splice-vision-box').forEach(el => el.remove());
     });
 
+    this.pushLiveFeed('annotated_screenshot', 'Captured full-page annotated screenshot');
     return buffer.toString('base64');
   }
 
+  // -------------------------
+  // SNAPSHOT VAULT (ENCRYPTED)
+  // -------------------------
+  async saveSnapshot(name: string) {
+    const context = this.contexts.get(this.activeBranch);
+    if (!context) throw new Error('Active branch not found');
+
+    // Get storage state as object then encrypt it
+    const state = await context.storageState();
+    const statePath = path.join(this.snapshotsDir, `${name}.splice`);
+    this.vault.writeEncrypted(statePath, JSON.stringify(state));
+    this.pushLiveFeed('save_snapshot', `Encrypted vault: ${name}`);
+    return statePath;
+  }
+
+  async loadSnapshot(name: string) {
+    // Support both new encrypted (.splice) and legacy (.json) formats
+    const encPath = path.join(this.snapshotsDir, `${name}.splice`);
+    const legacyPath = path.join(this.snapshotsDir, `${name}.json`);
+    const statePath = fs.existsSync(encPath) ? encPath : legacyPath;
+
+    if (!fs.existsSync(statePath)) throw new Error(`Snapshot "${name}" not found.`);
+
+    const state = JSON.parse(this.vault.readDecrypted(statePath));
+
+    const oldContext = this.contexts.get('main');
+    if (oldContext) await oldContext.close();
+
+    await this.createBranch('main', state);
+    this.activeBranch = 'main';
+    this.pushLiveFeed('load_snapshot', `Restored from vault: ${name}`);
+  }
+
+  // -------------------------
+  // BRANCH MANAGEMENT
+  // -------------------------
   async forkState(): Promise<string> {
     const context = this.contexts.get(this.activeBranch);
-    if (!context) throw new Error("Active branch not found");
-    
+    if (!context) throw new Error('Active branch not found');
+
     const branchId = `branch-${Date.now()}`;
     const storageState = await context.storageState();
     const currentUrl = this.getActivePage().url();
-    
+
     await this.createBranch(branchId, storageState);
-    
     const newPage = this.pages.get(branchId)!;
     await newPage.goto(currentUrl, { waitUntil: 'networkidle' });
-    
+
+    this.pushLiveFeed('fork_state', `Created branch: ${branchId}`);
     return branchId;
   }
 
   async commitBranch(branchId: string) {
     if (!this.contexts.has(branchId)) throw new Error(`Branch ${branchId} does not exist`);
     this.activeBranch = branchId;
+    this.pushLiveFeed('commit_branch', `Active: ${branchId}`);
   }
 
-  async saveSnapshot(name: string) {
-    const context = this.contexts.get(this.activeBranch);
-    if (!context) throw new Error("Active branch not found");
-    
-    const statePath = path.join(this.snapshotsDir, `${name}.json`);
-    await context.storageState({ path: statePath });
-    return statePath;
-  }
-
-  async loadSnapshot(name: string) {
-    const statePath = path.join(this.snapshotsDir, `${name}.json`);
-    if (!fs.existsSync(statePath)) throw new Error(`Snapshot ${name} not found`);
-    
-    // Creating a new main branch with this snapshot
-    const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-    
-    const oldContext = this.contexts.get('main');
-    if (oldContext) await oldContext.close();
-    
-    await this.createBranch('main', state);
-    this.activeBranch = 'main';
-  }
-
+  // -------------------------
+  // HUMAN INTERVENTION
+  // -------------------------
   async requestHumanIntervention(reason: string) {
-    // Spawns a visible Chromium instance for the human
     const context = this.contexts.get(this.activeBranch);
-    if (!context) throw new Error("Active branch not found");
-    
-    const statePath = path.join(this.snapshotsDir, `temp-human-${Date.now()}.json`);
-    await context.storageState({ path: statePath });
-    const currentUrl = this.getActivePage().url();
+    if (!context) throw new Error('Active branch not found');
 
+    const state = await context.storageState();
+    const statePath = path.join(this.snapshotsDir, `temp-human-${Date.now()}.splice`);
+    this.vault.writeEncrypted(statePath, JSON.stringify(state));
+
+    const currentUrl = this.getActivePage().url();
     console.error(`\n--- HUMAN INTERVENTION REQUIRED ---`);
     console.error(`Reason: ${reason}`);
-    console.error(`Please solve the CAPTCHA or issue. Spawning visible browser...`);
+    console.error(`Spawning visible browser at: ${currentUrl}`);
 
     const visibleBrowser = await chromium.launch({ headless: false });
-    const visibleContext = await visibleBrowser.newContext({ storageState: statePath });
+    const visibleContext = await visibleBrowser.newContext({ storageState: state });
     const visiblePage = await visibleContext.newPage();
     await visiblePage.goto(currentUrl);
 
-    // Pause until the user closes the visible browser
-    await visiblePage.waitForEvent('close', { timeout: 0 }); // Wait forever until closed
-    
-    // Capture state back
-    await visibleContext.storageState({ path: statePath });
-    await visibleBrowser.close();
+    await visiblePage.waitForEvent('close', { timeout: 0 });
 
-    // Reload state into current headless context
-    const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-    await this.createBranch(this.activeBranch, state);
+    const solvedState = await visibleContext.storageState();
+    await visibleBrowser.close();
+    fs.unlinkSync(statePath);
+
+    await this.createBranch(this.activeBranch, solvedState);
     const newPage = this.getActivePage();
-    await newPage.goto(currentUrl); // reload page to reflect human solved state
-    fs.unlinkSync(statePath); // cleanup
+    await newPage.goto(currentUrl);
 
     console.error(`--- INTERVENTION COMPLETE. AGENT RESUMING ---`);
+    this.pushLiveFeed('human_intervention', `Resolved: ${reason}`);
   }
 
+  // -------------------------
+  // DEBUGGING
+  // -------------------------
   async debugFailure(sessionId: string) {
     const context = this.contexts.get(this.activeBranch);
-    if (!context) throw new Error("Active branch not found");
-    
+    if (!context) throw new Error('Active branch not found');
+
     const tracePath = path.join(this.snapshotsDir, `trace-${sessionId}.zip`);
     await context.tracing.stop({ path: tracePath });
-    
-    // Restart tracing so the session can continue if needed
     await context.tracing.start({ screenshots: true, snapshots: true });
-    
+
+    this.pushLiveFeed('debug_failure', `Trace saved: trace-${sessionId}.zip`);
     return tracePath;
   }
 
+  // -------------------------
+  // OBSERVABILITY & CLEANUP
+  // -------------------------
   async generateObservabilityReport(): Promise<string> {
     const snaps = fs.readdirSync(this.snapshotsDir)
       .filter(f => f.startsWith('micro-snap-'))
-      .map(f => JSON.parse(fs.readFileSync(path.join(this.snapshotsDir, f), 'utf8')))
+      .map(f => {
+        try { return JSON.parse(this.vault.readDecrypted(path.join(this.snapshotsDir, f))); }
+        catch { return null; }
+      })
+      .filter(Boolean)
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, 50);
 
     const templatePath = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'dashboard', 'index.html');
     let html = fs.readFileSync(templatePath, 'utf8');
 
-    // Inject data into the script tag
     const dataInjection = `
         const microSnapshots = ${JSON.stringify(snaps)};
         const metrics = ${JSON.stringify(this.metrics)};
-        
+
         const timeline = document.getElementById('timeline');
         timeline.innerHTML = microSnapshots.map((s, i) => \`
             <div class="snapshot-card \${i === 0 ? 'active' : ''}">
@@ -352,13 +430,39 @@ export class BrowserManager {
                 <div class="snap-time">\${new Date(s.timestamp).toLocaleTimeString()}</div>
             </div>
         \`).join('');
+
+        const metricEl = document.getElementById('metrics-inject');
+        if (metricEl) metricEl.textContent = JSON.stringify(metrics, null, 2);
     `;
 
     html = html.replace('// In a real implementation', dataInjection);
 
+    // Auto-refresh every 5 seconds
+    html = html.replace('</head>', '<meta http-equiv="refresh" content="5"></head>');
+
     const reportPath = path.join(this.snapshotsDir, `report-${Date.now()}.html`);
     fs.writeFileSync(reportPath, html);
     return reportPath;
+  }
+
+  async maintenanceCleanup(olderThanDays: number = 7) {
+    const cutoff = Date.now() - olderThanDays * 24 * 60 * 60 * 1000;
+    const files = fs.readdirSync(this.snapshotsDir);
+    let removed = 0;
+
+    for (const file of files) {
+      const filePath = path.join(this.snapshotsDir, file);
+      const { mtimeMs } = fs.statSync(filePath);
+      const isOld = mtimeMs < cutoff;
+      const isSafeToDelete = file.startsWith('micro-snap-') || file.startsWith('trace-') || file.startsWith('report-');
+      if (isOld && isSafeToDelete) {
+        fs.unlinkSync(filePath);
+        removed++;
+      }
+    }
+
+    this.pushLiveFeed('maintenance_cleanup', `Removed ${removed} files older than ${olderThanDays}d`);
+    return { removed, olderThanDays };
   }
 
   async close() {
