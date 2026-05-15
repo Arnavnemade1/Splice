@@ -1,4 +1,4 @@
-export type SemanticLens = 'UX' | 'Security' | 'Performance' | 'Vision';
+export type SemanticLens = 'UX' | 'Security' | 'Performance' | 'Vision' | 'Network' | 'Behavior';
 
 export interface SemanticNode {
   id: string;
@@ -16,10 +16,26 @@ export interface SemanticNode {
     depth?: number;
     isLargeImage?: boolean;
   };
+  networkSummary?: {
+    totalRequests: number;
+    endpoints: string[];
+    dataTypes: string[];
+  };
+  behaviorSummary?: {
+    clicks: number;
+    hovers: number;
+    rageClicks: number;
+    avgDwellTime: number;
+    visibilityMs?: number;
+    errorCount?: number;
+    abandonedInputs?: number;
+    maxScrollDepth?: number; // 0-100
+    frictionScore: number; // 0-100
+  };
 }
 
 export interface TelemetryLog {
-  type: 'console' | 'network';
+  type: 'console' | 'network' | 'behavior';
   timestamp: number;
   data: any;
 }
@@ -28,4 +44,5 @@ export interface SessionMetrics {
   tokensSavedEstimate: number;
   preventedErrors: number;
   captchaInterruptions: number;
+  selfHealCount: number;
 }

@@ -33,7 +33,7 @@ export interface AuditOptions {
   safeMode?: boolean;       // If true, never submit forms (passive only)
   crawl?: boolean;          // If true, auto-follow same-domain links
   maxCrawlDepth?: number;   // Max pages to crawl (default 5)
-  checks?: Array<'headers' | 'xss' | 'auth' | 'data' | 'deps'>;
+  checks?: Array<'headers' | 'xss' | 'auth' | 'data' | 'deps' | 'exploits'>;
 }
 
 const XSS_PROBE = '"><img src=x onerror=window.__spliceXSSHit=true>';
@@ -347,6 +347,53 @@ export class SecurityAuditor {
   }
 
   // ─────────────────────────────────────────────
+  // CHECK 6: AGENT EXPLOITS & ACE
+  // ─────────────────────────────────────────────
+  async checkAgentExploits(url: string) {
+    const results = await this.page.evaluate(() => {
+      const issues: Array<{ severity: string; title: string; detail: string; remediation: string }> = [];
+      const codeBlocks = Array.from(document.querySelectorAll('pre, code'));
+      
+      const ACE_PATTERNS = [
+        { name: 'Reverse Shell', regex: /(nc|netcat|bash -i) .*>&\d/i },
+        { name: 'Destructive OS Command', regex: /rm\s+-rf\s+\/|mkfs|dd if=\/dev\/(zero|random)/i },
+        { name: 'Remote Execution Pipeline', regex: /(curl|wget)\s+.*\|\s*(bash|sh|zsh)/i },
+        { name: 'Cryptominer/Malware download', regex: /(chmod \+x.*&&.*\.\/|powershell.*-e|Invoke-WebRequest)/i }
+      ];
+
+      for (const block of codeBlocks) {
+        const content = block.textContent || '';
+        for (const pattern of ACE_PATTERNS) {
+          if (pattern.regex.test(content)) {
+            issues.push({
+              severity: 'CRITICAL',
+              title: `Agent Exploit Detected: ${pattern.name}`,
+              detail: `A code block contains a potentially malicious command: ${content.substring(0, 100)}...`,
+              remediation: 'Do not allow autonomous agents to execute code blocks from this page without human verification.'
+            });
+          }
+        }
+      }
+      return issues;
+    });
+
+    if (results.length === 0) {
+      this.pass('exploits', 'No obvious malicious agent exploits found in code blocks.');
+    } else {
+      for (const issue of results) {
+        this.push({
+          check: 'exploits',
+          severity: issue.severity as Severity,
+          title: issue.title,
+          detail: issue.detail,
+          remediation: issue.remediation,
+          affectedUrl: url
+        });
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────
   // CRAWL LOGIC
   // ─────────────────────────────────────────────
   private async getLinksOnPage(baseOrigin: string): Promise<string[]> {
@@ -372,7 +419,7 @@ export class SecurityAuditor {
       safeMode = true,
       crawl = true,
       maxCrawlDepth = 5,
-      checks = ['headers', 'xss', 'auth', 'data', 'deps']
+      checks = ['headers', 'xss', 'auth', 'data', 'deps', 'exploits']
     } = options;
 
     const baseOrigin = new URL(targetUrl).origin;
@@ -402,6 +449,7 @@ export class SecurityAuditor {
       if (checks.includes('auth'))    await this.checkAuth(url);
       if (checks.includes('data'))    await this.checkDataExposure(url);
       if (checks.includes('deps'))    await this.checkDependencies(url);
+      if (checks.includes('exploits')) await this.checkAgentExploits(url);
 
       // Crawl links from this page
       if (crawl) {

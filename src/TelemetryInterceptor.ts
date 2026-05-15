@@ -21,7 +21,7 @@ export class TelemetryInterceptor {
     this.logs = [];
   }
 
-  private addLog(log: TelemetryLog) {
+  public addLog(log: TelemetryLog) {
     this.logs.push(log);
     if (this.logs.length > this.MAX_LOGS) {
       this.logs.shift(); // Keep logs bounded
@@ -29,12 +29,27 @@ export class TelemetryInterceptor {
   }
 
   private handleConsole(msg: ConsoleMessage) {
+    const text = msg.text();
+    if (text.startsWith('[SPLICE_BEHAVIOR]')) {
+      try {
+        const payload = JSON.parse(text.replace('[SPLICE_BEHAVIOR]', '').trim());
+        this.addLog({
+          type: 'behavior',
+          timestamp: Date.now(),
+          data: payload
+        });
+        return;
+      } catch (e) {
+        // Fallback to regular console log if JSON fails
+      }
+    }
+
     this.addLog({
       type: 'console',
       timestamp: Date.now(),
       data: {
         type: msg.type(),
-        text: msg.text(),
+        text: text,
         location: msg.location()
       }
     });

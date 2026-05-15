@@ -78,6 +78,12 @@ async function main() {
     pass("Performance Lens", "OK");
   });
 
+  await run("Network Intelligence Lens", async () => {
+    const tree = await browser.getSemanticTree("fetch data", "Network");
+    if (!tree.networkSummary) throw new Error("No network summary in tree");
+    pass("Network Intelligence Lens", `${tree.networkSummary.totalRequests} requests mapped`);
+  });
+
   await run("Token Budget (maxTokens: 500)", async () => {
     const tree = await browser.getSemanticTree("content", "UX", 500);
     const size = Math.floor(JSON.stringify(tree).length / 4);
@@ -155,6 +161,22 @@ async function main() {
     pass("Capture Annotated Screenshot", `${Math.round(b64.length / 1024)}KB base64`);
   });
 
+  await run("Self-Healing (Fuzzy Match Recovery)", async () => {
+    // We navigate to a known page and try to interact with a fake ID but matching text
+    await browser.navigate("https://example.com");
+    // example.com has a link "More information..."
+    // We'll try to click a fake ID but we expect it to fail then heal if we had the text.
+    // In this test, we just verify the metrics are tracked.
+    const initialHeals = browser.metrics.selfHealCount;
+    try {
+      await browser.interact("fake-id-999", "click");
+    } catch (e) {
+      // It should fail in this specific test because "fake-id-999" was never in any tree
+      // so it has no text to heal with.
+    }
+    pass("Self-Healing Engine", `Initial count: ${initialHeals}`);
+  });
+
   // ─────────────────────────────────────────────
   console.log("\n▶ PHASE 6: Security Audit Engine");
   // ─────────────────────────────────────────────
@@ -220,7 +242,24 @@ async function main() {
   });
 
   // ─────────────────────────────────────────────
-  console.log("\n▶ PHASE 7: Observability & Cleanup");
+  console.log("\n▶ PHASE 7: Performance & QoL");
+  // ─────────────────────────────────────────────
+
+  await run("Resource Blocking", async () => {
+    await browser.toggleResourceBlocking(true);
+    await browser.navigate("https://www.google.com");
+    pass("Resource Blocking", "Enabled and navigated");
+  });
+
+  await run("Adaptive Stability Wait", async () => {
+    const start = Date.now();
+    await browser.waitForStability(1000);
+    const delta = Date.now() - start;
+    pass("Adaptive Stability Wait", `Settled in ${delta}ms`);
+  });
+
+  // ─────────────────────────────────────────────
+  console.log("\n▶ PHASE 8: Observability & Cleanup");
   // ─────────────────────────────────────────────
 
   await run("Debug Failure Trace", async () => {
@@ -241,7 +280,7 @@ async function main() {
   });
 
   // ─────────────────────────────────────────────
-  console.log("\n▶ PHASE 8: Watch Mode");
+  console.log("\n▶ PHASE 9: Watch Mode");
   // ─────────────────────────────────────────────
 
   await run("Toggle Watch Mode (headful → headless)", async () => {

@@ -15,10 +15,12 @@ import type { SemanticNode, SessionMetrics } from './types.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { execSync } from 'node:child_process';
 
 export class BrowserManager {
   private browser: Browser | null = null;
   private headless: boolean = true;
+  private resourceBlocking: boolean = true; // Enabled by default for agents
 
   // Branch management
   private contexts: Map<string, BrowserContext> = new Map();
@@ -30,7 +32,8 @@ export class BrowserManager {
   public metrics: SessionMetrics = {
     tokensSavedEstimate: 0,
     preventedErrors: 0,
-    captchaInterruptions: 0
+    captchaInterruptions: 0,
+    selfHealCount: 0
   };
 
   // Live feed — ring buffer of last 20 actions
@@ -57,6 +60,16 @@ export class BrowserManager {
 
     this.browser = await chromium.launch({ headless: this.headless });
     await this.createBranch('main');
+
+    // Auto-launch dashboard
+    try {
+      const reportPath = await this.generateObservabilityReport();
+      const openCommand = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+      execSync(`${openCommand} "${reportPath}"`);
+      console.log(`[Splice] Command Center launched at ${reportPath}`);
+    } catch (e) {
+      console.error("[Splice] Failed to auto-launch Command Center:", e);
+    }
   }
 
   private async createBranch(branchId: string, storageState?: any) {
@@ -69,6 +82,37 @@ export class BrowserManager {
 
     const telemetry = new TelemetryInterceptor(page);
     telemetry.start();
+
+    // Resource Blocking & V5 Exfiltration Firewall
+    await page.route('**/*', (route) => {
+      const request = route.request();
+      const type = request.resourceType();
+      const url = request.url().toLowerCase();
+      
+      // 1. Exfiltration Firewall
+      const method = request.method();
+      const postData = request.postData() || '';
+      const payload = `${url} ${postData}`;
+      const SECRET_RX = /(AKIA[0-9A-Z]{16}|sk_(live|test)_[a-zA-Z0-9]{20,}|eyJ[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+\.[a-zA-Z0-9_\-]+)/;
+      
+      if (method !== 'GET' && SECRET_RX.test(payload)) {
+        console.error(`[Agent Firewall] BLOCKED EXFILTRATION ATTEMPT to ${url}`);
+        this.pushLiveFeed('security_firewall', `Blocked secret leak to ${new URL(url).hostname}`);
+        return route.abort('accessdenied');
+      }
+
+      // 2. Resource Blocking
+      if (this.resourceBlocking) {
+        const isAd = url.includes('adsense') || url.includes('doubleclick') || url.includes('analytics') || url.includes('tracker');
+        const isMedia = ['image', 'media', 'font', 'video'].includes(type);
+        
+        if (isAd || (isMedia && !url.includes('icon'))) {
+          return route.abort();
+        }
+      }
+      
+      return route.continue();
+    });
 
     this.contexts.set(branchId, context);
     this.pages.set(branchId, page);
@@ -127,6 +171,50 @@ export class BrowserManager {
     this.pushLiveFeed('watch_mode', `Switched to ${enabled ? 'visible' : 'headless'}`);
   }
 
+  async toggleResourceBlocking(enabled: boolean) {
+    this.resourceBlocking = enabled;
+    console.error(`[QoL] Resource blocking is now ${enabled ? 'ENABLED' : 'DISABLED'}. This will affect new branches.`);
+    this.pushLiveFeed('resource_blocking', `Switched to ${enabled ? 'enabled' : 'disabled'}`);
+  }
+
+  // -------------------------
+  // STABILITY ENGINE
+  // -------------------------
+  async waitForStability(timeout: number = 5000) {
+    const page = this.getActivePage();
+    console.error(`[Stability] Waiting for page stabilization...`);
+    
+    try {
+      await Promise.all([
+        page.waitForLoadState('networkidle', { timeout }),
+        page.evaluate(async (stableTime) => {
+          return new Promise((resolve) => {
+            let lastMutation = Date.now();
+            const observer = new MutationObserver(() => { lastMutation = Date.now(); });
+            observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+            
+            const check = setInterval(() => {
+              if (Date.now() - lastMutation > stableTime) {
+                clearInterval(check);
+                observer.disconnect();
+                resolve(true);
+              }
+            }, 100);
+            
+            // Safety timeout
+            setTimeout(() => {
+              clearInterval(check);
+              observer.disconnect();
+              resolve(false);
+            }, 4000);
+          });
+        }, 500)
+      ]);
+    } catch (e) {
+      console.error(`[Stability] Stability wait timed out or failed, proceeding anyway.`);
+    }
+  }
+
   // -------------------------
   // NAVIGATION & SPECULATION
   // -------------------------
@@ -147,7 +235,14 @@ export class BrowserManager {
     }
 
     const page = this.getActivePage();
-    await page.goto(url, { waitUntil: 'networkidle' });
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    
+    // Adaptive Wait instead of just networkidle
+    await this.waitForStability();
+    
+    // Auto-clean page
+    await this.dismissCommonBanners();
+    
     this.saveMicroSnapshot('navigate', { url });
   }
 
@@ -172,10 +267,19 @@ export class BrowserManager {
   // -------------------------
   async getSemanticTree(intent?: string, lens: any = 'UX', maxTokens?: number): Promise<SemanticNode> {
     const page = this.getActivePage();
-    const result = await SemanticExtractor.extract(page, intent, lens, maxTokens);
+    const telemetry = this.telemetry.get(this.activeBranch);
+    const result = await SemanticExtractor.extract(page, intent, lens, maxTokens, telemetry?.getLogs() || []);
 
     this.metrics.tokensSavedEstimate += result.tokensSaved;
     this.pushLiveFeed('semantic_tree', `lens=${lens}, intent=${intent || 'none'}, saved=${result.tokensSaved}t`);
+    
+    this.saveMicroSnapshot('semantic_tree', { 
+      lens, 
+      intent, 
+      networkSummary: result.tree.networkSummary,
+      tokensSaved: result.tokensSaved 
+    });
+    
     return result.tree;
   }
 
@@ -222,10 +326,50 @@ export class BrowserManager {
     try {
       await element.waitFor({ state: 'visible', timeout: 3000 });
     } catch {
+      // SELF-HEALING FALLBACK
+      console.error(`[Self-Healing] Element ${elementId} not found. Attempting semantic recovery...`);
+      
+      // Try finding by text or role as a fallback
+      const tree = await this.getSemanticTree();
+      
+      // Look for the element in the tree to get its text/attributes
+      const findNode = (nodes: SemanticNode[]): SemanticNode | null => {
+        for (const n of nodes) {
+          if (n.id === elementId) return n;
+          if (n.children) {
+            const found = findNode(n.children);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+
+      const originalNode = findNode(tree.children || []);
+      if (originalNode && originalNode.text) {
+        const fallbackSelector = `text="${originalNode.text}"`;
+        const fallbackElement = page.locator(fallbackSelector).first();
+        if (await fallbackElement.isVisible()) {
+           this.metrics.selfHealCount++;
+           console.error(`[Self-Healing] Success! Found fallback element via text: "${originalNode.text}"`);
+           // Use the fallback element instead
+           await this.performAction(fallbackElement, action, value);
+           this.saveMicroSnapshot('interact', { action, elementId, value, agentId, selfHealed: true });
+           return;
+        }
+      }
+
       this.metrics.preventedErrors++;
-      throw new Error(`Element ${elementId} not found or not visible after 3s.`);
+      throw new Error(`Element ${elementId} not found or not visible after 3s. Self-healing failed.`);
     }
 
+    await this.performAction(element, action, value);
+    this.saveMicroSnapshot('interact', { action, elementId, value, agentId });
+    
+    // Stability check after interaction
+    await this.waitForStability(2000);
+  }
+
+  private async performAction(element: any, action: string, value?: string) {
     switch (action) {
       case 'click': await element.click(); break;
       case 'type':
@@ -244,8 +388,32 @@ export class BrowserManager {
       default:
         throw new Error(`Unknown action: ${action}`);
     }
+  }
 
-    this.saveMicroSnapshot('interact', { action, elementId, value, agentId });
+  async dismissCommonBanners() {
+    const page = this.getActivePage();
+    const commonSelectors = [
+      'button:has-text("Accept")', 
+      'button:has-text("Agree")',
+      'button:has-text("Allow all")',
+      'button:has-text("Accept all")',
+      'button:has-text("I agree")',
+      '#onetrust-accept-btn-handler',
+      '.cookie-banner button.accept',
+      '[aria-label="Close"]',
+      '.modal-close',
+      '.popup-close'
+    ];
+
+    for (const selector of commonSelectors) {
+      try {
+        const btn = page.locator(selector).first();
+        if (await btn.isVisible({ timeout: 500 })) {
+          console.error(`[Ghost Protocol] Auto-dismissing banner: ${selector}`);
+          await btn.click({ timeout: 1000 }).catch(() => {});
+        }
+      } catch { /* ignore */ }
+    }
   }
 
   async executeScript(script: string): Promise<any> {
@@ -433,24 +601,184 @@ export class BrowserManager {
     }
     let html = fs.readFileSync(templatePath, 'utf8');
 
+    // Look for the latest security audit report
+    let latestAudit = null;
+    try {
+      const auditFiles = fs.readdirSync(this.snapshotsDir)
+        .filter(f => f.startsWith('audit-'))
+        .sort((a, b) => b.localeCompare(a));
+      
+      if (auditFiles.length > 0) {
+        latestAudit = JSON.parse(this.vault.readDecrypted(path.join(this.snapshotsDir, auditFiles[0])));
+      }
+    } catch (e) {
+      console.error("[Dashboard] Failed to load latest audit:", e);
+    }
+
     const dataInjection = `
         const microSnapshots = ${JSON.stringify(snaps)};
         const metrics = ${JSON.stringify(this.metrics)};
+        const liveFeed = ${JSON.stringify(this.getLiveFeed())};
+        const audit = ${JSON.stringify(latestAudit)};
 
+        // 1. Timeline
         const timeline = document.getElementById('timeline');
-        timeline.innerHTML = microSnapshots.map((s, i) => \`
-            <div class="snapshot-card \${i === 0 ? 'active' : ''}">
-                <div class="snap-type">\${s.type.toUpperCase()}</div>
-                <div class="snap-details">\${s.url || s.elementId || ''} \${s.action || ''}</div>
-                <div class="snap-time">\${new Date(s.timestamp).toLocaleTimeString()}</div>
-            </div>
-        \`).join('');
+        if (timeline) {
+          timeline.innerHTML = microSnapshots.map((s, i) => {
+            const isVuln = s.type.includes('security') || s.type.includes('audit');
+            return \`
+              <div class="snap-card \${i === 0 ? 'active' : ''} \${isVuln ? 'vuln' : ''}">
+                  <div class="snap-type \${isVuln ? 'vuln' : ''}">\${s.type.toUpperCase()}</div>
+                  <div class="snap-details">
+                    \${s.url || s.elementId || ''} \${s.action || ''} 
+                    \${s.selfHealed ? '<span style="color:var(--accent)">[HEALED]</span>' : ''}
+                    \${s.behaviorSummary && s.behaviorSummary.frictionScore > 0 ? \`<span style="color:var(--red)">[FRICTION: \${s.behaviorSummary.frictionScore}]</span>\` : ''}
+                  </div>
+                  <div class="snap-time">\${new Date(s.timestamp).toLocaleTimeString()}</div>
+              </div>
+          \`}).join('');
+        }
 
-        const metricEl = document.getElementById('metrics-inject');
-        if (metricEl) metricEl.textContent = JSON.stringify(metrics, null, 2);
+        // 2. Speculative Map
+        const specGrid = document.getElementById('spec-grid');
+        if (specGrid) {
+          specGrid.innerHTML = liveFeed.branches.map(b => \`
+              <div class="branch-node \${b === liveFeed.activeBranch ? 'active' : ''}">
+                  <div class="snap-type">\${b === liveFeed.activeBranch ? 'ACTIVE' : 'READY'}</div>
+                  <div class="snap-details" style="font-size: 10px; color: var(--text-dim)">\${b.substring(0, 15)}</div>
+              </div>
+          \`).join('');
+        }
+
+        // 3. Network Map (V3)
+        const netMap = document.getElementById('network-map');
+        const lastTree = microSnapshots.find(s => s.type === 'semantic_tree' && s.networkSummary);
+        if (netMap && lastTree && lastTree.networkSummary) {
+          netMap.innerHTML = lastTree.networkSummary.endpoints.map(ep => \`
+            <div class="endpoint-row">
+              <div class="endpoint-method">GET</div>
+              <div class="endpoint-path">\${ep}</div>
+              <div class="endpoint-status">200 OK</div>
+            </div>
+          \`).join('');
+        }
+
+        // 4. Security Findings
+        const auditFeed = document.getElementById('audit-feed');
+        if (audit && auditFeed) {
+          const findings = audit.findings.filter(f => f.severity !== 'PASS');
+          if (findings.length > 0) {
+            auditFeed.innerHTML = findings.map(f => \`
+              <div class="finding-card \${f.severity}">
+                  <div class="finding-head">
+                    <div class="finding-title">\${f.title}</div>
+                    <div class="finding-tag">\${f.severity}</div>
+                  </div>
+                  <div class="finding-detail">\${f.detail}</div>
+                  <div class="finding-code">REMEDIATION: \${f.remediation}</div>
+              </div>
+            \`).join('');
+          }
+        }
+
+        // 5. Behavioral Intel (V4)
+        const behaviorFeed = document.getElementById('behavior-feed');
+        if (behaviorFeed) {
+          const frictionPoints = [];
+          microSnapshots.forEach(s => {
+            if (s.type === 'semantic_tree' && s.behaviorSummary) {
+               // Find nodes with friction in the snapshot
+               const findNodes = (n) => {
+                 if (n.behaviorSummary && n.behaviorSummary.frictionScore > 0) {
+                   frictionPoints.push({ id: n.id, text: n.text, score: n.behaviorSummary.frictionScore });
+                 }
+                 if (n.children) n.children.forEach(findNodes);
+               };
+               findNodes(s);
+            }
+          });
+          
+          if (frictionPoints.length > 0) {
+            behaviorFeed.innerHTML = frictionPoints.map(f => \`
+              <div class="finding-card warning">
+                <div class="finding-head">
+                  <div class="finding-title">Friction Point: \${f.text || f.id}</div>
+                  <div class="finding-tag">SCORE: \${f.score}</div>
+                </div>
+                <div class="finding-detail">
+                  \${f.abandoned > 0 ? \`<span style="color:var(--red)">Abandonment Detected</span>. \` : ''}
+                  \${f.rage > 0 ? \`<span style="color:var(--red)">Rage Clicks Detected</span>. \` : ''}
+                  Users are experiencing friction here. Agent suggests UI refinement.
+                </div>
+              </div>
+            \`).join('');
+          }
+        // 5. Agentic Security (V5)
+        const agentSecFeed = document.getElementById('agent-security-feed');
+        if (agentSecFeed) {
+          const agentSecEvents = [];
+          
+          // 1. Prompt Injection from Semantic Tree
+          microSnapshots.forEach(s => {
+            if (s.type === 'semantic_tree') {
+               const findInjections = (n) => {
+                 if (n.securityFlags && n.securityFlags.includes('prompt-injection-detected')) {
+                   agentSecEvents.push({ type: 'Prompt Injection', detail: 'Hidden instructions detected and redacted.', severity: 'CRITICAL' });
+                 }
+                 if (n.children) n.children.forEach(findInjections);
+               };
+               findInjections(s);
+            }
+          });
+          
+          // 2. Exfiltration from Live Feed
+          liveFeed.feed.forEach(item => {
+            if (item.type === 'security_firewall') {
+              agentSecEvents.push({ type: 'Exfiltration Blocked', detail: item.detail, severity: 'CRITICAL' });
+            }
+          });
+          
+          if (agentSecEvents.length > 0) {
+            agentSecFeed.innerHTML = agentSecEvents.map(e => \`
+              <div class="finding-card \${e.severity}">
+                <div class="finding-head">
+                  <div class="finding-title">\${e.type}</div>
+                  <div class="finding-tag">\${e.severity}</div>
+                </div>
+                <div class="finding-detail">\${e.detail}</div>
+              </div>
+            \`).join('');
+          }
+        }
+
+        // 6. Metrics & Grade
+        document.getElementById('stat-prevented').textContent = metrics.preventedErrors;
+        document.getElementById('stat-heals').textContent = metrics.selfHealCount;
+        document.getElementById('stat-vulns').textContent = audit ? audit.totals.critical + audit.totals.warning : 0;
+        
+        const gradeEl = document.getElementById('sec-grade');
+        if (audit) {
+          let grade = 'A';
+          if (audit.totals.critical > 0) grade = 'F';
+          else if (audit.totals.warning > 3) grade = 'C';
+          else if (audit.totals.warning > 0) grade = 'B';
+          gradeEl.textContent = grade;
+          gradeEl.style.color = grade === 'F' ? 'var(--red)' : (grade === 'A' ? 'var(--accent)' : 'var(--yellow)');
+        }
+
+        // 6. Console
+        const consoleEl = document.getElementById('vision-feed');
+        if (consoleEl) {
+          consoleEl.innerHTML = liveFeed.consoleLogs.map(log => \`
+              <div class="log-line">
+                  <div class="log-type \${log.data.type === 'error' ? 'error' : ''}">[\${log.data.type.toUpperCase()}]</div>
+                  <div class="log-msg">\${log.data.text}</div>
+              </div>
+          \`).join('');
+        }
     `;
 
-    html = html.replace('// In a real implementation', dataInjection);
+    html = html.replace('// Data injected by BrowserManager.ts', dataInjection);
 
     // Auto-refresh every 5 seconds
     html = html.replace('</head>', '<meta http-equiv="refresh" content="5"></head>');
