@@ -76,7 +76,7 @@ graph TD
 
 ### Setup
 ```bash
-# Clone the enterprise repository
+# Clone the repository
 git clone https://github.com/Arnavnemade1/Splice.git
 cd Splice
 
@@ -134,6 +134,6 @@ Splice is released under the **MIT License**. See [LICENSE](LICENSE) for the ful
 
 <p align="center">
   <br>
-  <b>Built for the future of Autonomous Intelligence.</b><br>
-  <sub>Maintained by Splice Enterprise & Contributors.</sub>
+  <b>Built for AI Agents </b><br>
+  <sub>Maintained by Splice devs & Contributors.</sub>
 </p>
