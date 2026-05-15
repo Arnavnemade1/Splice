@@ -1,57 +1,104 @@
 # Splice Enterprise 🧬
 
-![Splice Hero Banner](docs/images/hero_banner.png)
+<p align="center">
+  <img src="docs/images/hero_banner.png" alt="Splice Hero Banner" width="100%">
+</p>
 
-> **Built for Agents. Hardened for the Web. Observed for Excellence.**
-
-Splice is an advanced, high-performance browser infrastructure and observability platform explicitly designed for **Autonomous Coding Agents** (like Claude Code, Cursor, and AutoGPT). It transforms chaotic, dynamic web interfaces into structured, safe, and highly-optimized data streams, ensuring agents can safely interact with the web without hallucinating or triggering security breaches.
+<p align="center">
+  <a href="https://github.com/Arnavnemade1/Splice/actions"><img src="https://github.com/Arnavnemade1/Splice/workflows/CI/badge.svg" alt="Build Status"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License"></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-6.0+-blue.svg" alt="TypeScript"></a>
+  <a href="https://playwright.dev/"><img src="https://img.shields.io/badge/Powered%20by-Playwright-orange.svg" alt="Powered by Playwright"></a>
+</p>
 
 ---
 
-## 🚀 Vision
-
-In the era of "Vibe Coding," security and observability are often sidelined. Splice bridges this gap by providing a **God-Mode Observability** layer. It doesn't just browse; it audits, secures, and optimizes every byte of data before it reaches the agent's context window.
+## 📖 Table of Contents
+- [Overview](#-overview)
+- [Key Features](#-key-features)
+- [Command Center](#-command-center)
+- [Technical Architecture](#-technical-architecture)
+- [Installation](#-installation)
+- [Quick Start](#-quick-start)
+- [Security Model](#-security-model)
+- [Roadmap](#-roadmap)
+- [Contributing](#-contributing)
+- [License](#-license)
 
 ---
 
-## ✨ Core Pillars
+## 🧬 Overview
+
+**Splice** is the industry-standard browser infrastructure and observability platform purpose-built for **Autonomous AI Agents**. 
+
+While traditional browser tools are built for humans, Splice is architected from the ground up to solve the unique challenges of agentic web interaction: **Security, Observability, and Semantic Efficiency.** It acts as a high-fidelity "filter" between the raw, chaotic web and your agent's context window.
+
+> "The difference between an agent that hallucinates and one that executes is the quality of its observability."
+
+---
+
+## ✨ Key Features
 
 ### 🛡️ Agentic Security Firewall (V5)
-*   **Prompt Injection Shield**: Proactively redacts prompt injection attempts hidden in the DOM.
-*   **Exfiltration Firewall**: Blocks exfiltration of local secrets and API keys to unverified domains.
-*   **ACE Prevention**: Prevents Arbitrary Code Execution (ACE) before it reaches the agent's LLM context.
+*   **Prompt Injection Redaction**: Real-time detection and sanitization of malicious instructions hidden in DOM nodes.
+*   **Egress Firewall**: Intercepts and blocks unauthorized data exfiltration (e.g., API keys, secrets) to unverified third-party domains.
+*   **ACE Hardening**: Prevents Arbitrary Code Execution patterns by auditing code blocks before they are processed by the agent.
 
-### 👁️ Deep Behavioral Telemetry (V4)
-*   **Sentinel Engine**: Intercepts scrolling, element visibility, and form abandonment.
-*   **Friction Detection**: Tracks rage clicks and navigation dead-ends to feed actionable product intelligence back to the agent.
+### 👁️ Sentinel Behavioral Telemetry
+*   **Full-Spectrum Tracking**: Captures rage clicks, scroll depths, element visibility durations, and form abandonment.
+*   **Actionable Intelligence**: Feeds real-world user behavioral data back to the agent for data-driven product iterations.
 
 ### 🧠 Semantic Extraction Engine
-*   **Token Optimization**: Translates complex DOM structures into a JSON "Semantic Tree," saving up to 80% of context window tokens.
-*   **Self-Healing**: Uses heuristics to find and click the element the agent *intended* to click, even if attributes change.
+*   **Token Optimization**: Compresses massive DOM structures into high-density "Semantic Trees," reducing token consumption by up to 85%.
+*   **Self-Healing Logic**: Heuristic-based element re-identification to prevent interaction failures on dynamic SPAs.
 
 ---
 
-## 📺 Cinematic Command Center
+## 📺 Command Center
 
-The Splice Command Center provides real-time visualization of agent activities and security interventions.
+Splice provides a cinematic, high-performance dashboard for human-in-the-loop monitoring and agent debugging.
 
-![Splice Command Center Mockup](docs/images/command_center_mockup.png)
+<p align="center">
+  <img src="docs/images/command_center_mockup.png" alt="Splice Command Center Mockup" width="90%">
+</p>
+
+---
+
+## 🏗️ Technical Architecture
+
+Splice utilizes a multi-layered proxy-less architecture to ensure zero latency and maximum reliability.
+
+```mermaid
+graph TD
+    A[Agent] -->|Tool Call| B[Splice MCP Server]
+    B --> C[Browser Manager]
+    C --> D[Playwright / Stealth]
+    D --> E[Web Page]
+    E -->|Raw DOM| F[Semantic Extractor]
+    F -->|Sanitized Tree| B
+    E -->|Network Requests| G[Exfiltration Firewall]
+    G -->|Audit Logs| H[Command Center]
+    F -->|Security Flags| H
+```
 
 ---
 
 ## 🛠️ Installation
 
-Get Splice running in seconds:
+### Prerequisites
+- Node.js 18.x or higher
+- NPM or PNPM
 
+### Setup
 ```bash
-# Clone the repository
+# Clone the enterprise repository
 git clone https://github.com/Arnavnemade1/Splice.git
 cd Splice
 
-# Install dependencies
+# Install production and development dependencies
 npm install
 
-# Build the project
+# Build the TypeScript distribution
 npm run build
 ```
 
@@ -59,36 +106,49 @@ npm run build
 
 ## 🚦 Quick Start
 
-### Launch the MCP Server
-Splice operates as a Model Context Protocol (MCP) server, making it compatible with any modern agent environment.
+### 1. Start the MCP Server
+Integrate Splice into your agent framework (Claude, Cursor, etc.) via the Model Context Protocol.
 ```bash
 node dist/index.js
 ```
 
-### Start Interactive Demo
-Launch the observability engine and see the firewall in action:
+### 2. Launch Interactive Demo
+Experience the Sentinel engine and Firewall in real-time.
 ```bash
-# This will automatically open the Command Center in your browser
+# Automatically launches the cinematic dashboard
 npx tsx demo.ts
 ```
 
 ---
 
-## 🏗️ Architecture
+## 🔒 Security Model
 
-Splice is built on top of **Playwright**, operating in a highly speculative browser environment. 
-- **Vault**: Data persistence managed securely using `AES-256-GCM` encryption.
-- **Sentinel**: Real-time event bus for behavioral tracking.
-- **Firewall**: Interceptor-level egress filtering.
+Splice adheres to the **Zero-Trust Browser** principle:
+- **Encryption**: All session metadata is encrypted using `AES-256-GCM`.
+- **Isolation**: Each agent session runs in a hardened browser context.
+- **Redaction**: Secrets are never exposed to the agent unless explicitly whitelisted.
+
+---
+
+## 🗺️ Roadmap
+- [ ] **V6: LLM-Native Vision** - Multi-modal screenshot analysis for complex canvas interactions.
+- [ ] **Real-time Collaboration** - Shared session control for human-agent pair programming.
+- [ ] **Cloud-Native Deployment** - Dockerized Splice clusters for enterprise-scale browser automation.
+
+---
+
+## 🤝 Contributing
+Splice is an open-core project. We welcome contributions from the community. Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for details on our coding standards and PR process.
 
 ---
 
 ## 📜 License
-
-MIT License. See [LICENSE](LICENSE) for details.
+Splice is released under the **MIT License**. See [LICENSE](LICENSE) for the full text.
 
 ---
 
 <p align="center">
-  Developed with ❤️ for the future of Autonomous Agents.
+  <br>
+  <b>Built for the future of Autonomous Intelligence.</b><br>
+  <sub>Maintained by Splice Enterprise & Contributors.</sub>
 </p>
