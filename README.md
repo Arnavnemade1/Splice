@@ -1,8 +1,4 @@
-# Splice Enterprise 🧬
-
-<p align="center">
-  <img src="docs/images/hero_banner.png" alt="Splice Hero Banner" width="100%">
-</p>
+# Splice Enterprise
 
 <p align="center">
   <a href="https://github.com/Arnavnemade1/Splice/actions"><img src="https://github.com/Arnavnemade1/Splice/workflows/CI/badge.svg" alt="Build Status"></a>
@@ -13,58 +9,47 @@
 
 ---
 
-## 📖 Table of Contents
-- [Overview](#-overview)
-- [Key Features](#-key-features)
-- [Command Center](#-command-center)
-- [Technical Architecture](#-technical-architecture)
-- [Installation](#-installation)
-- [Quick Start](#-quick-start)
-- [Security Model](#-security-model)
-- [Roadmap](#-roadmap)
-- [Contributing](#-contributing)
-- [License](#-license)
+## Table of Contents
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Technical Architecture](#technical-architecture)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Security Model](#security-model)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
+- [License](#license)
 
 ---
 
-## 🧬 Overview
+## Overview
 
-**Splice** is the industry-standard browser infrastructure and observability platform purpose-built for **Autonomous AI Agents**. 
+Splice is an industry-standard browser infrastructure and observability platform purpose-built for Autonomous AI Agents. 
 
-While traditional browser tools are built for humans, Splice is architected from the ground up to solve the unique challenges of agentic web interaction: **Security, Observability, and Semantic Efficiency.** It acts as a high-fidelity "filter" between the raw, chaotic web and your agent's context window.
+While traditional browser tools are built for humans, Splice is architected from the ground up to solve the unique challenges of agentic web interaction: Security, Observability, and Semantic Efficiency. It acts as a high-fidelity filter between the raw, chaotic web and your agent's context window.
 
 > "The difference between an agent that hallucinates and one that executes is the quality of its observability."
 
 ---
 
-## ✨ Key Features
+## Key Features
 
-### 🛡️ Agentic Security Firewall (V5)
+### Agentic Security Firewall (V5)
 *   **Prompt Injection Redaction**: Real-time detection and sanitization of malicious instructions hidden in DOM nodes.
 *   **Egress Firewall**: Intercepts and blocks unauthorized data exfiltration (e.g., API keys, secrets) to unverified third-party domains.
 *   **ACE Hardening**: Prevents Arbitrary Code Execution patterns by auditing code blocks before they are processed by the agent.
 
-### 👁️ Sentinel Behavioral Telemetry
+### Sentinel Behavioral Telemetry
 *   **Full-Spectrum Tracking**: Captures rage clicks, scroll depths, element visibility durations, and form abandonment.
 *   **Actionable Intelligence**: Feeds real-world user behavioral data back to the agent for data-driven product iterations.
 
-### 🧠 Semantic Extraction Engine
+### Semantic Extraction Engine
 *   **Token Optimization**: Compresses massive DOM structures into high-density "Semantic Trees," reducing token consumption by up to 85%.
 *   **Self-Healing Logic**: Heuristic-based element re-identification to prevent interaction failures on dynamic SPAs.
 
 ---
 
-## 📺 Command Center
-
-Splice provides a cinematic, high-performance dashboard for human-in-the-loop monitoring and agent debugging.
-
-<p align="center">
-  <img src="docs/images/command_center_mockup.png" alt="Splice Command Center Mockup" width="90%">
-</p>
-
----
-
-## 🏗️ Technical Architecture
+## Technical Architecture
 
 Splice utilizes a multi-layered proxy-less architecture to ensure zero latency and maximum reliability.
 
@@ -83,7 +68,7 @@ graph TD
 
 ---
 
-## 🛠️ Installation
+## Installation
 
 ### Prerequisites
 - Node.js 18.x or higher
@@ -104,7 +89,7 @@ npm run build
 
 ---
 
-## 🚦 Quick Start
+## Quick Start
 
 ### 1. Start the MCP Server
 Integrate Splice into your agent framework (Claude, Cursor, etc.) via the Model Context Protocol.
@@ -121,28 +106,28 @@ npx tsx demo.ts
 
 ---
 
-## 🔒 Security Model
+## Security Model
 
-Splice adheres to the **Zero-Trust Browser** principle:
-- **Encryption**: All session metadata is encrypted using `AES-256-GCM`.
+Splice adheres to the Zero-Trust Browser principle:
+- **Encryption**: All session metadata is encrypted using AES-256-GCM.
 - **Isolation**: Each agent session runs in a hardened browser context.
 - **Redaction**: Secrets are never exposed to the agent unless explicitly whitelisted.
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 - [ ] **V6: LLM-Native Vision** - Multi-modal screenshot analysis for complex canvas interactions.
 - [ ] **Real-time Collaboration** - Shared session control for human-agent pair programming.
 - [ ] **Cloud-Native Deployment** - Dockerized Splice clusters for enterprise-scale browser automation.
 
 ---
 
-## 🤝 Contributing
+## Contributing
 Splice is an open-core project. We welcome contributions from the community. Please see our [CONTRIBUTING.md](CONTRIBUTING.md) for details on our coding standards and PR process.
 
 ---
 
-## 📜 License
+## License
 Splice is released under the **MIT License**. See [LICENSE](LICENSE) for the full text.
 
 ---
