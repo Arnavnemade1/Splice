@@ -1,4 +1,4 @@
-# Splice Enterprise
+# Splice
 
 <p align="center">
   <a href="https://github.com/Arnavnemade1/Splice/actions"><img src="https://github.com/Arnavnemade1/Splice/workflows/CI/badge.svg" alt="Build Status"></a>
