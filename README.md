@@ -103,7 +103,7 @@ node dist/index.js
 ```bash
 cd python
 pip install -e .
-python mcp_server.py
+splice-mcp
 ```
 
 ### 2. Launch Interactive Demo

@@ -17,4 +17,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
-splice-mcp = "mcp_server:main"
+splice-mcp = "splice_mcp.server:main"

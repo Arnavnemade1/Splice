@@ -113,8 +113,8 @@ def start_ts_bridge():
     global bridge_process
     
     # Check if compiled dist exists
-    dist_path = os.path.join("..", "dist", "bridge_server.js")
-    src_path = os.path.join("..", "src", "bridge_server.ts")
+    dist_path = os.path.join("..", "..", "dist", "bridge_server.js")
+    src_path = os.path.join("..", "..", "src", "bridge_server.ts")
     
     cmd = []
     if os.path.exists(dist_path):
