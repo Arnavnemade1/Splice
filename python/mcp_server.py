@@ -111,21 +111,29 @@ async def handle_call_tool(
 
 def start_ts_bridge():
     global bridge_process
-    # Path to the compiled TS server (dist/bridge_server.js)
-    ts_script_path = os.path.join("..", "dist", "bridge_server.js")
     
-    if os.path.exists(ts_script_path):
-        # We use Popen so it runs in background
-        bridge_process = subprocess.Popen(["node", ts_script_path])
-        # Give it a second to start
-        time.sleep(2)
-        # Call init
-        try:
-            import urllib.request
-            req = urllib.request.Request(BRIDGE_URL, data=json.dumps({"action": "init"}).encode('utf-8'), headers={'Content-Type': 'application/json'})
-            urllib.request.urlopen(req, timeout=10)
-        except Exception as e:
-            pass
+    # Check if compiled dist exists
+    dist_path = os.path.join("..", "dist", "bridge_server.js")
+    src_path = os.path.join("..", "src", "bridge_server.ts")
+    
+    cmd = []
+    if os.path.exists(dist_path):
+        cmd = ["node", dist_path]
+    elif os.path.exists(src_path):
+        cmd = ["npx", "tsx", src_path]
+    else:
+        print("Warning: Could not find bridge_server source or dist.")
+        return
+        
+    bridge_process = subprocess.Popen(cmd)
+    time.sleep(2)
+    
+    try:
+        import urllib.request
+        req = urllib.request.Request(BRIDGE_URL, data=json.dumps({"action": "init"}).encode('utf-8'), headers={'Content-Type': 'application/json'})
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as e:
+        pass
 
 async def main():
     start_ts_bridge()
