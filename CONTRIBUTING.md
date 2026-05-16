@@ -26,6 +26,15 @@ Splice is built specifically for autonomous agents. Because of this, changes to 
 1. **Speed & Latency**: Keep token bloat to an absolute minimum in the `SemanticTree`.
 2. **Security**: Ensure agents can't be tricked by malicious web pages into executing arbitrary code.
 
-When proposing a pull request, ensure `npm run build` succeeds locally and no new TypeScript compilation errors are introduced.
+When proposing a pull request, ensure `npm run build` and `npm test` succeed locally and no new TypeScript compilation errors are introduced.
+
+## Security-Sensitive Changes
+
+Splice exposes browser state and web content to AI agents, so security-sensitive changes deserve extra care. Pull requests should call out any changes that affect:
+
+- Snapshot storage, encryption, or filesystem paths
+- Tool schemas exposed through MCP
+- Prompt-injection, exfiltration, or secret-scanning behavior
+- Browser launch, dashboard opening, or local process execution
 
 Thank you for helping us make the web a safer place for agents!

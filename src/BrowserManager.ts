@@ -11,11 +11,12 @@ import { SemanticExtractor } from './SemanticExtractor.js';
 import { CryptoManager } from './CryptoManager.js';
 import { SecurityAuditor } from './SecurityAuditor.js';
 import type { AuditOptions } from './SecurityAuditor.js';
-import type { SemanticNode, SessionMetrics } from './types.js';
+import type { AgentStateDiagnosis, SemanticNode, SessionMetrics, VerifiedActionPlan } from './types.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { execSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 export class BrowserManager {
   private browser: Browser | null = null;
@@ -61,15 +62,34 @@ export class BrowserManager {
     this.browser = await chromium.launch({ headless: this.headless });
     await this.createBranch('main');
 
-    // Auto-launch dashboard
-    try {
-      const reportPath = await this.generateObservabilityReport();
-      const openCommand = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-      execSync(`${openCommand} "${reportPath}"`);
-      console.log(`[Splice] Command Center launched at ${reportPath}`);
-    } catch (e) {
-      console.error("[Splice] Failed to auto-launch Command Center:", e);
+    if (process.env.SPLICE_AUTO_OPEN_DASHBOARD === '1') {
+      try {
+        const reportPath = await this.generateObservabilityReport();
+        this.openDashboard(reportPath);
+        console.error(`[Splice] Command Center launched at ${reportPath}`);
+      } catch (e) {
+        console.error("[Splice] Failed to auto-launch Command Center:", e);
+      }
     }
+  }
+
+  private openDashboard(reportPath: string) {
+    const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd' : 'xdg-open';
+    const args = process.platform === 'win32' ? ['/c', 'start', '', reportPath] : [reportPath];
+    const child = spawn(command, args, { detached: true, stdio: 'ignore' });
+    child.unref();
+  }
+
+  private sanitizeFileName(name: string): string {
+    const sanitized = name.trim().replace(/[^a-zA-Z0-9._-]/g, '-').replace(/-+/g, '-');
+    if (!sanitized || sanitized === '.' || sanitized === '..') {
+      throw new Error('A valid snapshot or trace name is required.');
+    }
+    return sanitized.slice(0, 120);
+  }
+
+  private branchIdForUrl(url: string): string {
+    return `speculative-${createHash('sha256').update(url).digest('hex').slice(0, 12)}`;
   }
 
   private async createBranch(branchId: string, storageState?: any) {
@@ -136,6 +156,24 @@ export class BrowserManager {
     // Store micro-snapshots encrypted
     this.vault.writeEncrypted(snapPath, payload);
     this.pushLiveFeed(type, JSON.stringify(data).substring(0, 80));
+  }
+
+  private tokenizeIntent(intent: string): string[] {
+    const stopWords = new Set(['the', 'and', 'for', 'with', 'into', 'onto', 'that', 'this', 'from', 'then', 'please', 'click', 'press', 'open', 'go', 'to', 'on', 'a', 'an']);
+    return intent.toLowerCase()
+      .replace(/[^a-z0-9\s_-]/g, ' ')
+      .split(/\s+/)
+      .map(token => token.trim())
+      .filter(token => token.length > 2 && !stopWords.has(token));
+  }
+
+  private inferActionFromIntent(intent: string, value?: string): 'click' | 'type' | 'focus' | 'select' | 'press' {
+    const normalized = intent.toLowerCase();
+    if (value !== undefined || /\b(type|enter|fill|write|input)\b/.test(normalized)) return 'type';
+    if (/\b(select|choose|pick)\b/.test(normalized)) return 'select';
+    if (/\b(focus)\b/.test(normalized)) return 'focus';
+    if (/\b(press|keyboard|key)\b/.test(normalized)) return 'press';
+    return 'click';
   }
 
   // -------------------------
@@ -219,7 +257,7 @@ export class BrowserManager {
   // NAVIGATION & SPECULATION
   // -------------------------
   async navigate(url: string) {
-    const speculativeBranchId = `speculative-${Buffer.from(url).toString('base64').substring(0, 10)}`;
+    const speculativeBranchId = this.branchIdForUrl(url);
     if (this.contexts.has(speculativeBranchId)) {
       console.error(`[Speculative Execution] Cache hit for ${url}. Instantly switching branch.`);
       this.activeBranch = speculativeBranchId;
@@ -252,7 +290,7 @@ export class BrowserManager {
     const storageState = await context.storageState();
 
     for (const url of urls) {
-      const branchId = `speculative-${Buffer.from(url).toString('base64').substring(0, 10)}`;
+      const branchId = this.branchIdForUrl(url);
       if (!this.contexts.has(branchId)) {
         await this.createBranch(branchId, storageState);
         const newPage = this.pages.get(branchId)!;
@@ -281,6 +319,432 @@ export class BrowserManager {
     });
     
     return result.tree;
+  }
+
+  // -------------------------
+  // AGENT STATE FORENSICS
+  // -------------------------
+  async diagnoseAgentState(goal?: string, lastActions: string[] = []): Promise<AgentStateDiagnosis> {
+    const page = this.getActivePage();
+    await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
+
+    const telemetry = this.telemetry.get(this.activeBranch)?.getLogs() || [];
+    const recentNetworkErrors = telemetry
+      .filter(log => log.type === 'network' && log.data.event === 'response' && Number(log.data.status) >= 400)
+      .slice(-10);
+
+    const domSignals = await page.evaluate(() => {
+      const isVisible = (el: Element) => {
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          Number(style.opacity || 1) > 0.05 &&
+          rect.width > 0 &&
+          rect.height > 0;
+      };
+
+      const viewportArea = window.innerWidth * window.innerHeight;
+      const interactiveSelector = [
+        'a[href]',
+        'button',
+        'input',
+        'select',
+        'textarea',
+        '[role="button"]',
+        '[role="link"]',
+        '[onclick]',
+        '[tabindex]:not([tabindex="-1"])'
+      ].join(',');
+
+      const dialogs = Array.from(document.querySelectorAll('[role="dialog"], dialog, [aria-modal="true"], .modal, .popup'))
+        .filter(isVisible)
+        .map(el => {
+          const rect = el.getBoundingClientRect();
+          return {
+            text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120),
+            areaRatio: viewportArea ? (rect.width * rect.height) / viewportArea : 0
+          };
+        });
+
+      const overlays = Array.from(document.body.querySelectorAll<HTMLElement>('*'))
+        .filter(el => {
+          if (!isVisible(el)) return false;
+          const style = window.getComputedStyle(el);
+          const rect = el.getBoundingClientRect();
+          const zIndex = Number.parseInt(style.zIndex || '0', 10);
+          const areaRatio = viewportArea ? (rect.width * rect.height) / viewportArea : 0;
+          const fixedOrSticky = style.position === 'fixed' || style.position === 'sticky';
+          return fixedOrSticky && areaRatio > 0.18 && (Number.isFinite(zIndex) ? zIndex >= 10 : true);
+        })
+        .slice(0, 5)
+        .map(el => {
+          const rect = el.getBoundingClientRect();
+          return {
+            id: el.getAttribute('data-splice-id') || el.id || el.getAttribute('aria-label') || el.tagName.toLowerCase(),
+            text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 120),
+            zIndex: window.getComputedStyle(el).zIndex,
+            areaRatio: viewportArea ? (rect.width * rect.height) / viewportArea : 0
+          };
+        });
+
+      const disabledControls = Array.from(document.querySelectorAll<HTMLButtonElement | HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>(interactiveSelector))
+        .filter(el => isVisible(el) && ((el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true'));
+
+      const invalidFields = Array.from(document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input, textarea, select'))
+        .filter(el => isVisible(el) && !el.checkValidity());
+
+      const actionableElements = Array.from(document.querySelectorAll<HTMLElement>(interactiveSelector))
+        .filter(el => isVisible(el) && !(el as HTMLButtonElement).disabled)
+        .length;
+
+      const captchaFrames = document.querySelectorAll('iframe[src*="captcha"], iframe[src*="recaptcha"], iframe[title*="recaptcha"], iframe[src*="turnstile"]').length;
+      const loadingIndicators = Array.from(document.querySelectorAll('[aria-busy="true"], [role="progressbar"], .loading, .spinner, [data-loading="true"]')).filter(isVisible).length;
+      const passwordFields = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="password"]')).filter(isVisible).length;
+      const activeElement = document.activeElement instanceof HTMLElement
+        ? {
+            tagName: document.activeElement.tagName.toLowerCase(),
+            id: document.activeElement.getAttribute('data-splice-id') || document.activeElement.id || undefined,
+            text: (document.activeElement.innerText || document.activeElement.getAttribute('aria-label') || '').trim().slice(0, 80)
+          }
+        : null;
+
+      return {
+        title: document.title,
+        url: location.href,
+        dialogs,
+        overlays,
+        disabledControls: disabledControls.length,
+        invalidFields: invalidFields.length,
+        actionableElements,
+        captchaFrames,
+        loadingIndicators,
+        passwordFields,
+        activeElement,
+        bodyText: document.body.innerText.replace(/\s+/g, ' ').trim().slice(0, 600)
+      };
+    });
+
+    const evidence: string[] = [];
+    let state: AgentStateDiagnosis['state'] = 'ready';
+    let confidence = 0.72;
+    let recommendedNextAction: AgentStateDiagnosis['recommendedNextAction'] = {
+      tool: 'compile_verified_action',
+      reason: 'Page appears actionable; compile the next intent into a verified browser action.'
+    };
+
+    if (domSignals.captchaFrames > 0) {
+      state = 'captcha';
+      confidence = 0.95;
+      evidence.push(`${domSignals.captchaFrames} CAPTCHA or anti-bot iframe(s) detected.`);
+      recommendedNextAction = { tool: 'request_human_intervention', reason: 'CAPTCHA detected; agent should pause for human or configured solver.' };
+    } else if (domSignals.loadingIndicators > 0) {
+      state = 'navigation_pending';
+      confidence = 0.78;
+      evidence.push(`${domSignals.loadingIndicators} loading indicator(s) are visible.`);
+      recommendedNextAction = { tool: 'diagnose_agent_state', reason: 'Wait briefly, then re-diagnose once the page settles.' };
+    } else if (domSignals.dialogs.length > 0 || domSignals.overlays.length > 0) {
+      state = 'ui_obstruction';
+      confidence = 0.89;
+      const obstruction = domSignals.dialogs[0] || domSignals.overlays[0];
+      const obstructionLabel = 'id' in obstruction ? obstruction.id : obstruction.text;
+      evidence.push(`Visible dialog or overlay may be intercepting actions: "${obstruction.text || obstructionLabel || 'unnamed obstruction'}".`);
+      recommendedNextAction = { tool: 'compile_verified_action', target: 'close/dismiss control', reason: 'Dismiss the obstruction before continuing the workflow.' };
+    } else if (domSignals.invalidFields > 0 || domSignals.disabledControls > 0) {
+      state = 'validation_blocked';
+      confidence = 0.82;
+      evidence.push(`${domSignals.invalidFields} invalid field(s) and ${domSignals.disabledControls} disabled control(s) detected.`);
+      recommendedNextAction = { tool: 'compile_verified_action', reason: 'Fill required inputs or satisfy validation before submitting.' };
+    } else if (domSignals.passwordFields > 0 && /login|sign in|password|authenticate/i.test(domSignals.bodyText)) {
+      state = 'auth_required';
+      confidence = 0.8;
+      evidence.push('Password field and authentication language are visible.');
+      recommendedNextAction = { tool: 'load_snapshot', reason: 'Load an authenticated snapshot or request credentials through the host agent policy.' };
+    } else if (recentNetworkErrors.length > 0) {
+      state = 'network_failure';
+      confidence = 0.74;
+      evidence.push(`${recentNetworkErrors.length} recent HTTP error response(s), latest status ${recentNetworkErrors.at(-1)?.data.status}.`);
+      recommendedNextAction = { tool: 'navigate', reason: 'Retry navigation or inspect the failing endpoint before continuing.' };
+    }
+
+    if (domSignals.actionableElements === 0) {
+      state = state === 'ready' ? 'stale_or_missing_target' : state;
+      confidence = Math.max(confidence, 0.76);
+      evidence.push('No visible actionable elements are currently available.');
+    }
+
+    if (goal) evidence.push(`Current agent goal: ${goal}`);
+    if (lastActions.length > 0) evidence.push(`Recent actions: ${lastActions.slice(-4).join(' -> ')}`);
+    if (domSignals.activeElement?.id) evidence.push(`Focused element: ${domSignals.activeElement.id}`);
+    if (evidence.length === 0) evidence.push(`${domSignals.actionableElements} visible actionable element(s) detected.`);
+
+    const summaryByState: Record<AgentStateDiagnosis['state'], string> = {
+      ready: 'The page appears ready for a verified intent action.',
+      ui_obstruction: 'The agent is likely blocked by a visible overlay, modal, or pointer obstruction.',
+      captcha: 'The workflow is blocked by CAPTCHA or anti-bot verification.',
+      validation_blocked: 'The page likely requires missing or corrected form input before continuing.',
+      auth_required: 'The workflow appears to require authentication.',
+      navigation_pending: 'The page is still transitioning or loading.',
+      network_failure: 'Recent network failures may be preventing the expected state.',
+      stale_or_missing_target: 'The expected target is missing or the page has no visible actionable controls.',
+      ambiguous_target: 'Multiple targets appear plausible and need disambiguation.',
+      unknown: 'Splice could not confidently classify the current browser state.'
+    };
+
+    const diagnosis: AgentStateDiagnosis = {
+      state,
+      confidence,
+      summary: summaryByState[state],
+      evidence,
+      recommendedNextAction,
+      page: {
+        url: domSignals.url,
+        title: domSignals.title,
+        activeBranch: this.activeBranch
+      },
+      signals: {
+        dialogs: domSignals.dialogs.length,
+        obstructiveOverlays: domSignals.overlays.length,
+        disabledControls: domSignals.disabledControls,
+        invalidFields: domSignals.invalidFields,
+        captchaFrames: domSignals.captchaFrames,
+        loadingIndicators: domSignals.loadingIndicators,
+        recentNetworkErrors: recentNetworkErrors.length,
+        actionableElements: domSignals.actionableElements
+      }
+    };
+
+    this.saveMicroSnapshot('agent_state_diagnosis', {
+      state: diagnosis.state,
+      confidence: diagnosis.confidence,
+      summary: diagnosis.summary,
+      signals: diagnosis.signals
+    });
+    return diagnosis;
+  }
+
+  async compileVerifiedAction(input: {
+    intent: string;
+    value?: string;
+    constraints?: {
+      noNavigationOutsideDomain?: boolean;
+      avoidDestructiveActions?: boolean;
+      requireExactText?: boolean;
+    };
+    execute?: boolean;
+  }): Promise<VerifiedActionPlan> {
+    const { intent, value, constraints = {}, execute = false } = input;
+    if (!intent || intent.trim().length === 0) throw new Error('Intent is required.');
+
+    const page = this.getActivePage();
+    await this.getSemanticTree(intent, 'UX', 1200);
+    const diagnosis = await this.diagnoseAgentState(intent);
+    const keywords = this.tokenizeIntent(intent);
+    const inferredAction = this.inferActionFromIntent(intent, value);
+    const currentUrl = page.url();
+    const currentHost = (() => {
+      try { return new URL(currentUrl).host; } catch { return ''; }
+    })();
+
+    const candidates = await page.evaluate((args: { keywords: string[]; query: string; currentHost: string; noExternal: boolean; requireExactText: boolean }) => {
+      const selector = [
+        'a[href]',
+        'button',
+        'input',
+        'select',
+        'textarea',
+        '[role="button"]',
+        '[role="link"]',
+        '[onclick]',
+        '[tabindex]:not([tabindex="-1"])'
+      ].join(',');
+
+      const isVisible = (el: Element) => {
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          Number(style.opacity || 1) > 0.05 &&
+          rect.width > 0 &&
+          rect.height > 0;
+      };
+
+      return Array.from(document.querySelectorAll<HTMLElement>(selector))
+        .filter(isVisible)
+        .map(el => {
+          const id = el.getAttribute('data-splice-id') || '';
+          const rect = el.getBoundingClientRect();
+          const tagName = el.tagName.toLowerCase();
+          const href = el instanceof HTMLAnchorElement ? el.href : '';
+          const label = [
+            el.innerText,
+            el.getAttribute('aria-label'),
+            el.getAttribute('placeholder'),
+            el.getAttribute('name'),
+            el.getAttribute('title'),
+            href
+          ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+          const normalized = label.toLowerCase();
+          let score = 0;
+          if (args.query && normalized === args.query) score += 42;
+          else if (args.query && normalized.includes(args.query)) score += 30;
+          for (const keyword of args.keywords) {
+            if (normalized === keyword) score += 24;
+            else if (normalized.includes(keyword)) score += 10;
+          }
+          if (args.requireExactText && args.keywords.length > 0 && !args.keywords.some(keyword => normalized.includes(keyword))) {
+            score -= 30;
+          }
+          if (tagName === 'button' || el.getAttribute('role') === 'button') score += 3;
+          if (tagName === 'a' && /pricing|docs|login|sign|dashboard|settings|account/.test(normalized)) score += 2;
+          if ((el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true') score -= 25;
+
+          let external = false;
+          if (href && args.noExternal) {
+            try { external = new URL(href).host !== args.currentHost; } catch { external = false; }
+            if (external) score -= 40;
+          }
+
+          const centerX = rect.left + rect.width / 2;
+          const centerY = rect.top + rect.height / 2;
+          const topElement = document.elementFromPoint(centerX, centerY);
+          const obstructed = !!topElement && topElement !== el && !el.contains(topElement);
+          if (obstructed) score -= 12;
+
+          return {
+            id,
+            tagName,
+            label: label.slice(0, 180),
+            href,
+            score,
+            disabled: (el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true',
+            obstructed,
+            rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            external
+          };
+        })
+        .filter(candidate => candidate.id)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 8);
+    }, {
+      keywords,
+      query: keywords.join(' '),
+      currentHost,
+      noExternal: constraints.noNavigationOutsideDomain === true,
+      requireExactText: constraints.requireExactText === true
+    });
+
+    const destructiveIntent = /\b(delete|remove|destroy|cancel subscription|purchase|buy|pay|submit payment|transfer|wire)\b/i.test(intent);
+    const best = candidates[0];
+    const evidence: string[] = [
+      `Intent tokens: ${keywords.join(', ') || 'none'}`,
+      `State forensics: ${diagnosis.state} (${Math.round(diagnosis.confidence * 100)}% confidence)`
+    ];
+
+    if (!best || best.score <= 0) {
+      const plan: VerifiedActionPlan = {
+        intent,
+        confidence: 0.18,
+        risk: 'high',
+        plan: [],
+        preconditions: ['A visible actionable element must match the intent.'],
+        postconditions: ['No action executed.'],
+        evidence: [...evidence, 'No candidate target scored above zero.'],
+        alternatives: candidates.map(candidate => ({
+          target: candidate.id,
+          score: candidate.score,
+          label: candidate.label,
+          reason: candidate.disabled ? 'Candidate is disabled.' : candidate.obstructed ? 'Candidate appears visually obstructed.' : 'Low semantic match.'
+        }))
+      };
+      this.saveMicroSnapshot('verified_action_plan', { intent, confidence: plan.confidence, risk: plan.risk, executable: false });
+      return plan;
+    }
+
+    const topScore = Math.max(1, best.score);
+    const secondScore = candidates[1]?.score ?? 0;
+    const ambiguous = secondScore > 0 && secondScore / topScore > 0.82;
+    const blockedByPolicy = constraints.avoidDestructiveActions === true && destructiveIntent;
+    const baseConfidence = best.score >= 10 ? Math.max(best.score / 35, 0.62) : best.score / 35;
+    const confidence = Math.max(0.2, Math.min(0.96, baseConfidence - (ambiguous ? 0.16 : 0) - (best.obstructed ? 0.2 : 0) - (blockedByPolicy ? 0.35 : 0)));
+    const risk: VerifiedActionPlan['risk'] = blockedByPolicy || best.external || destructiveIntent ? 'high' : ambiguous || best.obstructed || diagnosis.state !== 'ready' ? 'medium' : 'low';
+    const beforeUrl = page.url();
+    const beforeTitle = await page.title().catch(() => '');
+
+    const plan: VerifiedActionPlan = {
+      intent,
+      confidence,
+      risk,
+      plan: blockedByPolicy ? [] : [{
+        action: inferredAction,
+        target: best.id,
+        value,
+        why: `Best semantic and visual match: "${best.label || best.tagName}" scored ${best.score}.`
+      }],
+      preconditions: [
+        `Target ${best.id} is visible.`,
+        best.disabled ? `Target ${best.id} must be enabled before action.` : `Target ${best.id} is enabled.`,
+        best.obstructed ? `Target ${best.id} must not be covered by another element.` : `Target ${best.id} is not visually obstructed at its center point.`,
+        constraints.noNavigationOutsideDomain ? `Navigation must stay on ${currentHost}.` : 'No domain constraint requested.',
+        constraints.avoidDestructiveActions ? 'Destructive actions require an explicit policy override.' : 'No destructive-action policy requested.'
+      ],
+      postconditions: [
+        inferredAction === 'click' ? 'URL, title, focused element, or visible page text should change in a way consistent with the intent.' : 'Target value or focus state should reflect the requested action.',
+        `A follow-up diagnosis should not report captcha, obstruction, or validation_blocked unless the site introduced a new guard.`
+      ],
+      evidence: blockedByPolicy ? [...evidence, 'Intent appears destructive and policy forbids execution.'] : evidence,
+      alternatives: candidates.slice(1).map(candidate => ({
+        target: candidate.id,
+        score: candidate.score,
+        label: candidate.label,
+        reason: candidate.disabled ? 'Disabled alternate.' : candidate.obstructed ? 'Obstructed alternate.' : 'Lower semantic score.'
+      }))
+    };
+
+    if (execute && plan.plan.length > 0 && confidence >= 0.45 && !best.disabled && !best.obstructed) {
+      const step = plan.plan[0];
+      await this.interact(step.target, step.action, step.value);
+      const afterUrl = page.url();
+      const afterTitle = await page.title().catch(() => '');
+      const afterDiagnosis = await this.diagnoseAgentState(intent);
+      const afterText = await page.locator('body').innerText({ timeout: 1500 }).catch(() => '');
+      const changed = beforeUrl !== afterUrl || beforeTitle !== afterTitle;
+      const intentVisible = keywords.some(keyword => afterText.toLowerCase().includes(keyword));
+      const domainStillAllowed = !constraints.noNavigationOutsideDomain || (() => {
+        try { return new URL(afterUrl).host === currentHost; } catch { return true; }
+      })();
+      const passed = domainStillAllowed && (changed || intentVisible || afterDiagnosis.state === 'ready');
+
+      plan.verification = {
+        executed: true,
+        passed,
+        evidence: [
+          changed ? `Page changed from "${beforeTitle || beforeUrl}" to "${afterTitle || afterUrl}".` : 'No URL or title change observed.',
+          intentVisible ? 'Post-action page text still contains intent terms.' : 'Intent terms were not found in the post-action body text.',
+          `Post-action diagnosis: ${afterDiagnosis.state}.`,
+          domainStillAllowed ? 'Domain constraint passed.' : 'Domain constraint failed.'
+        ]
+      };
+    } else {
+      plan.verification = {
+        executed: false,
+        passed: false,
+        evidence: [
+          execute ? 'Execution skipped because confidence/preconditions were insufficient.' : 'Execution was not requested.',
+          `Top candidate: ${best.id} (${best.label || best.tagName}).`
+        ]
+      };
+    }
+
+    this.saveMicroSnapshot('verified_action_plan', {
+      intent,
+      target: best.id,
+      confidence: plan.confidence,
+      risk: plan.risk,
+      executed: plan.verification?.executed,
+      passed: plan.verification?.passed
+    });
+    return plan;
   }
 
   getTelemetryLogs() {
@@ -481,19 +945,21 @@ export class BrowserManager {
 
     // Get storage state as object then encrypt it
     const state = await context.storageState();
-    const statePath = path.join(this.snapshotsDir, `${name}.splice`);
+    const safeName = this.sanitizeFileName(name);
+    const statePath = path.join(this.snapshotsDir, `${safeName}.splice`);
     this.vault.writeEncrypted(statePath, JSON.stringify(state));
-    this.pushLiveFeed('save_snapshot', `Encrypted vault: ${name}`);
+    this.pushLiveFeed('save_snapshot', `Encrypted vault: ${safeName}`);
     return statePath;
   }
 
   async loadSnapshot(name: string) {
     // Support both new encrypted (.splice) and legacy (.json) formats
-    const encPath = path.join(this.snapshotsDir, `${name}.splice`);
-    const legacyPath = path.join(this.snapshotsDir, `${name}.json`);
+    const safeName = this.sanitizeFileName(name);
+    const encPath = path.join(this.snapshotsDir, `${safeName}.splice`);
+    const legacyPath = path.join(this.snapshotsDir, `${safeName}.json`);
     const statePath = fs.existsSync(encPath) ? encPath : legacyPath;
 
-    if (!fs.existsSync(statePath)) throw new Error(`Snapshot "${name}" not found.`);
+    if (!fs.existsSync(statePath)) throw new Error(`Snapshot "${safeName}" not found.`);
 
     const state = JSON.parse(this.vault.readDecrypted(statePath));
 
@@ -502,7 +968,7 @@ export class BrowserManager {
 
     await this.createBranch('main', state);
     this.activeBranch = 'main';
-    this.pushLiveFeed('load_snapshot', `Restored from vault: ${name}`);
+    this.pushLiveFeed('load_snapshot', `Restored from vault: ${safeName}`);
   }
 
   // -------------------------
@@ -572,11 +1038,12 @@ export class BrowserManager {
     const context = this.contexts.get(this.activeBranch);
     if (!context) throw new Error('Active branch not found');
 
-    const tracePath = path.join(this.snapshotsDir, `trace-${sessionId}.zip`);
+    const safeSessionId = this.sanitizeFileName(sessionId);
+    const tracePath = path.join(this.snapshotsDir, `trace-${safeSessionId}.zip`);
     await context.tracing.stop({ path: tracePath });
     await context.tracing.start({ screenshots: true, snapshots: true });
 
-    this.pushLiveFeed('debug_failure', `Trace saved: trace-${sessionId}.zip`);
+    this.pushLiveFeed('debug_failure', `Trace saved: trace-${safeSessionId}.zip`);
     return tracePath;
   }
 
@@ -621,160 +1088,167 @@ export class BrowserManager {
         const liveFeed = ${JSON.stringify(this.getLiveFeed())};
         const audit = ${JSON.stringify(latestAudit)};
 
-        // 1. Timeline
-        const timeline = document.getElementById('timeline');
-        if (timeline) {
-          timeline.innerHTML = microSnapshots.map((s, i) => {
-            const isVuln = s.type.includes('security') || s.type.includes('audit');
-            return \`
-              <div class="snap-card \${i === 0 ? 'active' : ''} \${isVuln ? 'vuln' : ''}">
-                  <div class="snap-type \${isVuln ? 'vuln' : ''}">\${s.type.toUpperCase()}</div>
-                  <div class="snap-details">
-                    \${s.url || s.elementId || ''} \${s.action || ''} 
-                    \${s.selfHealed ? '<span style="color:var(--accent)">[HEALED]</span>' : ''}
-                    \${s.behaviorSummary && s.behaviorSummary.frictionScore > 0 ? \`<span style="color:var(--red)">[FRICTION: \${s.behaviorSummary.frictionScore}]</span>\` : ''}
-                  </div>
-                  <div class="snap-time">\${new Date(s.timestamp).toLocaleTimeString()}</div>
-              </div>
-          \`}).join('');
-        }
+        const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({
+          '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+        }[ch]));
+        const empty = (text) => \`<div class="empty">\${esc(text)}</div>\`;
+        const tagClass = (value) => {
+          const normalized = String(value || '').toLowerCase();
+          if (normalized.includes('critical') || normalized.includes('high') || normalized.includes('captcha') || normalized.includes('obstruction')) return 'red';
+          if (normalized.includes('warning') || normalized.includes('medium') || normalized.includes('validation') || normalized.includes('pending')) return 'amber';
+          if (normalized.includes('info') || normalized.includes('network')) return 'blue';
+          return 'green';
+        };
 
-        // 2. Speculative Map
-        const specGrid = document.getElementById('spec-grid');
-        if (specGrid) {
-          specGrid.innerHTML = liveFeed.branches.map(b => \`
-              <div class="branch-node \${b === liveFeed.activeBranch ? 'active' : ''}">
-                  <div class="snap-type">\${b === liveFeed.activeBranch ? 'ACTIVE' : 'READY'}</div>
-                  <div class="snap-details" style="font-size: 10px; color: var(--text-dim)">\${b.substring(0, 15)}</div>
-              </div>
-          \`).join('');
-        }
-
-        // 3. Network Map (V3)
-        const netMap = document.getElementById('network-map');
-        const lastTree = microSnapshots.find(s => s.type === 'semantic_tree' && s.networkSummary);
-        if (netMap && lastTree && lastTree.networkSummary) {
-          netMap.innerHTML = lastTree.networkSummary.endpoints.map(ep => \`
-            <div class="endpoint-row">
-              <div class="endpoint-method">GET</div>
-              <div class="endpoint-path">\${ep}</div>
-              <div class="endpoint-status">200 OK</div>
-            </div>
-          \`).join('');
-        }
-
-        // 4. Security Findings
-        const auditFeed = document.getElementById('audit-feed');
-        if (audit && auditFeed) {
-          const findings = audit.findings.filter(f => f.severity !== 'PASS');
-          if (findings.length > 0) {
-            auditFeed.innerHTML = findings.map(f => \`
-              <div class="finding-card \${f.severity}">
-                  <div class="finding-head">
-                    <div class="finding-title">\${f.title}</div>
-                    <div class="finding-tag">\${f.severity}</div>
-                  </div>
-                  <div class="finding-detail">\${f.detail}</div>
-                  <div class="finding-code">REMEDIATION: \${f.remediation}</div>
-              </div>
-            \`).join('');
-          }
-        }
-
-        // 5. Behavioral Intel (V4)
-        const behaviorFeed = document.getElementById('behavior-feed');
-        if (behaviorFeed) {
-          const frictionPoints = [];
-          microSnapshots.forEach(s => {
-            if (s.type === 'semantic_tree' && s.behaviorSummary) {
-               // Find nodes with friction in the snapshot
-               const findNodes = (n) => {
-                 if (n.behaviorSummary && n.behaviorSummary.frictionScore > 0) {
-                   frictionPoints.push({ id: n.id, text: n.text, score: n.behaviorSummary.frictionScore });
-                 }
-                 if (n.children) n.children.forEach(findNodes);
-               };
-               findNodes(s);
-            }
-          });
-          
-          if (frictionPoints.length > 0) {
-            behaviorFeed.innerHTML = frictionPoints.map(f => \`
-              <div class="finding-card warning">
-                <div class="finding-head">
-                  <div class="finding-title">Friction Point: \${f.text || f.id}</div>
-                  <div class="finding-tag">SCORE: \${f.score}</div>
-                </div>
-                <div class="finding-detail">
-                  \${f.abandoned > 0 ? \`<span style="color:var(--red)">Abandonment Detected</span>. \` : ''}
-                  \${f.rage > 0 ? \`<span style="color:var(--red)">Rage Clicks Detected</span>. \` : ''}
-                  Users are experiencing friction here. Agent suggests UI refinement.
-                </div>
-              </div>
-            \`).join('');
-          }
-        // 5. Agentic Security (V5)
-        const agentSecFeed = document.getElementById('agent-security-feed');
-        if (agentSecFeed) {
-          const agentSecEvents = [];
-          
-          // 1. Prompt Injection from Semantic Tree
-          microSnapshots.forEach(s => {
-            if (s.type === 'semantic_tree') {
-               const findInjections = (n) => {
-                 if (n.securityFlags && n.securityFlags.includes('prompt-injection-detected')) {
-                   agentSecEvents.push({ type: 'Prompt Injection', detail: 'Hidden instructions detected and redacted.', severity: 'CRITICAL' });
-                 }
-                 if (n.children) n.children.forEach(findInjections);
-               };
-               findInjections(s);
-            }
-          });
-          
-          // 2. Exfiltration from Live Feed
-          liveFeed.feed.forEach(item => {
-            if (item.type === 'security_firewall') {
-              agentSecEvents.push({ type: 'Exfiltration Blocked', detail: item.detail, severity: 'CRITICAL' });
-            }
-          });
-          
-          if (agentSecEvents.length > 0) {
-            agentSecFeed.innerHTML = agentSecEvents.map(e => \`
-              <div class="finding-card \${e.severity}">
-                <div class="finding-head">
-                  <div class="finding-title">\${e.type}</div>
-                  <div class="finding-tag">\${e.severity}</div>
-                </div>
-                <div class="finding-detail">\${e.detail}</div>
-              </div>
-            \`).join('');
-          }
-        }
-
-        // 6. Metrics & Grade
-        document.getElementById('stat-prevented').textContent = metrics.preventedErrors;
-        document.getElementById('stat-heals').textContent = metrics.selfHealCount;
+        document.getElementById('stat-prevented').textContent = metrics.preventedErrors ?? 0;
+        document.getElementById('stat-heals').textContent = metrics.selfHealCount ?? 0;
         document.getElementById('stat-vulns').textContent = audit ? audit.totals.critical + audit.totals.warning : 0;
-        
+        document.getElementById('active-branch').textContent = liveFeed.activeBranch || 'main';
+        document.getElementById('watch-mode').textContent = liveFeed.watchMode ? 'On' : 'Off';
+        document.getElementById('branch-count').textContent = liveFeed.branches.length;
+
         const gradeEl = document.getElementById('sec-grade');
+        let grade = 'A';
         if (audit) {
-          let grade = 'A';
           if (audit.totals.critical > 0) grade = 'F';
           else if (audit.totals.warning > 3) grade = 'C';
           else if (audit.totals.warning > 0) grade = 'B';
-          gradeEl.textContent = grade;
-          gradeEl.style.color = grade === 'F' ? 'var(--red)' : (grade === 'A' ? 'var(--accent)' : 'var(--yellow)');
+        }
+        gradeEl.textContent = audit ? grade : '-';
+        gradeEl.style.color = grade === 'F' ? 'var(--red)' : (grade === 'A' ? 'var(--green)' : 'var(--amber)');
+
+        const timeline = document.getElementById('timeline');
+        if (timeline) {
+          timeline.innerHTML = microSnapshots.length
+            ? microSnapshots.map((s, i) => {
+              const alert = ['security', 'audit', 'diagnosis'].some(token => String(s.type).includes(token));
+              const title = s.summary || s.intent || s.url || s.elementId || s.action || s.state || 'Session event';
+              return \`
+                <div class="timeline-item \${i === 0 ? 'active' : ''} \${alert ? 'alert' : ''}">
+                  <div class="mono">\${esc(String(s.type || 'event').toUpperCase())}</div>
+                  <div class="item-title">\${esc(title)}</div>
+                  <div class="item-meta">\${new Date(s.timestamp).toLocaleTimeString()}</div>
+                </div>
+              \`;
+            }).join('')
+            : empty('No session events yet.');
         }
 
-        // 6. Console
+        const forensicsFeed = document.getElementById('forensics-feed');
+        const diagnoses = microSnapshots.filter(s => s.type === 'agent_state_diagnosis').slice(0, 4);
+        if (forensicsFeed) {
+          forensicsFeed.innerHTML = diagnoses.length
+            ? diagnoses.map(d => \`
+              <div class="info-card">
+                <div class="card-head">
+                  <div class="card-title">\${esc(d.summary || d.state)}</div>
+                  <div class="tag \${tagClass(d.state)}">\${esc(d.state || 'ready')}</div>
+                </div>
+                <div class="card-body">
+                  Confidence: \${Math.round((d.confidence || 0) * 100)}%. 
+                  Signals: \${Object.entries(d.signals || {}).map(([k, v]) => \`\${k}=\${v}\`).join(', ') || 'none'}.
+                </div>
+              </div>
+            \`).join('')
+            : empty('Run diagnose_agent_state to classify the current workflow state.');
+        }
+
+        const verifiedFeed = document.getElementById('verified-action-feed');
+        const verifiedPlans = microSnapshots.filter(s => s.type === 'verified_action_plan').slice(0, 4);
+        if (verifiedFeed) {
+          verifiedFeed.innerHTML = verifiedPlans.length
+            ? verifiedPlans.map(p => \`
+              <div class="info-card">
+                <div class="card-head">
+                  <div class="card-title">\${esc(p.intent || 'Verified action')}</div>
+                  <div class="tag \${tagClass(p.risk)}">\${esc(p.risk || 'low')}</div>
+                </div>
+                <div class="card-body">
+                  Target: \${esc(p.target || 'none')}. Confidence: \${Math.round((p.confidence || 0) * 100)}%. 
+                  Execution: \${p.executed ? (p.passed ? 'passed' : 'review') : 'planned'}.
+                </div>
+              </div>
+            \`).join('')
+            : empty('Run compile_verified_action to generate preconditions and postconditions.');
+        }
+
+        const specGrid = document.getElementById('spec-grid');
+        if (specGrid) {
+          specGrid.innerHTML = liveFeed.branches.length
+            ? liveFeed.branches.map(b => \`
+              <div class="branch-node \${b === liveFeed.activeBranch ? 'active' : ''}">
+                <div class="branch-label">\${b === liveFeed.activeBranch ? 'Active' : 'Ready'}</div>
+                <div class="branch-id">\${esc(b)}</div>
+              </div>
+            \`).join('')
+            : empty('No browser branches are active.');
+        }
+
+        const netMap = document.getElementById('network-map');
+        const lastTree = microSnapshots.find(s => s.type === 'semantic_tree' && s.networkSummary);
+        if (netMap) {
+          netMap.innerHTML = lastTree?.networkSummary?.endpoints?.length
+            ? lastTree.networkSummary.endpoints.map(ep => \`
+              <div class="endpoint-row">
+                <div class="mono">GET</div>
+                <div class="endpoint-path">\${esc(ep)}</div>
+                <div class="item-meta">mapped</div>
+              </div>
+            \`).join('')
+            : empty('Use the Network lens to map XHR and fetch endpoints.');
+        }
+
+        const agentSecFeed = document.getElementById('agent-security-feed');
+        if (agentSecFeed) {
+          const events = [];
+          liveFeed.feed.forEach(item => {
+            if (item.type === 'security_firewall') events.push({ title: 'Exfiltration blocked', detail: item.detail, severity: 'critical' });
+          });
+          microSnapshots.forEach(s => {
+            if (s.type === 'semantic_tree' && s.securityFlags?.includes?.('prompt-injection-detected')) {
+              events.push({ title: 'Prompt injection redacted', detail: 'Hidden instruction pattern was detected in page content.', severity: 'critical' });
+            }
+          });
+          agentSecFeed.innerHTML = events.length
+            ? events.map(e => \`
+              <div class="info-card">
+                <div class="card-head">
+                  <div class="card-title">\${esc(e.title)}</div>
+                  <div class="tag red">\${esc(e.severity)}</div>
+                </div>
+                <div class="card-body">\${esc(e.detail)}</div>
+              </div>
+            \`).join('')
+            : empty('Firewall active. No prompt-injection or exfiltration events in the current window.');
+        }
+
+        const auditFeed = document.getElementById('audit-feed');
+        if (auditFeed) {
+          const findings = audit ? audit.findings.filter(f => f.severity !== 'PASS').slice(0, 5) : [];
+          auditFeed.innerHTML = findings.length
+            ? findings.map(f => \`
+              <div class="info-card">
+                <div class="card-head">
+                  <div class="card-title">\${esc(f.title)}</div>
+                  <div class="tag \${tagClass(f.severity)}">\${esc(f.severity)}</div>
+                </div>
+                <div class="card-body">\${esc(f.detail)}<br><br>Remediation: \${esc(f.remediation)}</div>
+              </div>
+            \`).join('')
+            : empty('Run run_security_audit to populate launch-readiness findings.');
+        }
+
         const consoleEl = document.getElementById('vision-feed');
         if (consoleEl) {
-          consoleEl.innerHTML = liveFeed.consoleLogs.map(log => \`
+          consoleEl.innerHTML = liveFeed.consoleLogs.length
+            ? liveFeed.consoleLogs.map(log => \`
               <div class="log-line">
-                  <div class="log-type \${log.data.type === 'error' ? 'error' : ''}">[\${log.data.type.toUpperCase()}]</div>
-                  <div class="log-msg">\${log.data.text}</div>
+                <div class="mono">\${esc(log.data.type || 'log')}</div>
+                <div class="log-msg">\${esc(log.data.text || '')}</div>
+                <div class="item-meta">\${new Date(log.timestamp).toLocaleTimeString()}</div>
               </div>
-          \`).join('');
+            \`).join('')
+            : empty('Console telemetry will appear here once pages emit logs.');
         }
     `;
 

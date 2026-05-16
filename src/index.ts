@@ -166,6 +166,42 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "diagnose_agent_state",
+        description: "Agent State Forensics: classify why the current browser workflow is ready, stuck, obstructed, blocked by validation, waiting on auth, or failing due to network/CAPTCHA state.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            goal: { type: "string", description: "Optional current agent goal, used to make the diagnosis more specific." },
+            lastActions: {
+              type: "array",
+              items: { type: "string" },
+              description: "Optional recent action summaries, newest last."
+            }
+          }
+        },
+      },
+      {
+        name: "compile_verified_action",
+        description: "Verified Intent Actions: compile a natural-language browser intent into a target, preconditions, postconditions, risk score, alternatives, and optional execution with verification.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            intent: { type: "string", description: "The browser intent, e.g. 'click the pricing link' or 'fill email field'." },
+            value: { type: "string", description: "Optional value for type/select/press actions." },
+            execute: { type: "boolean", description: "If true, execute only when confidence and preconditions are sufficient." },
+            constraints: {
+              type: "object",
+              properties: {
+                noNavigationOutsideDomain: { type: "boolean", description: "Penalize or reject targets that navigate to a different host." },
+                avoidDestructiveActions: { type: "boolean", description: "Block destructive intents such as delete, pay, buy, transfer, or cancellation." },
+                requireExactText: { type: "boolean", description: "Require candidate labels to include intent terms." }
+              }
+            }
+          },
+          required: ["intent"],
+        },
+      },
+      {
         name: "fork_state",
         description: "Clone the current browser state into a new background branch for shadow testing risky actions.",
         inputSchema: {
@@ -388,6 +424,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       await browser.interact(elementId, action, value, agentId);
       await new Promise(r => setTimeout(r, 1000)); // wait for network idle/renders
       return { content: [{ type: "text", text: `Successfully performed '${action}' on element '${elementId}'.` }] };
+    }
+
+    if (request.params.name === "diagnose_agent_state") {
+      const { goal, lastActions } = (request.params.arguments as any) || {};
+      const diagnosis = await browser.diagnoseAgentState(goal, Array.isArray(lastActions) ? lastActions : []);
+      return { content: [{ type: "text", text: JSON.stringify(diagnosis, null, 2) }] };
+    }
+
+    if (request.params.name === "compile_verified_action") {
+      const { intent, value, constraints, execute } = request.params.arguments as any;
+      const plan = await browser.compileVerifiedAction({ intent, value, constraints, execute: execute === true });
+      return { content: [{ type: "text", text: JSON.stringify(plan, null, 2) }] };
     }
 
     if (request.params.name === "fork_state") {
@@ -630,4 +678,5 @@ async function main() {
 
 main().catch((error) => {
   console.error("Fatal error running server:", error);
+  process.exit(1);
 });

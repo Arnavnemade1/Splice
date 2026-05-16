@@ -1,310 +1,525 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Splice | Command Center V3</title>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --bg: #050505;
-            --surface: #0a0a0a;
-            --surface-bright: #141414;
-            --accent: #00ffaa;
-            --accent-glow: rgba(0, 255, 170, 0.3);
-            --red: #ff3366;
-            --yellow: #ffcc00;
-            --blue: #0088ff;
-            --text: #ffffff;
-            --text-dim: #777777;
-            --border: rgba(255, 255, 255, 0.05);
-            --glass: rgba(15, 15, 15, 0.7);
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Splice Command Center</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090a0c;
+      --panel: #101216;
+      --panel-2: #151922;
+      --panel-3: #1b2029;
+      --line: rgba(255, 255, 255, 0.08);
+      --line-strong: rgba(255, 255, 255, 0.14);
+      --text: #f5f7fb;
+      --muted: #9aa3b2;
+      --quiet: #697386;
+      --green: #41e6a2;
+      --green-bg: rgba(65, 230, 162, 0.11);
+      --red: #ff5577;
+      --red-bg: rgba(255, 85, 119, 0.12);
+      --amber: #f6c863;
+      --amber-bg: rgba(246, 200, 99, 0.12);
+      --blue: #5ab8ff;
+      --blue-bg: rgba(90, 184, 255, 0.12);
+      --radius: 8px;
+    }
 
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            background: var(--bg);
-            color: var(--text);
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
+    * { box-sizing: border-box; }
 
-        .scanlines {
-            position: fixed;
-            top: 0; left: 0; width: 100vw; height: 100vh;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
-            background-size: 100% 4px, 3px 100%;
-            z-index: 9999;
-            pointer-events: none;
-            opacity: 0.15;
-        }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow: hidden;
+    }
 
-        .grid-bg {
-            position: fixed;
-            top: 0; left: 0; width: 100vw; height: 100vh;
-            background-image: 
-                linear-gradient(to right, rgba(0, 255, 170, 0.05) 1px, transparent 1px),
-                linear-gradient(to bottom, rgba(0, 255, 170, 0.05) 1px, transparent 1px);
-            background-size: 40px 40px;
-            z-index: 0;
-            pointer-events: none;
-            transform: perspective(600px) rotateX(60deg) translateY(100px) scale(3);
-            animation: gridMove 10s linear infinite;
-        }
-        
-        @keyframes gridMove {
-            0% { transform: perspective(600px) rotateX(60deg) translateY(100px) scale(3); }
-            100% { transform: perspective(600px) rotateX(60deg) translateY(140px) scale(3); }
-        }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(to right, rgba(255,255,255,0.025) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255,255,255,0.025) 1px, transparent 1px);
+      background-size: 32px 32px;
+      mask-image: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent 75%);
+    }
 
-        .content-wrapper {
-            position: relative;
-            z-index: 10;
-            display: flex;
-            flex-direction: column;
-            height: 100vh;
-            background: radial-gradient(circle at 50% 50%, transparent 0%, #050505 80%);
-        }
+    .shell {
+      position: relative;
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
 
-        header {
-            padding: 20px 40px;
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: var(--glass);
-            backdrop-filter: blur(24px);
-            z-index: 100;
-        }
+    header {
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) auto;
+      gap: 28px;
+      align-items: center;
+      padding: 22px 28px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(9, 10, 12, 0.92);
+      backdrop-filter: blur(18px);
+    }
 
-        .logo { font-weight: 700; font-size: 22px; letter-spacing: -1px; display: flex; align-items: center; gap: 12px; }
-        .logo span { color: var(--accent); text-shadow: 0 0 20px var(--accent-glow); }
-        .logo .v3 { font-size: 10px; background: var(--accent); color: #000; padding: 2px 6px; border-radius: 4px; vertical-align: middle; }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      min-width: 0;
+    }
 
-        .top-stats { display: flex; gap: 40px; align-items: center; }
-        .stat { display: flex; flex-direction: column; align-items: flex-end; }
-        .stat-val { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 600; color: #fff; }
-        .stat-label { font-size: 10px; text-transform: uppercase; color: var(--text-dim); letter-spacing: 1.5px; margin-top: 4px; }
+    .mark {
+      width: 42px;
+      height: 42px;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius);
+      display: grid;
+      place-items: center;
+      background: linear-gradient(145deg, rgba(65,230,162,0.18), rgba(90,184,255,0.08));
+      font-weight: 800;
+      color: var(--green);
+      letter-spacing: 0;
+    }
 
-        .grade-box {
-            background: rgba(255, 255, 255, 0.03);
-            padding: 8px 20px;
-            border-radius: 12px;
-            border: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-        .grade-letter { font-size: 28px; font-weight: 800; color: var(--accent); line-height: 1; }
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
 
-        main {
-            display: grid;
-            grid-template-columns: 350px 1fr 400px;
-            gap: 1px;
-            background: var(--border);
-            flex: 1;
-            overflow: hidden;
-        }
+    .subtitle {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
 
-        .panel { background: var(--bg); display: flex; flex-direction: column; overflow: hidden; }
-        .panel-header {
-            padding: 20px 25px;
-            border-bottom: 1px solid var(--border);
-            font-size: 11px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            color: var(--text-dim);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: rgba(255,255,255,0.01);
-        }
-        .panel-header span { color: var(--accent); font-size: 9px; background: rgba(0, 255, 170, 0.1); padding: 2px 8px; border-radius: 20px; }
+    .top-stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(112px, 1fr));
+      gap: 10px;
+    }
 
-        /* TIMELINE */
-        .timeline { flex: 1; overflow-y: auto; padding: 25px; }
-        .snap-card {
-            border-left: 2px solid var(--border);
-            padding: 0 0 35px 25px;
-            position: relative;
-            transition: 0.3s;
-        }
-        .snap-card:hover { border-left-color: rgba(255,255,255,0.2); }
-        .snap-card::before {
-            content: ''; position: absolute; left: -6px; top: 0; width: 10px; height: 10px;
-            background: var(--bg); border: 2px solid var(--border); border-radius: 50%;
-        }
-        .snap-card.active::before { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 15px var(--accent-glow); }
-        .snap-card.vuln::before { background: var(--red); border-color: var(--red); box-shadow: 0 0 15px rgba(255,51,102,0.5); }
-        
-        .snap-type { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); margin-bottom: 8px; display: inline-block; }
-        .snap-type.vuln { color: var(--red); }
-        .snap-details { font-size: 14px; font-weight: 500; margin-bottom: 6px; color: #eee; line-height: 1.4; }
-        .snap-time { font-size: 11px; color: var(--text-dim); }
+    .metric {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,0.03);
+      padding: 12px 14px;
+      min-width: 0;
+    }
 
-        /* CENTER VIEWPORT */
-        .viewport { flex: 1; padding: 35px; overflow-y: auto; display: flex; flex-direction: column; gap: 40px; }
-        .section-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 20px; color: var(--text-dim); }
-        
-        .branch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 15px; }
-        .branch-node {
-            background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px;
-            text-align: center; transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            position: relative; overflow: hidden;
-        }
-        .branch-node:hover { transform: translateY(-4px); border-color: rgba(255,255,255,0.1); }
-        .branch-node.active { border-color: var(--accent); background: rgba(0, 255, 170, 0.03); }
-        .branch-node.active::after {
-            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            background: linear-gradient(180deg, rgba(0, 255, 170, 0.05) 0%, transparent 100%);
-        }
+    .metric-value {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 20px;
+      font-weight: 600;
+      line-height: 1;
+    }
 
-        /* NETWORK TOPOLOGY */
-        .network-map {
-            background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
-            padding: 25px; min-height: 200px; display: flex; flex-direction: column; gap: 15px;
-        }
-        .endpoint-row {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 12px 16px; background: rgba(255,255,255,0.02); border-radius: 8px;
-            font-family: 'JetBrains Mono', monospace; font-size: 12px;
-        }
-        .endpoint-method { color: var(--accent); font-weight: 700; width: 50px; }
-        .endpoint-path { color: #aaa; flex: 1; }
-        .endpoint-status { color: var(--text-dim); }
+    .metric-label {
+      margin-top: 7px;
+      color: var(--quiet);
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
 
-        /* AUDIT FEED */
-        .audit-grid { display: flex; flex-direction: column; gap: 15px; }
-        .finding-card {
-            background: var(--surface-bright); border: 1px solid var(--border); border-radius: 14px;
-            padding: 20px; display: flex; flex-direction: column; gap: 12px;
-            transition: 0.3s;
-        }
-        .finding-card:hover { border-color: rgba(255,255,255,0.1); transform: scale(1.01); }
-        .finding-card.CRITICAL { border-left: 5px solid var(--red); background: linear-gradient(90deg, rgba(255,51,102,0.05) 0%, transparent 100%); }
-        .finding-card.WARNING { border-left: 5px solid var(--yellow); background: linear-gradient(90deg, rgba(255,204,0,0.05) 0%, transparent 100%); }
-        
-        .finding-head { display: flex; justify-content: space-between; align-items: center; }
-        .finding-tag { font-size: 9px; padding: 4px 10px; border-radius: 6px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; }
-        .CRITICAL .finding-tag { background: rgba(255,51,102,0.1); color: var(--red); }
-        .WARNING .finding-tag { background: rgba(255,204,0,0.1); color: var(--yellow); }
-        
-        .finding-title { font-size: 15px; font-weight: 700; }
-        .finding-detail { font-size: 13px; color: var(--text-dim); line-height: 1.5; }
-        .finding-code {
-            background: #000; padding: 15px; border-radius: 8px; font-family: 'JetBrains Mono', monospace;
-            font-size: 11px; color: var(--accent); border: 1px solid rgba(255,255,255,0.03); overflow-x: auto;
-        }
+    main {
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 340px minmax(420px, 1fr) 390px;
+      border-top: 1px solid rgba(255,255,255,0.02);
+    }
 
-        /* RIGHT PANEL: CONSOLE */
-        .console { flex: 1; overflow-y: auto; padding: 25px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
-        .log-line { margin-bottom: 12px; display: flex; gap: 15px; line-height: 1.4; }
-        .log-type { color: var(--accent); min-width: 80px; opacity: 0.8; }
-        .log-type.error { color: var(--red); }
-        .log-msg { color: #999; word-break: break-all; }
+    .panel {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: rgba(16, 18, 22, 0.96);
+      border-right: 1px solid var(--line);
+    }
 
-        ::-webkit-scrollbar { width: 5px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
-        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+    .panel:last-child { border-right: 0; }
 
-        .pulse { animation: pulse 2s infinite; }
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
-    </style>
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 58px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,0.02);
+    }
+
+    .panel-title {
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+      color: #d8dee8;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 4px 9px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .pill::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--green);
+    }
+
+    .scroll {
+      min-height: 0;
+      overflow: auto;
+      padding: 18px;
+    }
+
+    .timeline-item {
+      position: relative;
+      display: grid;
+      gap: 8px;
+      padding: 0 0 24px 20px;
+      border-left: 1px solid var(--line);
+    }
+
+    .timeline-item::before {
+      content: "";
+      position: absolute;
+      left: -5px;
+      top: 2px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--panel-3);
+      border: 1px solid var(--line-strong);
+    }
+
+    .timeline-item.active::before { background: var(--green); border-color: var(--green); }
+    .timeline-item.alert::before { background: var(--red); border-color: var(--red); }
+
+    .mono {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      color: var(--green);
+    }
+
+    .item-title {
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.35;
+      color: #edf1f7;
+      overflow-wrap: anywhere;
+    }
+
+    .item-meta {
+      color: var(--quiet);
+      font-size: 11px;
+    }
+
+    .workspace {
+      min-height: 0;
+      overflow: auto;
+      padding: 20px;
+      display: grid;
+      gap: 18px;
+      align-content: start;
+    }
+
+    .hero-row {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .status-card,
+    .info-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      padding: 16px;
+      min-width: 0;
+    }
+
+    .status-card strong {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 10px;
+    }
+
+    .status-card span {
+      display: block;
+      font-size: 24px;
+      font-weight: 800;
+      line-height: 1;
+    }
+
+    .status-card.green span { color: var(--green); }
+    .status-card.amber span { color: var(--amber); }
+    .status-card.blue span { color: var(--blue); }
+
+    .section-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+    }
+
+    .grid {
+      display: grid;
+      gap: 10px;
+    }
+
+    .branches { grid-template-columns: repeat(auto-fill, minmax(126px, 1fr)); }
+
+    .branch-node {
+      min-height: 76px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel-2);
+      padding: 13px;
+    }
+
+    .branch-node.active {
+      border-color: rgba(65, 230, 162, 0.55);
+      background: var(--green-bg);
+    }
+
+    .branch-label {
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 8px;
+    }
+
+    .branch-id {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .info-card {
+      display: grid;
+      gap: 10px;
+    }
+
+    .card-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .card-title {
+      font-size: 14px;
+      font-weight: 800;
+      line-height: 1.3;
+    }
+
+    .tag {
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      white-space: nowrap;
+    }
+
+    .tag.green { background: var(--green-bg); color: var(--green); }
+    .tag.red { background: var(--red-bg); color: var(--red); }
+    .tag.amber { background: var(--amber-bg); color: var(--amber); }
+    .tag.blue { background: var(--blue-bg); color: var(--blue); }
+
+    .card-body {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+
+    .endpoint-row,
+    .log-line {
+      display: grid;
+      grid-template-columns: 64px minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,0.025);
+      padding: 10px 12px;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+    }
+
+    .endpoint-path,
+    .log-msg {
+      color: var(--muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .console {
+      min-height: 0;
+      overflow: auto;
+      padding: 18px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .empty {
+      border: 1px dashed var(--line-strong);
+      border-radius: var(--radius);
+      padding: 28px;
+      color: var(--quiet);
+      text-align: center;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); border-radius: 999px; }
+
+    @media (max-width: 1180px) {
+      body { overflow: auto; }
+      .shell { height: auto; min-height: 100vh; }
+      header { grid-template-columns: 1fr; }
+      .top-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      main { grid-template-columns: 1fr; }
+      .panel { min-height: 420px; border-right: 0; border-bottom: 1px solid var(--line); }
+      .hero-row { grid-template-columns: 1fr; }
+    }
+  </style>
 </head>
 <body>
-    <div class="scanlines"></div>
-    <div class="grid-bg"></div>
-    
-    <div class="content-wrapper">
-        <header>
-        <div class="logo"><span>SPLICE</span> COMMAND CENTER <span class="v3">V4.0</span></div>
-        <div class="top-stats">
-            <div class="stat">
-                <div class="stat-val" id="stat-prevented">0</div>
-                <div class="stat-label">Safety Blocks</div>
-            </div>
-            <div class="stat">
-                <div class="stat-val" id="stat-heals">0</div>
-                <div class="stat-label">Self-Heals</div>
-            </div>
-            <div class="stat">
-                <div class="stat-val" id="stat-vulns">0</div>
-                <div class="stat-label">Threats</div>
-            </div>
-            <div class="grade-box">
-                <div class="stat-label">Security Grade</div>
-                <div class="grade-letter" id="sec-grade">-</div>
-            </div>
+  <div class="shell">
+    <header>
+      <div class="brand">
+        <div class="mark">S</div>
+        <div>
+          <h1>Splice Command Center</h1>
+          <div class="subtitle">Agent browser forensics, verified actions, telemetry, and security intelligence.</div>
         </div>
+      </div>
+      <div class="top-stats">
+        <div class="metric">
+          <div class="metric-value" id="stat-prevented">0</div>
+          <div class="metric-label">Safety Blocks</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value" id="stat-heals">0</div>
+          <div class="metric-label">Self-Heals</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value" id="stat-vulns">0</div>
+          <div class="metric-label">Threats</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value" id="sec-grade">-</div>
+          <div class="metric-label">Security Grade</div>
+        </div>
+      </div>
     </header>
 
     <main>
-        <section class="panel">
-            <div class="panel-header">Causal Replay <span class="pulse">Streaming</span></div>
-            <div class="timeline" id="timeline"></div>
-        </section>
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Causal Timeline</div>
+          <div class="pill">Live</div>
+        </div>
+        <div class="scroll" id="timeline"></div>
+      </section>
 
-        <section class="panel" style="border-left: 1px solid var(--border); border-right: 1px solid var(--border);">
-            <div class="panel-header">Context Architecture <span>Intelligence</span></div>
-            <div class="viewport">
-                <div>
-                    <div class="section-title">Active Branches</div>
-                    <div class="branch-grid" id="spec-grid"></div>
-                </div>
-                <div>
-                    <div class="section-title">Network Intelligence</div>
-                    <div class="network-map" id="network-map">
-                        <div style="color: var(--text-dim); text-align: center; padding: 40px; font-size: 13px;">
-                            Switch to 'Network' lens to map topology.
-                        </div>
-                    </div>
-                </div>
-                <div>
-                    <div class="section-title">Behavioral Intelligence</div>
-                    <div class="audit-grid" id="behavior-feed">
-                        <div style="color: var(--text-dim); text-align: center; padding: 40px; font-size: 13px;">
-                            Switch to 'Behavior' lens to track user intent.
-                        </div>
-                    </div>
-                </div>
-                <div>
-                    <div class="section-title">Agentic Security (V5)</div>
-                    <div class="audit-grid" id="agent-security-feed">
-                        <div style="color: var(--text-dim); text-align: center; padding: 40px; font-size: 13px;">
-                            Firewall Active. Scanning for Prompt Injection & Exfiltration.
-                        </div>
-                    </div>
-                </div>
-                <div>
-                    <div class="section-title">Security Insights</div>
-                    <div class="audit-grid" id="audit-feed">
-                        <div style="color: var(--text-dim); text-align: center; padding: 40px; font-size: 13px;">
-                            Run `run_security_audit` to initialize.
-                        </div>
-                    </div>
-                </div>
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Agent Intelligence</div>
+          <div class="pill">Forensics</div>
+        </div>
+        <div class="workspace">
+          <div class="hero-row">
+            <div class="status-card green">
+              <strong>Active Branch</strong>
+              <span id="active-branch">main</span>
             </div>
-        </section>
+            <div class="status-card blue">
+              <strong>Watch Mode</strong>
+              <span id="watch-mode">Off</span>
+            </div>
+            <div class="status-card amber">
+              <strong>Branches</strong>
+              <span id="branch-count">1</span>
+            </div>
+          </div>
 
-        <section class="panel">
-            <div class="panel-header">Neural Monologue <span>Console</span></div>
-            <div class="console" id="vision-feed"></div>
-        </section>
+          <div class="section-label">Browser State Forensics</div>
+          <div class="grid" id="forensics-feed"></div>
+
+          <div class="section-label">Verified Action Plans</div>
+          <div class="grid" id="verified-action-feed"></div>
+
+          <div class="section-label">Active Branches</div>
+          <div class="grid branches" id="spec-grid"></div>
+
+          <div class="section-label">Network Intelligence</div>
+          <div class="grid" id="network-map"></div>
+
+          <div class="section-label">Agentic Security</div>
+          <div class="grid" id="agent-security-feed"></div>
+
+          <div class="section-label">Security Audit</div>
+          <div class="grid" id="audit-feed"></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Console Stream</div>
+          <div class="pill">Telemetry</div>
+        </div>
+        <div class="console" id="vision-feed"></div>
+      </section>
     </main>
+  </div>
 
-    </div>
-
-    <script>
-        // Data injected by BrowserManager.ts
-    </script>
+  <script>
+    // Data injected by BrowserManager.ts
+  </script>
 </body>
 </html>

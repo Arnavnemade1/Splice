@@ -5,6 +5,8 @@ description = "Python MCP Server and SDK for Splice Enterprise"
 authors = [
     {name = "Splice Team"}
 ]
+readme = "../README.md"
+license = "MIT"
 dependencies = [
     "mcp>=1.2.0",
     "httpx>=0.27.0",
@@ -18,3 +20,7 @@ build-backend = "hatchling.build"
 
 [project.scripts]
 splice-mcp = "splice_mcp.server:main"
+
+[project.urls]
+Homepage = "https://github.com/Arnavnemade1/Splice"
+Issues = "https://github.com/Arnavnemade1/Splice/issues"

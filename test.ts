@@ -178,6 +178,31 @@ async function main() {
   });
 
   // ─────────────────────────────────────────────
+  console.log("\n▶ PHASE 5.5: Agent Cognition");
+  // ─────────────────────────────────────────────
+
+  await run("Agent State Forensics", async () => {
+    await browser.navigate("https://example.com");
+    const diagnosis = await browser.diagnoseAgentState("find more information link", ["navigate example.com"]);
+    if (!diagnosis.state || !diagnosis.summary || diagnosis.confidence <= 0) {
+      throw new Error("Diagnosis missing state, summary, or confidence");
+    }
+    pass("Agent State Forensics", `${diagnosis.state} @ ${Math.round(diagnosis.confidence * 100)}%`);
+  });
+
+  await run("Verified Intent Action Compiler", async () => {
+    const plan = await browser.compileVerifiedAction({
+      intent: "click more information",
+      constraints: {
+        avoidDestructiveActions: true
+      }
+    });
+    if (!plan.plan.length || !plan.plan[0].target) throw new Error("No action target compiled");
+    if (!plan.preconditions.length || !plan.postconditions.length) throw new Error("Missing verification contract");
+    pass("Verified Intent Action Compiler", `${plan.plan[0].target} @ ${Math.round(plan.confidence * 100)}%`);
+  });
+
+  // ─────────────────────────────────────────────
   console.log("\n▶ PHASE 6: Security Audit Engine");
   // ─────────────────────────────────────────────
 

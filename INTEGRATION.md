@@ -2,6 +2,8 @@
 
 Splice Enterprise is not a standard NPM library that you import directly into your UI. It is a **Model Context Protocol (MCP) Server**. This means it runs as a standalone sidecar process and securely exposes its web-browsing capabilities to your AI Agents over standard I/O.
 
+The server runs headless by default. Set `SPLICE_AUTO_OPEN_DASHBOARD=1` only when you want Splice to open the local observability dashboard during startup.
+
 Here is how you add Splice to your agent projects, whether it's a generic swarm or your specific `Ace Trading Daemon`.
 
 ---

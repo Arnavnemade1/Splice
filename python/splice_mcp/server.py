@@ -1,10 +1,10 @@
 import asyncio
 import httpx
 import json
-import os
 import subprocess
 import time
-from typing import Optional, Any, Dict
+from pathlib import Path
+from typing import Any, Dict
 
 from mcp.server import Server, NotificationOptions
 from mcp.server.models import InitializationOptions
@@ -66,14 +66,39 @@ async def handle_list_tools() -> list[types.Tool]:
             }
         ),
         types.Tool(
-            name="python_executor",
-            description="Run an arbitrary python script to process data. Used for data science analysis.",
+            name="splice_diagnose_agent_state",
+            description="Classify whether the browser workflow is ready, obstructed, blocked by validation/auth/CAPTCHA, or failing due to network state.",
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "code": {"type": "string", "description": "Python code to run. Must print the final result to stdout."}
+                    "goal": {"type": "string", "description": "Optional current agent goal."},
+                    "lastActions": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional recent action summaries."
+                    }
+                }
+            }
+        ),
+        types.Tool(
+            name="splice_compile_verified_action",
+            description="Compile a browser intent into a verified action plan with preconditions, postconditions, alternatives, and optional execution.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "intent": {"type": "string", "description": "The browser intent to compile."},
+                    "value": {"type": "string", "description": "Optional value for type/select/press actions."},
+                    "execute": {"type": "boolean", "description": "Execute only if confidence and preconditions are sufficient."},
+                    "constraints": {
+                        "type": "object",
+                        "properties": {
+                            "noNavigationOutsideDomain": {"type": "boolean"},
+                            "avoidDestructiveActions": {"type": "boolean"},
+                            "requireExactText": {"type": "boolean"}
+                        }
+                    }
                 },
-                "required": ["code"]
+                "required": ["intent"]
             }
         )
     ]
@@ -82,6 +107,8 @@ async def handle_list_tools() -> list[types.Tool]:
 async def handle_call_tool(
     name: str, arguments: dict | None
 ) -> list[types.TextContent | types.ImageContent | types.EmbeddedResource]:
+    arguments = arguments or {}
+
     if name == "splice_navigate":
         url = arguments.get("url")
         result = await call_bridge("navigate", {"url": url})
@@ -95,37 +122,33 @@ async def handle_call_tool(
         result = await call_bridge("interact", arguments)
         return [types.TextContent(type="text", text=json.dumps(result))]
 
-    elif name == "python_executor":
-        code = arguments.get("code")
-        try:
-            # Execute python code
-            result = subprocess.run(["python3", "-c", code], capture_output=True, text=True, timeout=10)
-            output = result.stdout
-            if result.stderr:
-                output += f"\nErrors:\n{result.stderr}"
-            return [types.TextContent(type="text", text=output)]
-        except Exception as e:
-            return [types.TextContent(type="text", text=f"Python Execution Failed: {str(e)}")]
+    elif name == "splice_diagnose_agent_state":
+        result = await call_bridge("diagnoseAgentState", arguments)
+        return [types.TextContent(type="text", text=json.dumps(result))]
+
+    elif name == "splice_compile_verified_action":
+        result = await call_bridge("compileVerifiedAction", arguments)
+        return [types.TextContent(type="text", text=json.dumps(result))]
             
     raise ValueError(f"Unknown tool: {name}")
 
 def start_ts_bridge():
     global bridge_process
     
-    # Check if compiled dist exists
-    dist_path = os.path.join("..", "..", "dist", "bridge_server.js")
-    src_path = os.path.join("..", "..", "src", "bridge_server.ts")
+    project_root = Path(__file__).resolve().parents[2]
+    dist_path = project_root / "dist" / "bridge_server.js"
+    src_path = project_root / "src" / "bridge_server.ts"
     
     cmd = []
-    if os.path.exists(dist_path):
-        cmd = ["node", dist_path]
-    elif os.path.exists(src_path):
-        cmd = ["npx", "tsx", src_path]
+    if dist_path.exists():
+        cmd = ["node", str(dist_path)]
+    elif src_path.exists():
+        cmd = ["npx", "tsx", str(src_path)]
     else:
         print("Warning: Could not find bridge_server source or dist.")
         return
         
-    bridge_process = subprocess.Popen(cmd)
+    bridge_process = subprocess.Popen(cmd, cwd=project_root)
     time.sleep(2)
     
     try:

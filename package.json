@@ -1,21 +1,50 @@
 {
   "name": "splice",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Secure browser infrastructure and observability for autonomous web agents.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./bridge": {
+      "types": "./dist/bridge_server.d.ts",
+      "import": "./dist/bridge_server.js"
+    }
+  },
+  "files": [
+    "dist",
+    "dashboard",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "tsc",
     "build:test": "tsc -p tsconfig.test.json",
-    "test": "npm run build:test && node dist_test/test.js"
+    "clean": "rm -rf dist dist_test",
+    "test": "npm run build:test && node dist_test/test.js",
+    "prepack": "npm run clean && npm run build"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Arnavnemade1/Splice.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "ai-agents",
+    "browser-automation",
+    "mcp",
+    "observability",
+    "playwright",
+    "security"
+  ],
+  "author": "Splice Contributors",
+  "license": "MIT",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "bugs": {
     "url": "https://github.com/Arnavnemade1/Splice/issues"
   },

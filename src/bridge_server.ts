@@ -32,6 +32,17 @@ const server = http.createServer(async (req, res) => {
             await manager.interact(args.elementId, args.interaction, args.value, args.agentId);
             result = { status: 'interacted' };
             break;
+          case 'diagnoseAgentState':
+            result = await manager.diagnoseAgentState(args.goal, Array.isArray(args.lastActions) ? args.lastActions : []);
+            break;
+          case 'compileVerifiedAction':
+            result = await manager.compileVerifiedAction({
+              intent: args.intent,
+              value: args.value,
+              constraints: args.constraints,
+              execute: args.execute === true
+            });
+            break;
           case 'runSecurityAudit':
             result = await manager.runSecurityAudit(args.targetUrl, args.options);
             break;
