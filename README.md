@@ -92,9 +92,18 @@ npm run build
 ## Quick Start
 
 ### 1. Start the MCP Server
-Integrate Splice into your agent framework (Claude, Cursor, etc.) via the Model Context Protocol.
+Splice operates as a Model Context Protocol (MCP) server. You can run the native Node.js version, or our **new Python MCP Server** (built for LangChain, AutoGPT, and CrewAI compatibility).
+
+**Option A: Node.js (High Performance Core)**
 ```bash
 node dist/index.js
+```
+
+**Option B: Python SDK (AI Agent Ecosystem)**
+```bash
+cd python
+pip install -e .
+python mcp_server.py
 ```
 
 ### 2. Launch Interactive Demo
