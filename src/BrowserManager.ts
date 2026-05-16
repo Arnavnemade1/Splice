@@ -10,8 +10,9 @@ import { TelemetryInterceptor } from './TelemetryInterceptor.js';
 import { SemanticExtractor } from './SemanticExtractor.js';
 import { CryptoManager } from './CryptoManager.js';
 import { SecurityAuditor } from './SecurityAuditor.js';
+import { AgentCoordinator } from './AgentCoordinator.js';
 import type { AuditOptions } from './SecurityAuditor.js';
-import type { AgentStateDiagnosis, SemanticNode, SessionMetrics, VerifiedActionPlan } from './types.js';
+import type { AgentStateDiagnosis, LedgerEntry, SemanticNode, SessionMetrics, VerifiedActionPlan } from './types.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -29,6 +30,9 @@ export class BrowserManager {
   private telemetry: Map<string, TelemetryInterceptor> = new Map();
 
   public activeBranch: string = 'main';
+
+  /** Multi-agent coordination engine — exposed for MCP tool layer. */
+  public readonly coordinator: AgentCoordinator = new AgentCoordinator();
 
   public metrics: SessionMetrics = {
     tokensSavedEstimate: 0,
@@ -268,6 +272,7 @@ export class BrowserManager {
         // Settle delay to avoid context destruction issues on immediate subsequent calls
         await new Promise(r => setTimeout(r, 200));
       } catch { /* Already loaded */ }
+      this.coordinator.updateBranchStatus(this.activeBranch, url);
       this.pushLiveFeed('navigate', `Cache hit → ${url}`);
       return;
     }
@@ -280,6 +285,9 @@ export class BrowserManager {
     
     // Auto-clean page
     await this.dismissCommonBanners();
+
+    // Sync branch URL into the Canonical Context
+    this.coordinator.updateBranchStatus(this.activeBranch, url);
     
     this.saveMicroSnapshot('navigate', { url });
   }
@@ -768,6 +776,9 @@ export class BrowserManager {
   // INTERACTIONS
   // -------------------------
   async interact(elementId: string, action: string, value?: string, agentId?: string) {
+    // ── Ownership check — keeps errors local, eliminates conflicting writes ──
+    this.coordinator.verifyOwnership(this.activeBranch, agentId);
+
     const page = this.getActivePage();
 
     // CAPTCHA detection & Autonomous Triage
@@ -974,7 +985,7 @@ export class BrowserManager {
   // -------------------------
   // BRANCH MANAGEMENT
   // -------------------------
-  async forkState(): Promise<string> {
+  async forkState(agentId?: string): Promise<string> {
     const context = this.contexts.get(this.activeBranch);
     if (!context) throw new Error('Active branch not found');
 
@@ -986,7 +997,13 @@ export class BrowserManager {
     const newPage = this.pages.get(branchId)!;
     await newPage.goto(currentUrl, { waitUntil: 'networkidle' });
 
-    this.pushLiveFeed('fork_state', `Created branch: ${branchId}`);
+    // Register branch ownership immediately so it's never an orphan
+    if (agentId) {
+      this.coordinator.acquireOwnership(branchId, agentId);
+    }
+    this.coordinator.updateBranchStatus(branchId, currentUrl);
+
+    this.pushLiveFeed('fork_state', `Created branch: ${branchId}${agentId ? ` (owner: ${agentId})` : ''}`);
     return branchId;
   }
 
@@ -994,6 +1011,33 @@ export class BrowserManager {
     if (!this.contexts.has(branchId)) throw new Error(`Branch ${branchId} does not exist`);
     this.activeBranch = branchId;
     this.pushLiveFeed('commit_branch', `Active: ${branchId}`);
+  }
+
+  /**
+   * Atomically transfer write ownership of a branch from one agent to another.
+   * The from-agent must currently own the branch. Records the transfer in the ledger.
+   */
+  handoffBranch(branchId: string, fromAgentId: string, toAgentId: string): void {
+    if (!this.contexts.has(branchId)) throw new Error(`Branch ${branchId} does not exist`);
+    this.coordinator.handoffBranch(branchId, fromAgentId, toAgentId);
+    this.pushLiveFeed('handoff_branch', `${branchId}: ${fromAgentId} → ${toAgentId}`);
+  }
+
+  /**
+   * Promote a locally-produced finding to the Immutable Evidence Ledger.
+   * Requires the agent to own the source branch. Triggers conflict detection.
+   */
+  promoteFinding(
+    key: string,
+    value: unknown,
+    confidence: number,
+    branchId: string,
+    agentId: string
+  ): LedgerEntry {
+    const ccs = this.coordinator.buildCanonicalContext();
+    const entry = this.coordinator.promoteFinding(key, value, confidence, branchId, agentId, ccs.snapshotId);
+    this.pushLiveFeed('promote_finding', `key=${key}, agent=${agentId}, conf=${confidence}`);
+    return entry;
   }
 
   // -------------------------
@@ -1087,6 +1131,8 @@ export class BrowserManager {
         const metrics = ${JSON.stringify(this.metrics)};
         const liveFeed = ${JSON.stringify(this.getLiveFeed())};
         const audit = ${JSON.stringify(latestAudit)};
+        const ccs = ${JSON.stringify(this.coordinator.buildCanonicalContext())};
+        const taxMetrics = ${JSON.stringify(this.coordinator.getCoordinationTaxMetrics())};
 
         const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({
           '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
@@ -1249,6 +1295,86 @@ export class BrowserManager {
               </div>
             \`).join('')
             : empty('Console telemetry will appear here once pages emit logs.');
+        }
+
+        // \u2500\u2500\u2500 Coordination Health Panel \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        const statAgents = document.getElementById('stat-agents');
+        if (statAgents) statAgents.textContent = ccs.registeredAgents.length;
+
+        // Pill state
+        const coordPill = document.getElementById('coord-state-pill');
+        if (coordPill) {
+          const stateLabel = { healthy: 'Healthy', degraded: 'Degraded', quorum_blocked: 'Quorum Blocked' }[ccs.systemState] || ccs.systemState;
+          coordPill.textContent = stateLabel;
+          coordPill.style.color = ccs.systemState === 'healthy' ? 'var(--green)' : ccs.systemState === 'quorum_blocked' ? 'var(--red)' : 'var(--amber)';
+        }
+
+        // Tax Meter — highlight non-zero values in amber
+        const updateTax = (id, val) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.textContent = val;
+          el.className = 'tax-value ' + (val > 0 ? 'nonzero' : 'zero');
+        };
+        updateTax('tax-conflicts', taxMetrics.conflictsDetected);
+        updateTax('tax-resolved', taxMetrics.conflictsResolved);
+        updateTax('tax-blocked', taxMetrics.blockedActions);
+        updateTax('tax-violations', taxMetrics.ownershipViolationAttempts);
+        updateTax('tax-forced', taxMetrics.forcedReleases);
+
+        // Agent Registry
+        const agentRegistry = document.getElementById('agent-registry');
+        if (agentRegistry) {
+          agentRegistry.innerHTML = ccs.registeredAgents.length
+            ? ccs.registeredAgents.map(a => \`
+              <div class="branch-node" style="display:flex;align-items:center;gap:10px;min-height:auto;padding:10px 13px;">
+                <span class="agent-badge \${esc(a.role)}">\${esc(a.agentId)}</span>
+                <span class="tag purple">\${esc(a.role)}</span>
+              </div>
+            \`).join('')
+            : empty('No agents registered. Call register_agent to begin multi-agent collaboration.');
+        }
+
+        // Evidence Ledger
+        const ledgerFeed = document.getElementById('ledger-feed');
+        const conflictedKeys = new Set(${JSON.stringify(this.coordinator.getConflictedKeys())});
+        if (ledgerFeed) {
+          const ledgerEntries = ccs.promotedFindings.slice(0, 6);
+          ledgerFeed.innerHTML = ledgerEntries.length
+            ? ledgerEntries.map(e => {
+                const conf = Math.round(e.confidence * 100);
+                const fillClass = conf < 50 ? 'verylow' : conf < 70 ? 'low' : '';
+                const isConflict = conflictedKeys.has ? conflictedKeys.has(e.key) : false;
+                return \`
+                  <div class="ledger-entry \${isConflict ? 'conflict' : ''}">
+                    <div class="ledger-key">\${esc(e.key)}</div>
+                    <div class="ledger-meta">
+                      <span>agent: \${esc(e.agentId)}</span>
+                      <span>conf: \${conf}%</span>
+                      <span>branch: \${esc(e.branchId)}</span>
+                    </div>
+                    <div class="conf-bar"><div class="conf-fill \${fillClass}" style="width:\${conf}%"></div></div>
+                    \${isConflict ? '<div style="font-size:11px;color:var(--amber);margin-top:4px;">⚠ Conflict — call resolve_conflict</div>' : ''}
+                  </div>
+                \`;
+              }).join('')
+            : empty('No promoted findings yet. Agents can call promote_finding to share evidence.');
+        }
+
+        // Quorum Status
+        const quorumFeed = document.getElementById('quorum-feed');
+        if (quorumFeed) {
+          quorumFeed.innerHTML = ccs.blockedKeys.length
+            ? ccs.blockedKeys.map(k => \`
+              <div class="info-card">
+                <div class="card-head">
+                  <div class="card-title" style="font-family:var(--mono,'JetBrains Mono'),monospace;font-size:13px">\${esc(k)}</div>
+                  <div class="tag red">Blocked</div>
+                </div>
+                <div class="card-body">Conflicting entries detected. Call <code>resolve_conflict</code> with this key to unblock dependent actions.</div>
+              </div>
+            \`).join('')
+            : \`<div class="empty" style="color:var(--green);border-color:rgba(65,230,162,0.2)">✓ All keys in consensus. No quorum failures.</div>\`;
         }
     `;
 

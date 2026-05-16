@@ -111,3 +111,70 @@ export interface VerifiedActionPlan {
     evidence: string[];
   };
 }
+
+// ─── Multi-Agent Collaboration Types ───────────────────────────────────────
+
+export type AgentRole = 'explorer' | 'verifier' | 'executor' | 'auditor';
+
+export interface AgentRegistration {
+  agentId: string;
+  role: AgentRole;
+  registeredAt: number;
+  lastActiveAt: number;
+}
+
+export interface BranchStatus {
+  branchId: string;
+  ownerAgentId: string | null;
+  currentUrl: string;
+  lastActionAt: number;
+}
+
+/** A single entry in the Immutable Evidence Ledger. Append-only. */
+export interface LedgerEntry {
+  /** sha256(previousId + key + JSON.stringify(value) + agentId) — chains entries */
+  id: string;
+  /** Semantic topic key, e.g. 'auth.status', 'checkout.form.valid' */
+  key: string;
+  value: unknown;
+  /** 0–1 confidence score required from the writing agent */
+  confidence: number;
+  agentId: string;
+  branchId: string;
+  /** The CCS snapshotId the agent was reading when it produced this finding */
+  causalSnapshot: string;
+  timestamp: number;
+  /** Set when a higher-confidence entry on the same key supersedes this one */
+  supersededBy?: string;
+}
+
+/**
+ * Canonical Context Snapshot — the single read-only object that replaces
+ * all agent-to-agent messaging. Built lazily, never pushed.
+ */
+export interface CanonicalContext {
+  /** Monotonically increasing integer ID */
+  snapshotId: string;
+  generatedAt: number;
+  activeBranches: BranchStatus[];
+  /** Only entries with confidence >= QUORUM_CONFIDENCE_THRESHOLD and not superseded */
+  promotedFindings: LedgerEntry[];
+  systemState: 'healthy' | 'degraded' | 'quorum_blocked';
+  /** Keys whose conflicting ledger entries are blocking related actions */
+  blockedKeys: string[];
+  /** Human-readable action descriptions that were rejected due to quorum failure */
+  blockedActions: string[];
+  registeredAgents: AgentRegistration[];
+}
+
+/**
+ * Measures the overhead introduced by multi-agent coordination.
+ * If these counters are non-zero, the system is paying a coordination tax.
+ */
+export interface CoordinationTaxMetrics {
+  conflictsDetected: number;
+  conflictsResolved: number;
+  blockedActions: number;
+  ownershipViolationAttempts: number;
+  forcedReleases: number;
+}

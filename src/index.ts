@@ -206,7 +206,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         description: "Clone the current browser state into a new background branch for shadow testing risky actions.",
         inputSchema: {
           type: "object",
-          properties: {},
+          properties: {
+            agentId: { type: "string", description: "Optional agent ID that will own the new branch. Ownership is recorded immediately." }
+          },
         },
       },
       {
@@ -400,6 +402,80 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             directory: { type: "string", description: "The directory to scan. Defaults to process.cwd()." }
           }
         }
+      },
+      // ─── Multi-Agent Collaboration Tools ──────────────────────────────────────
+      {
+        name: "register_agent",
+        description: "Multi-Agent: Register this agent with Splice and declare its role. Enables role-appropriate constraints and branch ownership tracking. Roles: explorer, verifier, executor, auditor.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            agentId: { type: "string", description: "Stable identifier for this agent instance (e.g. 'explorer-1')." },
+            role: { type: "string", enum: ["explorer", "verifier", "executor", "auditor"], description: "The agent's functional role." }
+          },
+          required: ["agentId", "role"]
+        }
+      },
+      {
+        name: "get_canonical_context",
+        description: "Multi-Agent: Pull the Canonical Context Snapshot (CCS) — the single shared source of truth that replaces all agent-to-agent messaging. Returns active branches, promoted findings, quorum state, and registered agents.",
+        inputSchema: { type: "object", properties: {} }
+      },
+      {
+        name: "acquire_branch_ownership",
+        description: "Multi-Agent: Claim exclusive write access to a browser branch. Required before calling interact, promote_finding, or handoff_branch on that branch. Fails if another agent already holds it.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            branchId: { type: "string", description: "The branch to acquire ownership of." },
+            agentId: { type: "string", description: "The acquiring agent's ID." }
+          },
+          required: ["branchId", "agentId"]
+        }
+      },
+      {
+        name: "promote_finding",
+        description: "Multi-Agent: Promote a locally-produced finding to the Immutable Evidence Ledger so other agents can read it via get_canonical_context. Requires a confidence score (0–1). Conflicting findings on the same key are flagged for quorum resolution rather than silently overwritten.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            key: { type: "string", description: "Semantic topic key, e.g. 'auth.status' or 'checkout.form.valid'." },
+            value: { description: "The finding value (any JSON-serializable type)." },
+            confidence: { type: "number", description: "0–1. How confident the agent is in this finding. Entries below 0.7 are excluded from the CCS until resolved." },
+            branchId: { type: "string", description: "The branch this finding was produced from. Agent must own this branch." },
+            agentId: { type: "string", description: "The agent promoting the finding." }
+          },
+          required: ["key", "value", "confidence", "branchId", "agentId"]
+        }
+      },
+      {
+        name: "resolve_conflict",
+        description: "Multi-Agent: Resolve a quorum conflict on a ledger key by selecting the highest-confidence entry. Marks losing entries as superseded and unblocks actions that were waiting on consensus.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            key: { type: "string", description: "The conflicted ledger key to resolve." }
+          },
+          required: ["key"]
+        }
+      },
+      {
+        name: "handoff_branch",
+        description: "Multi-Agent: Atomically transfer write ownership of a browser branch from one agent to another. The source agent must currently own the branch. The transfer is recorded in the ledger for auditability.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            branchId: { type: "string", description: "The branch to transfer." },
+            fromAgentId: { type: "string", description: "The agent releasing ownership." },
+            toAgentId: { type: "string", description: "The agent receiving ownership." }
+          },
+          required: ["branchId", "fromAgentId", "toAgentId"]
+        }
+      },
+      {
+        name: "get_coordination_health",
+        description: "Multi-Agent: Returns CoordinationTaxMetrics — a live measure of overhead introduced by multi-agent collaboration. Non-zero values in conflictsDetected, blockedActions, or ownershipViolationAttempts indicate the system is paying a coordination tax.",
+        inputSchema: { type: "object", properties: {} }
       }
     ],
   };
@@ -439,8 +515,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (request.params.name === "fork_state") {
-      const branchId = await browser.forkState();
-      return { content: [{ type: "text", text: `Created new branch: ${branchId}. Switch using commit_branch.` }] };
+      const { agentId } = (request.params.arguments as any) || {};
+      const branchId = await browser.forkState(agentId);
+      return { content: [{ type: "text", text: `Created new branch: ${branchId}${agentId ? ` (owned by ${agentId})` : ''}. Switch using commit_branch.` }] };
     }
 
     if (request.params.name === "speculative_fork") {
@@ -652,6 +729,100 @@ ${recommendations || "- No major friction points detected. The current UI appear
         : `✅ SCAN PASSED: No exposed API keys or secrets found in ${directory}.`;
       
       return { content: [{ type: "text", text }] };
+    }
+
+    // ─── Multi-Agent Collaboration Handlers ─────────────────────────────────
+
+    if (request.params.name === "register_agent") {
+      const { agentId, role } = request.params.arguments as { agentId: string; role: any };
+      const reg = browser.coordinator.registerAgent(agentId, role);
+      return { content: [{ type: "text", text: `Agent registered:\n${JSON.stringify(reg, null, 2)}` }] };
+    }
+
+    if (request.params.name === "get_canonical_context") {
+      const ccs = browser.coordinator.buildCanonicalContext();
+      return { content: [{ type: "text", text: JSON.stringify(ccs, null, 2) }] };
+    }
+
+    if (request.params.name === "acquire_branch_ownership") {
+      const { branchId, agentId } = request.params.arguments as { branchId: string; agentId: string };
+      const acquired = browser.coordinator.acquireOwnership(branchId, agentId);
+      if (!acquired) {
+        const owner = browser.coordinator.getOwner(branchId);
+        return {
+          content: [{ type: "text", text: `Ownership rejected: branch "${branchId}" is currently owned by "${owner}". Call handoff_branch first, or wait for the owner to release it.` }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: `Agent "${agentId}" now owns branch "${branchId}". You may now call interact and promote_finding on this branch.` }] };
+    }
+
+    if (request.params.name === "promote_finding") {
+      const { key, value, confidence, branchId, agentId } = request.params.arguments as any;
+      const entry = browser.promoteFinding(key, value, confidence, branchId, agentId);
+      const conflicted = browser.coordinator.getConflictedKeys();
+      const isConflicted = conflicted.includes(key);
+      return {
+        content: [{
+          type: "text",
+          text: [
+            `Finding promoted to ledger (id=${entry.id}).`,
+            isConflicted
+              ? `⚠️  CONFLICT DETECTED on key "${key}": another agent has posted a contradictory finding. Call resolve_conflict to unblock related actions.`
+              : `✅ No conflicts on key "${key}". Finding is visible in the Canonical Context.`
+          ].join('\n')
+        }]
+      };
+    }
+
+    if (request.params.name === "resolve_conflict") {
+      const { key } = request.params.arguments as { key: string };
+      const winner = browser.coordinator.resolveConflict(key);
+      if (!winner) {
+        return { content: [{ type: "text", text: `No active conflict found for key "${key}".` }] };
+      }
+      return {
+        content: [{
+          type: "text",
+          text: [
+            `Conflict resolved for key "${key}".`,
+            `Winner: agent "${winner.agentId}" (confidence=${winner.confidence}, id=${winner.id}).`,
+            `Any actions that were blocked by this conflict are now unblocked.`
+          ].join('\n')
+        }]
+      };
+    }
+
+    if (request.params.name === "handoff_branch") {
+      const { branchId, fromAgentId, toAgentId } = request.params.arguments as any;
+      browser.handoffBranch(branchId, fromAgentId, toAgentId);
+      return { content: [{ type: "text", text: `Branch "${branchId}" transferred from "${fromAgentId}" to "${toAgentId}". Transfer recorded in the Evidence Ledger.` }] };
+    }
+
+    if (request.params.name === "get_coordination_health") {
+      const metrics = browser.coordinator.getCoordinationTaxMetrics();
+      const ccs = browser.coordinator.buildCanonicalContext();
+      const report = [
+        `=== COORDINATION HEALTH REPORT ===`,
+        `System State: ${ccs.systemState.toUpperCase()}`,
+        ``,
+        `COORDINATION TAX METRICS (non-zero = overhead introduced by multi-agent setup):`,
+        `  Conflicts Detected:           ${metrics.conflictsDetected}`,
+        `  Conflicts Resolved:           ${metrics.conflictsResolved}`,
+        `  Actions Blocked by Quorum:    ${metrics.blockedActions}`,
+        `  Ownership Violation Attempts: ${metrics.ownershipViolationAttempts}`,
+        `  Forced Branch Releases:       ${metrics.forcedReleases}`,
+        ``,
+        `CONFLICTED KEYS (require resolve_conflict):`,
+        ccs.blockedKeys.length > 0 ? ccs.blockedKeys.map(k => `  - ${k}`).join('\n') : '  None',
+        ``,
+        `REGISTERED AGENTS: ${ccs.registeredAgents.length}`,
+        ...ccs.registeredAgents.map(a => `  - ${a.agentId} [${a.role}]`),
+        ``,
+        `ACTIVE BRANCHES: ${ccs.activeBranches.length}`,
+        ...ccs.activeBranches.map(b => `  - ${b.branchId} → owner: ${b.ownerAgentId ?? 'none'} (${b.currentUrl})`),
+      ].join('\n');
+      return { content: [{ type: "text", text: report }] };
     }
 
     throw new Error(`Tool not found: ${request.params.name}`);

@@ -24,6 +24,8 @@
       --amber-bg: rgba(246, 200, 99, 0.12);
       --blue: #5ab8ff;
       --blue-bg: rgba(90, 184, 255, 0.12);
+      --purple: #a78bfa;
+      --purple-bg: rgba(167, 139, 250, 0.13);
       --radius: 8px;
     }
 
@@ -105,7 +107,7 @@
 
     .top-stats {
       display: grid;
-      grid-template-columns: repeat(4, minmax(112px, 1fr));
+      grid-template-columns: repeat(5, minmax(100px, 1fr));
       gap: 10px;
     }
 
@@ -136,7 +138,7 @@
     main {
       min-height: 0;
       display: grid;
-      grid-template-columns: 340px minmax(420px, 1fr) 390px;
+      grid-template-columns: 300px minmax(380px, 1fr) 340px 300px;
       border-top: 1px solid rgba(255,255,255,0.02);
     }
 
@@ -364,6 +366,102 @@
     .tag.red { background: var(--red-bg); color: var(--red); }
     .tag.amber { background: var(--amber-bg); color: var(--amber); }
     .tag.blue { background: var(--blue-bg); color: var(--blue); }
+    .tag.purple { background: var(--purple-bg); color: var(--purple); }
+
+    .status-card.purple span { color: var(--purple); }
+
+    /* Coordination Tax Meter */
+    .tax-meter {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel-2);
+      padding: 14px 16px;
+      display: grid;
+      gap: 8px;
+    }
+    .tax-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 12px;
+      font-size: 12px;
+    }
+    .tax-label { color: var(--muted); }
+    .tax-value {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 12px;
+      font-weight: 700;
+      min-width: 24px;
+      text-align: right;
+    }
+    .tax-value.nonzero { color: var(--amber); }
+    .tax-value.zero { color: var(--quiet); }
+
+    /* Ledger entry */
+    .ledger-entry {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      padding: 12px 14px;
+      display: grid;
+      gap: 6px;
+    }
+    .ledger-entry.conflict { border-color: rgba(246, 200, 99, 0.4); background: var(--amber-bg); }
+    .ledger-entry.superseded { opacity: 0.45; }
+    .ledger-key {
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      color: var(--blue);
+      font-weight: 600;
+    }
+    .ledger-meta {
+      font-size: 11px;
+      color: var(--quiet);
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .conf-bar {
+      height: 3px;
+      border-radius: 999px;
+      background: var(--line);
+      overflow: hidden;
+      margin-top: 4px;
+    }
+    .conf-fill {
+      height: 100%;
+      border-radius: 999px;
+      background: var(--green);
+      transition: width 0.4s ease;
+    }
+    .conf-fill.low { background: var(--amber); }
+    .conf-fill.verylow { background: var(--red); }
+
+    /* Agent badge */
+    .agent-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: var(--purple-bg);
+      border: 1px solid rgba(167, 139, 250, 0.25);
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--purple);
+      white-space: nowrap;
+    }
+    .agent-badge::before {
+      content: "";
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--purple);
+    }
+    .agent-badge.explorer::before { background: var(--blue); }
+    .agent-badge.verifier::before { background: var(--green); }
+    .agent-badge.executor::before { background: var(--amber); }
+    .agent-badge.auditor::before { background: var(--red); }
 
     .card-body {
       color: var(--muted);
@@ -421,7 +519,7 @@
       body { overflow: auto; }
       .shell { height: auto; min-height: 100vh; }
       header { grid-template-columns: 1fr; }
-      .top-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .top-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       main { grid-template-columns: 1fr; }
       .panel { min-height: 420px; border-right: 0; border-bottom: 1px solid var(--line); }
       .hero-row { grid-template-columns: 1fr; }
@@ -454,6 +552,10 @@
         <div class="metric">
           <div class="metric-value" id="sec-grade">-</div>
           <div class="metric-label">Security Grade</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value" id="stat-agents">0</div>
+          <div class="metric-label">Agents</div>
         </div>
       </div>
     </header>
@@ -514,6 +616,38 @@
           <div class="pill">Telemetry</div>
         </div>
         <div class="console" id="vision-feed"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <div class="panel-title">Coordination Health</div>
+          <div class="pill" id="coord-state-pill">Healthy</div>
+        </div>
+        <div class="workspace">
+          <div class="section-label">Coordination Tax Meter
+            <span style="color:var(--quiet);font-weight:400;font-size:10px">non-zero = overhead</span>
+          </div>
+          <div class="tax-meter" id="tax-meter">
+            <div class="tax-row"><span class="tax-label">Conflicts Detected</span><span class="tax-value zero" id="tax-conflicts">0</span></div>
+            <div class="tax-row"><span class="tax-label">Conflicts Resolved</span><span class="tax-value zero" id="tax-resolved">0</span></div>
+            <div class="tax-row"><span class="tax-label">Actions Blocked</span><span class="tax-value zero" id="tax-blocked">0</span></div>
+            <div class="tax-row"><span class="tax-label">Ownership Violations</span><span class="tax-value zero" id="tax-violations">0</span></div>
+            <div class="tax-row"><span class="tax-label">Forced Releases</span><span class="tax-value zero" id="tax-forced">0</span></div>
+          </div>
+
+          <div class="section-label">Registered Agents</div>
+          <div class="grid" id="agent-registry"></div>
+
+          <div class="section-label">Evidence Ledger
+            <span style="color:var(--quiet);font-weight:400;font-size:10px">promoted findings</span>
+          </div>
+          <div class="grid" id="ledger-feed"></div>
+
+          <div class="section-label">Quorum Status
+            <span style="color:var(--quiet);font-weight:400;font-size:10px">conflicted keys</span>
+          </div>
+          <div class="grid" id="quorum-feed"></div>
+        </div>
       </section>
     </main>
   </div>
