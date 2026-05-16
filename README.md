@@ -14,36 +14,36 @@
 
 Splice is an industry-standard browser infrastructure and observability platform purpose-built for AI Agents (Claude Code, Cursor, AutoGPT). It acts as a high-fidelity, secure filter between the raw web and your agent's context window.
 
-[**Mission**](#-the-mission) • [**Documentation**](#quick-start) • [**Architecture**](#architecture) • [**Security**](#security-model)
+[**Mission**](#the-mission) • [**Documentation**](#quick-start) • [**Architecture**](#architecture) • [**Security**](#security-model)
 
 </div>
 
 ---
 
-## 🎯 The Mission
+## The Mission
 
 **Make the web safe and readable for AI.**
 
-Today's internet is a mess of ads, popups, and complex code designed for humans. AI agents struggle to navigate this "noise" and are vulnerable to hidden security threats. 
+Today's internet is composed of complex code designed specifically for human interaction. AI agents often struggle to navigate this noise and are vulnerable to hidden security threats. 
 
-Splice acts as a **smart translator**: it cleans up the mess, blocks the threats, and hands the agent a crystal-clear map of exactly what it needs to see. We believe that for AI to truly be autonomous, it needs a browser built for machines, not people.
+Splice acts as a translation layer: it redacts threats, prunes unnecessary DOM noise, and provides agents with a structured, high-fidelity map of the environment. For AI to achieve true autonomy, it requires a browser environment designed for machines.
 
 ---
 
-## ✦ Overview
+## Overview
 
-While traditional browser automation tools are built for deterministic human testing, Splice is architected to solve the unique challenges of non-deterministic, agentic web interaction. 
+While traditional browser automation tools are built for deterministic testing, Splice is architected to solve the unique challenges of non-deterministic, agentic web interaction. 
 
-We solve three core problems:
+The platform addresses three core requirements:
 1. **Security:** Blocking prompt injections and data theft hidden in websites.
-2. **Efficiency:** Turning giant web pages into tiny, readable data chunks.
-3. **Visibility:** Letting humans see exactly what their agents are doing.
+2. **Efficiency:** Converting large web pages into token-efficient data structures.
+3. **Visibility:** Providing real-time telemetry of agent actions.
 
 ---
 
-## ✦ Data Transformation Flow
+## Data Transformation Flow
 
-How Splice turns a chaotic website into a structured agent context:
+How Splice transforms an unstructured website into structured agent context:
 
 ```mermaid
 graph LR
@@ -69,7 +69,7 @@ graph LR
 
 ---
 
-## ✦ Core Capabilities
+## Core Capabilities
 
 ### Agentic Security Firewall (V5)
 * **Prompt Injection Redaction:** Real-time detection and sanitization of malicious instructions hidden in DOM nodes.
@@ -78,7 +78,7 @@ graph LR
 
 ### Semantic Extraction Engine
 * **Token Optimization:** Compresses complex DOM structures into high-density "Semantic Trees," reducing token consumption by up to 85%.
-* **Self-Healing Logic:** Heuristic-based element re-identification to prevent interaction failures on dynamic SPAs.
+* **Self-Healing Logic:** Heuristic-based element re-identification to prevent interaction failures on dynamic applications.
 
 ### Sentinel Behavioral Telemetry
 * **Full-Spectrum Tracking:** Captures rage clicks, scroll depths, element visibility durations, and form abandonment.
@@ -86,9 +86,9 @@ graph LR
 
 ---
 
-## ✦ Architecture
+## Architecture
 
-Splice utilizes a multi-layered proxy-less architecture. We use a **Hybrid Bridge** model, allowing high-performance DOM manipulation in TypeScript while exposing a native Python SDK for the AI ecosystem.
+Splice utilizes a multi-layered proxy-less architecture. The system uses a Hybrid Bridge model, allowing high-performance DOM manipulation in TypeScript while exposing a native Python SDK for the AI ecosystem.
 
 ```mermaid
 sequenceDiagram
@@ -110,9 +110,9 @@ sequenceDiagram
 
 ---
 
-## 🛠️ Installation & Quick Start
+## Installation & Quick Start
 
-Splice is designed to operate seamlessly within your existing Agent Framework via the **Model Context Protocol (MCP)**.
+Splice is designed to operate within your existing Agent Framework via the Model Context Protocol (MCP).
 
 ### Option A: Python SDK (Recommended)
 
@@ -139,27 +139,27 @@ npx tsx demo.ts
 
 ---
 
-## 🔒 Security Model
+## Security Model
 
-Splice adheres to the **Zero-Trust Browser** principle:
-- **Encryption**: All session metadata is encrypted using `AES-256-GCM`.
+Splice adheres to the Zero-Trust Browser principle:
+- **Encryption**: All session metadata is encrypted using AES-256-GCM.
 - **Isolation**: Each agent session runs in a hardened, isolated browser context.
 - **Redaction**: Secrets are never exposed to the agent unless explicitly whitelisted.
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 - [ ] **V6: LLM-Native Vision** - Multi-modal screenshot analysis.
 - [ ] **Data Science Executor** - Run sandboxed Python scripts on extracted data.
 - [ ] **Cloud-Native Deployment** - Dockerized Splice clusters.
 
 ---
 
-## 🤝 Contributing
-Splice is an open-core project. We welcome contributions. See [CONTRIBUTING.md](CONTRIBUTING.md).
+## Contributing
+Splice is an open-core project. We welcome contributions from the community. Please see our CONTRIBUTING.md for details on our coding standards and PR process.
 
-## 📜 License
-MIT License. See [LICENSE](LICENSE).
+## License
+Splice is released under the MIT License. See LICENSE for the full text.
 
 <br />
 <div align="center">
