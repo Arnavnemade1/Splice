@@ -12,7 +12,7 @@
 
 Splice gives AI coding agents a browser they can understand, audit, and recover inside. It does not stop at screenshots, raw DOM, or accessibility snapshots. Splice diagnoses browser state, compiles intent into verified actions, redacts hostile page content, and records the evidence agents need to keep moving safely.
 
-[Quick Start](#quick-start) · [Why Splice](#why-splice) · [Flagship Features](#flagship-features) · [Architecture](#architecture) · [Security](#security-model)
+[Quick Start](#quick-start) · [Why Splice](#why-splice) · [Flagship Features](#flagship-features) · [OpenClaw](#openclaw-gateway) · [Architecture](#architecture) · [Security](#security-model)
 
 </div>
 
@@ -123,6 +123,7 @@ Splice generates AI-optimized semantic trees with lenses for UX, security, perfo
 - Secret egress blocking for common API key, JWT, Stripe, and AWS patterns
 - Local secret scanning before publication
 - Encrypted session snapshots with AES-256-GCM
+- Extended security audit: scans for unsecured OpenClaw ports, DOM-level WebSocket script injections, and unverified high-privilege workspace skills
 
 ### Command Center
 
@@ -134,6 +135,59 @@ The local dashboard turns a browser run into an inspectable operations console:
 - Security audit findings
 - Console and network telemetry
 
+### OpenClaw Gateway
+
+Splice ships an optional local [OpenClaw](https://github.com/Arnavnemade1/Splice) control gateway that lets OpenClaw-compatible agents connect directly over a low-latency WebSocket channel. The gateway is **disabled by default** and never opens a network socket unless explicitly opted in.
+
+```bash
+# Enable at startup
+SPLICE_ENABLE_OPENCLAW=1 node dist/index.js
+
+# Custom port (default: 18789)
+SPLICE_ENABLE_OPENCLAW=1 OPENCLAW_GATEWAY_PORT=19000 node dist/index.js
+```
+
+You can also toggle the gateway at runtime without restarting the server:
+
+```json
+{
+  "name": "toggle_openclaw_gateway",
+  "arguments": { "enabled": true }
+}
+```
+
+When active, connecting OpenClaw agents receive an immediate handshake:
+
+```json
+{
+  "event": "handshake",
+  "status": "connected",
+  "version": "2.0.0",
+  "engine": "Splice Enterprise Browser Core"
+}
+```
+
+The gateway binds exclusively to `127.0.0.1` — it is never reachable from the network.
+
+### Discord Notifications
+
+Splice includes a built-in Discord webhook client that can fire rich embed alerts for significant autonomous events (human interventions required, deadlocks detected, security audit completions). Configure it via environment variable or MCP tool:
+
+```bash
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/... node dist/index.js
+```
+
+or at runtime:
+
+```json
+{
+  "name": "configure_discord_webhook",
+  "arguments": { "webhookUrl": "https://discord.com/api/webhooks/..." }
+}
+```
+
+> **Note**: Discord notifications are currently **on hold** and will not fire until re-enabled in a future release. The infrastructure is fully wired; the integration can be activated by removing the `on hold` guard in `DiscordWebhook.ts`.
+
 ---
 
 ## Architecture
@@ -141,6 +195,8 @@ The local dashboard turns a browser run into an inspectable operations console:
 ```mermaid
 flowchart LR
     Agent["Coding Agent"] --> MCP["Splice MCP Server"]
+    OpenClaw["OpenClaw Agent"] -. "optional ws://127.0.0.1:18789" .-> Gateway["OpenClaw Gateway"]
+    Gateway --> Core
     MCP --> Core["TypeScript Browser Core"]
     Core --> Browser["Playwright Browser Context"]
     Browser --> Web["Target Web App"]
@@ -152,6 +208,7 @@ flowchart LR
     Forensics --> MCP
     Actions --> MCP
     Security --> MCP
+    Core -. "on hold" .-> Discord["Discord Webhook"]
     MCP --> Agent
 ```
 
@@ -213,6 +270,15 @@ You can also generate a report from the MCP tool:
 }
 ```
 
+### Environment Variables
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SPLICE_AUTO_OPEN_DASHBOARD` | `0` | Set to `1` to auto-open the Command Center dashboard on startup. |
+| `SPLICE_ENABLE_OPENCLAW` | `0` | Set to `1` to start the OpenClaw WebSocket gateway on boot. |
+| `OPENCLAW_GATEWAY_PORT` | `18789` | Override the OpenClaw gateway port. Only used if `SPLICE_ENABLE_OPENCLAW=1`. |
+| `DISCORD_WEBHOOK_URL` | _(unset)_ | Full Discord webhook URL for automated event notifications. _(on hold)_ |
+
 ---
 
 ## MCP Tools
@@ -240,6 +306,22 @@ Safety and observability tools:
 - `toggle_resource_blocking`
 - `toggle_watch_mode`
 - `maintenance_cleanup`
+
+OpenClaw and notifications:
+
+- `toggle_openclaw_gateway` — start or stop the local OpenClaw WebSocket gateway at runtime
+- `configure_discord_webhook` — set or update the Discord webhook URL dynamically
+- `send_discord_update` — send a custom alert card to the configured Discord channel
+
+Multi-agent coordination tools:
+
+- `register_agent`
+- `get_canonical_context`
+- `acquire_branch_ownership`
+- `promote_finding`
+- `request_quorum`
+- `handoff_branch`
+- `get_product_intelligence`
 
 ---
 
@@ -271,6 +353,8 @@ Splice follows a zero-trust browser posture:
 - Secret-looking payloads are blocked from outbound non-GET requests.
 - Dashboard auto-open is opt-in via `SPLICE_AUTO_OPEN_DASHBOARD=1`.
 - Arbitrary Python execution is not exposed through the MCP wrapper.
+- The OpenClaw gateway binds to `127.0.0.1` only and is **disabled by default** — it must be explicitly opted in via `SPLICE_ENABLE_OPENCLAW=1` or `toggle_openclaw_gateway`.
+- The security auditor actively scans for unsecured OpenClaw ports, DOM-level WebSocket script injections, and unverified high-privilege skills.
 
 Please report vulnerabilities privately. See [SECURITY.md](SECURITY.md).
 
@@ -283,6 +367,8 @@ Please report vulnerabilities privately. See [SECURITY.md](SECURITY.md).
 - Browser replay summaries that explain failed traces in agent-readable language
 - More first-party lenses for accessibility, commerce, auth, and SaaS workflows
 - Benchmarks for real coding-agent browser debugging tasks
+- Activate Discord webhook notifications for significant autonomous events
+- OpenClaw protocol extensions for multi-modal tool calling
 
 ---
 
