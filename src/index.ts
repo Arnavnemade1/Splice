@@ -9,6 +9,7 @@ import {
 import { BrowserManager } from "./BrowserManager.js";
 import fs from "node:fs";
 import path from "node:path";
+import { discordNotifier } from "./DiscordWebhook.js";
 
 const browser = new BrowserManager();
 
@@ -403,6 +404,41 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           }
         }
       },
+      {
+        name: "toggle_openclaw_gateway",
+        description: "Control the dynamic lifecycle of the optional local OpenClaw gateway server (port 18789). Enables/disables local OpenClaw agents from connecting.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            enabled: { type: "boolean", description: "Set true to start the gateway, false to stop it." }
+          },
+          required: ["enabled"]
+        }
+      },
+      {
+        name: "configure_discord_webhook",
+        description: "Dynamically configure or update the target Discord Webhook URL for automated significant-event notifications.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            webhookUrl: { type: "string", description: "The full Discord webhook URL." }
+          },
+          required: ["webhookUrl"]
+        }
+      },
+      {
+        name: "send_discord_update",
+        description: "Send a manual custom status or alert card directly to the configured Discord channel.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            title: { type: "string", description: "Title of the alert card." },
+            description: { type: "string", description: "Summary or message details." },
+            color: { type: "string", enum: ["red", "green", "yellow", "blue"], description: "Color signature of the notification." }
+          },
+          required: ["title", "description"]
+        }
+      },
       // ─── Multi-Agent Collaboration Tools ──────────────────────────────────────
       {
         name: "register_agent",
@@ -476,6 +512,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         name: "get_coordination_health",
         description: "Multi-Agent: Returns CoordinationTaxMetrics — a live measure of overhead introduced by multi-agent collaboration. Non-zero values in conflictsDetected, blockedActions, or ownershipViolationAttempts indicate the system is paying a coordination tax.",
         inputSchema: { type: "object", properties: {} }
+      },
+      {
+        name: "get_summons",
+        description: "Multi-Agent: List all pending and active summon requests from human users asking for help.",
+        inputSchema: { type: "object", properties: {} }
+      },
+      {
+        name: "acknowledge_summon",
+        description: "Multi-Agent: Let an agent acknowledge a pending summon by ID, marking it as accepted by that agent.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            summonId: { type: "string", description: "The ID of the summon to acknowledge (e.g., 'summon-123')." },
+            agentId: { type: "string", description: "The ID of the agent acknowledging the summon." }
+          },
+          required: ["summonId", "agentId"]
+        }
       }
     ],
   };
@@ -728,7 +781,56 @@ ${recommendations || "- No major friction points detected. The current UI appear
         ? `⚠️ WARNING: Found ${results.length} exposed secrets in the repository:\n${results.join('\n')}\nPlease remove these before committing!`
         : `✅ SCAN PASSED: No exposed API keys or secrets found in ${directory}.`;
       
+      // Send automated Discord notification for exposed secrets
+      if (results.length > 0 && discordNotifier.isActive()) {
+        discordNotifier.sendEmbed({
+          title: "🚨 CRITICAL: Exposed Secrets Found in Repository",
+          description: `Splice local secret scanner has detected **${results.length}** exposed API keys or tokens in the codebase.`,
+          color: 0xe74c3c,
+          fields: [
+            { name: "Scanned Directory", value: directory, inline: false },
+            { name: "Details", value: results.join('\n').substring(0, 1000), inline: false }
+          ],
+          footerText: "Splice Enterprise Security Hub"
+        }).catch(err => console.error("Error sending secrets alert to Discord:", err.message));
+      }
+      
       return { content: [{ type: "text", text }] };
+    }
+
+    if (request.params.name === "toggle_openclaw_gateway") {
+      const { enabled } = request.params.arguments as { enabled: boolean };
+      await browser.toggleOpenClawGateway(enabled);
+      return { content: [{ type: "text", text: `OpenClaw Gateway server is now ${enabled ? 'ENABLED and listening securely on port 18789' : 'DISABLED'}.` }] };
+    }
+
+    if (request.params.name === "configure_discord_webhook") {
+      const { webhookUrl } = request.params.arguments as { webhookUrl: string };
+      discordNotifier.setWebhookUrl(webhookUrl);
+      return { content: [{ type: "text", text: `Discord Webhook URL has been configured successfully.` }] };
+    }
+
+    if (request.params.name === "send_discord_update") {
+      const { title, description, color } = request.params.arguments as { title: string; description: string; color?: string };
+      
+      let colorCode = 0x3498db; // blue
+      if (color === "red") colorCode = 0xe74c3c;
+      else if (color === "green") colorCode = 0x2ecc71;
+      else if (color === "yellow") colorCode = 0xf1c40f;
+
+      const sent = await discordNotifier.sendEmbed({
+        title,
+        description,
+        color: colorCode
+      });
+
+      if (!sent) {
+        return { 
+          content: [{ type: "text", text: `Failed to send Discord update. Ensure DISCORD_WEBHOOK_URL is configured.` }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: `Successfully sent manual status update to Discord.` }] };
     }
 
     // ─── Multi-Agent Collaboration Handlers ─────────────────────────────────
@@ -823,6 +925,23 @@ ${recommendations || "- No major friction points detected. The current UI appear
         ...ccs.activeBranches.map(b => `  - ${b.branchId} → owner: ${b.ownerAgentId ?? 'none'} (${b.currentUrl})`),
       ].join('\n');
       return { content: [{ type: "text", text: report }] };
+    }
+
+    if (request.params.name === "get_summons") {
+      const summons = browser.coordinator.getSummons();
+      return { content: [{ type: "text", text: JSON.stringify(summons, null, 2) }] };
+    }
+
+    if (request.params.name === "acknowledge_summon") {
+      const { summonId, agentId } = request.params.arguments as { summonId: string; agentId: string };
+      const req = browser.acknowledgeSummon(summonId, agentId);
+      if (!req) {
+        return {
+          content: [{ type: "text", text: `Summon request with ID "${summonId}" not found.` }],
+          isError: true
+        };
+      }
+      return { content: [{ type: "text", text: `Agent "${agentId}" successfully acknowledged summon "${summonId}". You are now assigned to help the user on branch 'main'.` }] };
     }
 
     throw new Error(`Tool not found: ${request.params.name}`);

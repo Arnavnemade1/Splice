@@ -178,3 +178,14 @@ export interface CoordinationTaxMetrics {
   ownershipViolationAttempts: number;
   forcedReleases: number;
 }
+
+export interface SummonRequest {
+  id: string;
+  url: string;
+  timestamp: number;
+  reason?: string;
+  domContext?: string;
+  status: 'pending' | 'acknowledged';
+  acknowledgedBy?: string;
+  acknowledgedAt?: number;
+}

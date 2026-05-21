@@ -155,6 +155,38 @@ async function main() {
   });
 
   // ─────────────────────────────────────────────
+  console.log("\n▶ PHASE 5: Summon Handoff Protocol");
+  // ─────────────────────────────────────────────
+
+  await run("User Summon Dispatch", async () => {
+    const req = browser.requestSummon("http://localhost:3000/checkout", "Form validation is stuck on submit button");
+    if (req.status !== "pending") throw new Error("Summon should initially be pending");
+    if (req.url !== "http://localhost:3000/checkout") throw new Error("Summon URL mismatch");
+    
+    const summons = coordinator.getSummons();
+    if (summons.length !== 1 || summons[0].id !== req.id) throw new Error("Summon not recorded in coordinator");
+    
+    pass("User Summon Dispatch", `Created summon ${req.id} (status: pending)`);
+  });
+
+  await run("Agent Summon Acknowledgement", async () => {
+    const summons = coordinator.getSummons();
+    const reqId = summons[0].id;
+    
+    const acked = browser.acknowledgeSummon(reqId, "verifier-1");
+    if (!acked || acked.status !== "acknowledged" || acked.acknowledgedBy !== "verifier-1") {
+      throw new Error("Acknowledge failed to update status or agent ID");
+    }
+    
+    // Verify it recorded in the ledger
+    const ledger = coordinator.getLedger();
+    const hasAckEntry = ledger.some(e => e.key === `_summon_ack.${reqId}` && e.agentId === "verifier-1");
+    if (!hasAckEntry) throw new Error("Acknowledgement not written to Evidence Ledger");
+    
+    pass("Agent Summon Acknowledgement", `Summon ${reqId} successfully claimed by verifier-1`);
+  });
+
+  // ─────────────────────────────────────────────
   await browser.close();
 
   const passed = RESULTS.filter(r => r.status === "PASS").length;

@@ -11,13 +11,17 @@ import { SemanticExtractor } from './SemanticExtractor.js';
 import { CryptoManager } from './CryptoManager.js';
 import { SecurityAuditor } from './SecurityAuditor.js';
 import { AgentCoordinator } from './AgentCoordinator.js';
+import { OpenClawGateway } from './OpenClawGateway.js';
+import { discordNotifier } from './DiscordWebhook.js';
 import type { AuditOptions } from './SecurityAuditor.js';
-import type { AgentStateDiagnosis, LedgerEntry, SemanticNode, SessionMetrics, VerifiedActionPlan } from './types.js';
+import type { AgentStateDiagnosis, LedgerEntry, SemanticNode, SessionMetrics, VerifiedActionPlan, SummonRequest } from './types.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+
 
 export class BrowserManager {
   private browser: Browser | null = null;
@@ -33,6 +37,9 @@ export class BrowserManager {
 
   /** Multi-agent coordination engine — exposed for MCP tool layer. */
   public readonly coordinator: AgentCoordinator = new AgentCoordinator();
+
+  // OpenClaw Gateway instance
+  private openclawGateway: OpenClawGateway | null = null;
 
   public metrics: SessionMetrics = {
     tokensSavedEstimate: 0,
@@ -65,6 +72,17 @@ export class BrowserManager {
 
     this.browser = await chromium.launch({ headless: this.headless });
     await this.createBranch('main');
+
+    // Optional OpenClaw Gateway initialization
+    if (process.env.SPLICE_ENABLE_OPENCLAW === '1') {
+      try {
+        this.openclawGateway = new OpenClawGateway(this);
+        await this.openclawGateway.start();
+        this.pushLiveFeed('openclaw_gateway', 'Gateway started automatically');
+      } catch (e: any) {
+        console.error("[Splice] Failed to start optional OpenClaw Gateway:", e.message);
+      }
+    }
 
     if (process.env.SPLICE_AUTO_OPEN_DASHBOARD === '1') {
       try {
@@ -143,7 +161,7 @@ export class BrowserManager {
     this.telemetry.set(branchId, telemetry);
   }
 
-  private getActivePage(): Page {
+  public getActivePage(): Page {
     const page = this.pages.get(this.activeBranch);
     if (!page) throw new Error(`Active branch ${this.activeBranch} not found`);
     return page;
@@ -152,6 +170,10 @@ export class BrowserManager {
   private pushLiveFeed(type: string, detail: string) {
     this.liveFeed.unshift({ type, detail, timestamp: Date.now() });
     if (this.liveFeed.length > 20) this.liveFeed.pop();
+
+    if (this.openclawGateway) {
+      this.openclawGateway.broadcast('live_feed_update', { type, detail });
+    }
   }
 
   private saveMicroSnapshot(type: string, data: any) {
@@ -1040,6 +1062,20 @@ export class BrowserManager {
     return entry;
   }
 
+  requestSummon(url: string, reason?: string, domContext?: string): SummonRequest {
+    const req = this.coordinator.addSummonRequest(url, reason, domContext);
+    this.pushLiveFeed('summon_requested', `id=${req.id}, url=${url}`);
+    return req;
+  }
+
+  acknowledgeSummon(summonId: string, agentId: string): SummonRequest | null {
+    const req = this.coordinator.acknowledgeSummon(summonId, agentId);
+    if (req) {
+      this.pushLiveFeed('summon_acknowledged', `id=${summonId}, agent=${agentId}`);
+    }
+    return req;
+  }
+
   // -------------------------
   // HUMAN INTERVENTION
   // -------------------------
@@ -1055,6 +1091,16 @@ export class BrowserManager {
     console.error(`\n--- HUMAN INTERVENTION REQUIRED ---`);
     console.error(`Reason: ${reason}`);
     console.error(`Spawning visible browser at: ${currentUrl}`);
+
+    // Send automated Discord notification
+    if (discordNotifier.isActive()) {
+      await discordNotifier.sendEmbed({
+        title: "⚠️ Human Intervention Required",
+        description: `An agent is currently stuck and requires manual assistance.\n\n**Reason:** ${reason}\n**Active URL:** ${currentUrl}`,
+        color: 0xf1c40f,
+        footerText: `Splice Enterprise Hub • ${new Date().toLocaleTimeString()}`
+      });
+    }
 
     const visibleBrowser = await chromium.launch({ headless: false });
     const visibleContext = await visibleBrowser.newContext({ storageState: state });
@@ -1073,6 +1119,16 @@ export class BrowserManager {
 
     console.error(`--- INTERVENTION COMPLETE. AGENT RESUMING ---`);
     this.pushLiveFeed('human_intervention', `Resolved: ${reason}`);
+
+    // Send automated Discord resolution notification
+    if (discordNotifier.isActive()) {
+      await discordNotifier.sendEmbed({
+        title: "✅ Human Intervention Resolved",
+        description: `Manual intervention was resolved. Agent is resuming navigation/actions.\n\n**Reason:** ${reason}`,
+        color: 0x2ecc71,
+        footerText: `Splice Enterprise Hub • ${new Date().toLocaleTimeString()}`
+      });
+    }
   }
 
   // -------------------------
@@ -1105,10 +1161,18 @@ export class BrowserManager {
       .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, 50);
 
-    const templatePath = path.join(process.cwd(), 'dashboard', 'index.html');
+    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+    let templatePath = path.join(__dirname, '..', 'dashboard', 'index.html');
     if (!fs.existsSync(templatePath)) {
-      // Fallback for when running from a different context or if cwd is not root
-      throw new Error(`Observability template not found at ${templatePath}. Ensure you are running Splice from the project root.`);
+      // Fallback for test mode (dist_test/src/BrowserManager.js -> dist_test/dashboard -> Splice/dashboard)
+      templatePath = path.join(__dirname, '..', '..', 'dashboard', 'index.html');
+    }
+    if (!fs.existsSync(templatePath)) {
+      // Fallback for current working directory
+      templatePath = path.join(process.cwd(), 'dashboard', 'index.html');
+    }
+    if (!fs.existsSync(templatePath)) {
+      throw new Error(`Observability template not found. Searched paths include: ${path.join(__dirname, '..', 'dashboard', 'index.html')}, ${path.join(__dirname, '..', '..', 'dashboard', 'index.html')}, and process.cwd(). Ensure you are running Splice from the project root.`);
     }
     let html = fs.readFileSync(templatePath, 'utf8');
 
@@ -1133,6 +1197,7 @@ export class BrowserManager {
         const audit = ${JSON.stringify(latestAudit)};
         const ccs = ${JSON.stringify(this.coordinator.buildCanonicalContext())};
         const taxMetrics = ${JSON.stringify(this.coordinator.getCoordinationTaxMetrics())};
+        const summonsList = ${JSON.stringify(this.coordinator.getSummons())};
 
         const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({
           '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
@@ -1376,6 +1441,25 @@ export class BrowserManager {
             \`).join('')
             : \`<div class="empty" style="color:var(--green);border-color:rgba(65,230,162,0.2)">✓ All keys in consensus. No quorum failures.</div>\`;
         }
+
+        // Summons
+        const summonsFeed = document.getElementById('summons-feed');
+        if (summonsFeed) {
+          summonsFeed.innerHTML = summonsList.length
+            ? summonsList.map(s => \`
+              <div class="info-card">
+                <div class="card-head">
+                  <div class="card-title">\${esc(s.reason || 'Assistance requested')}</div>
+                  <div class="tag \${s.status === 'acknowledged' ? 'green' : 'amber'}">\${esc(s.status)}</div>
+                </div>
+                <div class="card-body">
+                  URL: <code style="font-size:11px">\${esc(s.url)}</code><br><br>
+                  \${s.status === 'acknowledged' ? \`Assigned to: <strong>\${esc(s.acknowledgedBy)}</strong>\` : 'Waiting for agent response...'}
+                </div>
+              </div>
+            \`).join('')
+            : '<div class="empty">No summons recorded.</div>';
+        }
     `;
 
     html = html.replace('// Data injected by BrowserManager.ts', dataInjection);
@@ -1418,10 +1502,59 @@ export class BrowserManager {
     this.vault.writeEncrypted(auditPath, JSON.stringify(report, null, 2));
 
     this.pushLiveFeed('security_audit', `Crawled ${report.crawledUrls.length} pages — ${report.totals.critical} critical, ${report.totals.warning} warnings`);
+
+    // Send automated Discord notification
+    if (discordNotifier.isActive()) {
+      const severityEmoji = report.totals.critical > 0 ? "🚨" : report.totals.warning > 0 ? "⚠️" : "✅";
+      const color = report.totals.critical > 0 ? 0xe74c3c : report.totals.warning > 0 ? 0xf1c40f : 0x2ecc71;
+      
+      await discordNotifier.sendEmbed({
+        title: `${severityEmoji} Splice Security Audit Completed`,
+        description: `**Target URL:** ${targetUrl}\n**Status:** ${report.agentFeedback.summary}`,
+        color,
+        fields: [
+          { name: "Pages Crawled", value: `${report.crawledUrls.length}`, inline: true },
+          { name: "Critical Issues", value: `${report.totals.critical}`, inline: true },
+          { name: "Warnings", value: `${report.totals.warning}`, inline: true },
+          { name: "Passed Checks", value: `${report.totals.passed}`, inline: true },
+          { 
+            name: "Critical Actions Required", 
+            value: report.agentFeedback.criticalActions.length > 0 
+              ? report.agentFeedback.criticalActions.join('\n').substring(0, 1000)
+              : "None. All critical security checks passed!" 
+          }
+        ],
+        footerText: `Splice Enterprise Security Hub • ${new Date().toLocaleTimeString()}`
+      });
+    }
+
     return report;
   }
 
+  /**
+   * Toggle the optional OpenClaw gateway server lifecycle dynamically.
+   */
+  async toggleOpenClawGateway(enabled: boolean) {
+    if (enabled) {
+      if (!this.openclawGateway) {
+        this.openclawGateway = new OpenClawGateway(this);
+      }
+      await this.openclawGateway.start();
+      this.pushLiveFeed('openclaw_gateway', 'Gateway server started manually');
+    } else {
+      if (this.openclawGateway) {
+        await this.openclawGateway.stop();
+        this.openclawGateway = null;
+        this.pushLiveFeed('openclaw_gateway', 'Gateway server stopped manually');
+      }
+    }
+  }
+
   async close() {
+    if (this.openclawGateway) {
+      await this.openclawGateway.stop();
+      this.openclawGateway = null;
+    }
     if (this.browser) {
       await this.browser.close();
       this.browser = null;

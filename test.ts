@@ -6,6 +6,7 @@
 import { BrowserManager } from "./src/BrowserManager.js";
 import fs from "node:fs";
 import path from "node:path";
+import { WebSocket } from "ws";
 
 const RESULTS: Array<{ name: string; status: "PASS" | "FAIL" | "WARN"; detail: string }> = [];
 
@@ -128,7 +129,8 @@ async function main() {
     pass("Speculative Navigation Cache Hit", "Branch swap — zero load time");
   });
 
-  // Switch back to example.com context
+  // Switch back to main branch context
+  browser.activeBranch = 'main';
   await browser.navigate("https://example.com");
 
   await run("Save Snapshot (Encrypted)", async () => {
@@ -312,6 +314,75 @@ async function main() {
     // We skip actually going visible in a test runner, but test the toggle logic
     await browser.toggleWatchMode(false); // ensure headless
     pass("Toggle Watch Mode", "Headless confirmed");
+  });
+
+  // ─────────────────────────────────────────────
+  console.log("\n▶ PHASE 10: OpenClaw & Discord Webhooks");
+  // ─────────────────────────────────────────────
+
+  await run("OpenClaw Gateway dynamic lifecycle", async () => {
+    const port = process.env.OPENCLAW_GATEWAY_PORT ? parseInt(process.env.OPENCLAW_GATEWAY_PORT) : 18789;
+    await browser.toggleOpenClawGateway(true);
+    pass("OpenClaw Gateway dynamic lifecycle", `Gateway started on port ${port}`);
+  });
+
+  await run("OpenClaw Gateway Handshake & Commands", async () => {
+    const port = process.env.OPENCLAW_GATEWAY_PORT ? parseInt(process.env.OPENCLAW_GATEWAY_PORT) : 18789;
+    const ws = new WebSocket(`ws://127.0.0.1:${port}`);
+    
+    const handshakePromise = new Promise<any>((resolve, reject) => {
+      ws.on('message', (data) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.event === 'handshake') resolve(msg);
+        } catch (e) { reject(e); }
+      });
+      ws.on('error', reject);
+    });
+
+    const handshake = await handshakePromise;
+    if (handshake.status !== 'connected' || handshake.version !== '2.0.0') {
+      throw new Error(`Unexpected handshake: ${JSON.stringify(handshake)}`);
+    }
+
+    const queryPromise = new Promise<any>((resolve, reject) => {
+      ws.on('message', (data) => {
+        try {
+          const msg = JSON.parse(data.toString());
+          if (msg.command === 'session_status') resolve(msg);
+        } catch (e) { reject(e); }
+      });
+      ws.on('error', reject);
+    });
+
+    ws.send(JSON.stringify({ id: "req-1", command: "session_status" }));
+    const response = await queryPromise;
+    if (response.status !== 'success' || !response.data || !response.data.url) {
+      throw new Error(`Session status query failed: ${JSON.stringify(response)}`);
+    }
+
+    ws.close();
+    await browser.toggleOpenClawGateway(false);
+    pass("OpenClaw Gateway Handshake & Commands", `Handshake and status verified`);
+  });
+
+  await run("Discord Webhook Embed Builder (On Hold)", async () => {
+    const { discordNotifier } = await import("./src/DiscordWebhook.js");
+    if (discordNotifier.isActive()) {
+      throw new Error("Discord webhook integration should be inactive/on hold");
+    }
+    pass("Discord Webhook Embed Builder (On Hold)", "Webhook correctly put on hold (inactive by default)");
+  });
+
+  await run("Security Audit — Extended OpenClaw Checks", async () => {
+    const report = await browser.runSecurityAudit("https://example.com", {
+      safeMode: true,
+      crawl: false,
+      checks: ["openclaw"]
+    });
+
+    if (!report.findings) throw new Error("No audit findings returned");
+    pass("Security Audit — Extended OpenClaw Checks", `Executed openclaw checks successfully`);
   });
 
   // ─────────────────────────────────────────────

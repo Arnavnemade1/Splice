@@ -1,4 +1,7 @@
 import type { Page, Response } from 'playwright';
+import net from 'node:net';
+import fs from 'node:fs';
+import path from 'node:path';
 
 export type Severity = 'CRITICAL' | 'WARNING' | 'INFO' | 'PASS';
 
@@ -33,7 +36,7 @@ export interface AuditOptions {
   safeMode?: boolean;       // If true, never submit forms (passive only)
   crawl?: boolean;          // If true, auto-follow same-domain links
   maxCrawlDepth?: number;   // Max pages to crawl (default 5)
-  checks?: Array<'headers' | 'xss' | 'auth' | 'data' | 'deps' | 'exploits'>;
+  checks?: Array<'headers' | 'xss' | 'auth' | 'data' | 'deps' | 'exploits' | 'openclaw'>;
 }
 
 const XSS_PROBE = '"><img src=x onerror=window.__spliceXSSHit=true>';
@@ -394,6 +397,122 @@ export class SecurityAuditor {
   }
 
   // ─────────────────────────────────────────────
+  // CHECK 7: OPENCLAW GATEWAY, SKILLS & CLAWJACKED
+  // ─────────────────────────────────────────────
+  async checkOpenClaw(url: string) {
+    // 1. Port scanning for unsecured local OpenClaw gateway
+    const checkPort = (port: number): Promise<boolean> => {
+      return new Promise((resolve) => {
+        const socket = new net.Socket();
+        socket.setTimeout(800);
+        socket.once('connect', () => { socket.destroy(); resolve(true); });
+        socket.once('timeout', () => { socket.destroy(); resolve(false); });
+        socket.once('error', () => { socket.destroy(); resolve(false); });
+        socket.connect(port, '127.0.0.1');
+      });
+    };
+
+    try {
+      const gatewayOpen = await checkPort(18789);
+      if (gatewayOpen) {
+        this.push({
+          check: 'openclaw',
+          severity: 'WARNING',
+          title: 'Active OpenClaw Gateway Detected',
+          detail: 'An active OpenClaw gateway was detected running on local port 18789. Ensure this gateway is strictly bound to 127.0.0.1 and not exposed externally.',
+          remediation: 'Verify your gateway config. Bind to 127.0.0.1 (localhost) only, or implement a VPN/Tailscale layer.',
+          affectedUrl: url
+        });
+      } else {
+        this.pass('openclaw', 'No unsecured local OpenClaw gateway exposed on port 18789.');
+      }
+    } catch {
+      // Ignore network errors in port scanner
+    }
+
+    // 2. ClawJacked Exploit & Prompt Injection Scanning
+    const clawjackedFindings = await this.page.evaluate(() => {
+      const results: string[] = [];
+      
+      // Script references
+      document.querySelectorAll('script').forEach(script => {
+        const text = script.textContent || '';
+        if (/ws:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0):18789/i.test(text) || /openclaw/i.test(text)) {
+          results.push(`Script block attempts connection/reference to OpenClaw: "${text.substring(0, 100)}..."`);
+        }
+      });
+
+      // Prompt injection attempts targeting local tools
+      const selector = 'span, div, p, a, input, textarea, code, pre';
+      document.querySelectorAll(selector).forEach(el => {
+        const text = el.textContent || (el as HTMLInputElement).value || '';
+        if (/openclaw.*(execute|run|shell|terminal|token|credentials|leak)/i.test(text)) {
+          results.push(`Potential prompt injection in ${el.tagName}: "${text.trim().substring(0, 120)}..."`);
+        }
+      });
+
+      return results;
+    });
+
+    if (clawjackedFindings.length > 0) {
+      for (const finding of clawjackedFindings) {
+        this.push({
+          check: 'openclaw',
+          severity: 'CRITICAL',
+          title: 'ClawJacked Exploit / Prompt Injection Found',
+          detail: finding,
+          remediation: 'Sanitize webpage inputs and dynamic elements before exposing them to autonomous browser agents.',
+          affectedUrl: url
+        });
+      }
+    } else {
+      this.pass('openclaw', 'No ClawJacked prompt injections or external websocket connections detected.');
+    }
+
+    // 3. Unsafe Local OpenClaw Skills Scanning (local directory scan)
+    const localDir = process.cwd();
+    const results: string[] = [];
+    const scanSkillDir = (dir: string, depth = 0) => {
+      if (depth > 3 || !fs.existsSync(dir)) return;
+      try {
+        const files = fs.readdirSync(dir);
+        for (const file of files) {
+          if (file === 'node_modules' || file === '.git' || file === 'dist') continue;
+          const fullPath = path.join(dir, file);
+          const stat = fs.statSync(fullPath);
+          if (stat.isDirectory()) {
+            scanSkillDir(fullPath, depth + 1);
+          } else if (file.endsWith('.ts') || file.endsWith('.js') || file.endsWith('.json')) {
+            const content = fs.readFileSync(fullPath, 'utf8');
+            // Malicious skill signature check (accessing environment vars + sending to external server/discord webhooks or executing commands)
+            if (/claw.*skill/i.test(file) || /molt.*plugin/i.test(file)) {
+              if (/process\.env/i.test(content) && /(exec|eval|spawn|child_process)/i.test(content)) {
+                results.push(`Unsafe skill file: ${file} (contains system-level execution capability with environment access)`);
+              }
+            }
+          }
+        }
+      } catch {}
+    };
+
+    scanSkillDir(localDir);
+    if (results.length > 0) {
+      for (const res of results) {
+        this.push({
+          check: 'openclaw',
+          severity: 'WARNING',
+          title: 'Unverified OpenClaw Skill Detected',
+          detail: res,
+          remediation: 'Audit the identified skill file. Ensure it is from a trusted source and run it in an isolated container/sandbox.',
+          affectedUrl: url
+        });
+      }
+    } else {
+      this.pass('openclaw', 'No unverified or malicious local OpenClaw skills found in workspace.');
+    }
+  }
+
+  // ─────────────────────────────────────────────
   // CRAWL LOGIC
   // ─────────────────────────────────────────────
   private async getLinksOnPage(baseOrigin: string): Promise<string[]> {
@@ -419,7 +538,7 @@ export class SecurityAuditor {
       safeMode = true,
       crawl = true,
       maxCrawlDepth = 5,
-      checks = ['headers', 'xss', 'auth', 'data', 'deps', 'exploits']
+      checks = ['headers', 'xss', 'auth', 'data', 'deps', 'exploits', 'openclaw']
     } = options;
 
     const baseOrigin = new URL(targetUrl).origin;
@@ -450,6 +569,7 @@ export class SecurityAuditor {
       if (checks.includes('data'))    await this.checkDataExposure(url);
       if (checks.includes('deps'))    await this.checkDependencies(url);
       if (checks.includes('exploits')) await this.checkAgentExploits(url);
+      if (checks.includes('openclaw')) await this.checkOpenClaw(url);
 
       // Crawl links from this page
       if (crawl) {

@@ -6,7 +6,9 @@ import type {
   CanonicalContext,
   CoordinationTaxMetrics,
   LedgerEntry,
+  SummonRequest,
 } from './types.js';
+import { discordNotifier } from './DiscordWebhook.js';
 
 /** Minimum confidence score for a finding to be included in the CCS. */
 const QUORUM_CONFIDENCE_THRESHOLD = 0.7;
@@ -253,6 +255,18 @@ export class AgentCoordinator {
           `agent "${agentId}" (conf=${confidence}) vs agent "${sibling.agentId}" (conf=${sibling.confidence}). ` +
           `Call resolve_conflict to unblock.`
         );
+
+        // Send conflict deadlock alert to Discord
+        if (discordNotifier.isActive()) {
+          discordNotifier.sendEmbed({
+            title: "⚔️ Quorum Conflict Deadlock Detected",
+            description: `Two or more agents have promoted contradictory findings on key **${key}**.\n\n` +
+              `**Agent "${agentId}"** (confidence: ${confidence}) proposed:\n\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\`\n` +
+              `**Agent "${sibling.agentId}"** (confidence: ${sibling.confidence}) proposed:\n\`\`\`json\n${JSON.stringify(sibling.value, null, 2)}\n\`\`\``,
+            color: 0xe74c3c,
+            footerText: `Splice Coordination Hub • ${new Date().toLocaleTimeString()}`
+          }).catch(err => console.error("Error sending deadlock notification:", err.message));
+        }
       }
     }
 
@@ -384,5 +398,78 @@ export class AgentCoordinator {
 
   getCoordinationTaxMetrics(): CoordinationTaxMetrics {
     return { ...this.taxMetrics };
+  }
+
+  // ── Summon Requests ──────────────────────────────────────────────────────
+  private summons: Map<string, SummonRequest> = new Map();
+
+  addSummonRequest(url: string, reason?: string, domContext?: string): SummonRequest {
+    const id = `summon-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    const req: SummonRequest = {
+      id,
+      url,
+      timestamp: Date.now(),
+      reason,
+      domContext,
+      status: 'pending',
+    };
+    this.summons.set(id, req);
+
+    // Automatically log this as an internal ledger entry for traceability
+    this.appendToLedger({
+      key: `_summon.${id}`,
+      value: { url, reason },
+      confidence: 1.0,
+      agentId: 'system',
+      branchId: 'main',
+      causalSnapshot: String(this.snapshotCounter),
+    });
+
+    // Send automated Discord summon notification
+    if (discordNotifier.isActive()) {
+      discordNotifier.sendEmbed({
+        title: "🆘 User Summons Help",
+        description: `A user has summoned agentic assistance.\n\n**Reason:** ${reason || 'No reason specified'}\n**Context URL:** ${url}`,
+        color: 0xe74c3c,
+        footerText: `Splice Coordination Hub • ${new Date().toLocaleTimeString()}`
+      }).catch(err => console.error("Error sending summon to Discord:", err.message));
+    }
+
+    return req;
+  }
+
+  getSummons(): SummonRequest[] {
+    return Array.from(this.summons.values());
+  }
+
+  acknowledgeSummon(summonId: string, agentId: string): SummonRequest | null {
+    const req = this.summons.get(summonId);
+    if (!req) return null;
+    req.status = 'acknowledged';
+    req.acknowledgedBy = agentId;
+    req.acknowledgedAt = Date.now();
+    this.touchAgent(agentId);
+
+    // Log acknowledgement in the ledger
+    this.appendToLedger({
+      key: `_summon_ack.${summonId}`,
+      value: { agentId, timestamp: req.acknowledgedAt },
+      confidence: 1.0,
+      agentId,
+      branchId: 'main',
+      causalSnapshot: String(this.snapshotCounter),
+    });
+
+    // Send automated Discord acknowledgement notification
+    if (discordNotifier.isActive()) {
+      discordNotifier.sendEmbed({
+        title: "🤝 Summon Acknowledged",
+        description: `Agent **${agentId}** has acknowledged summon request **${summonId}** and is taking charge of the workflow.`,
+        color: 0x2ecc71,
+        footerText: `Splice Coordination Hub • ${new Date().toLocaleTimeString()}`
+      }).catch(err => console.error("Error sending summon acknowledgement to Discord:", err.message));
+    }
+
+    return req;
   }
 }
