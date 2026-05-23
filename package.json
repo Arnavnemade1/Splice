@@ -21,6 +21,8 @@
     "build:test": "tsc -p tsconfig.test.json",
     "clean": "rm -rf dist dist_test",
     "test": "npm run build:test && node dist_test/test.js",
+    "validate:local": "npm test",
+    "demo:local": "npm test",
     "prepack": "npm run clean && npm run build"
   },
   "repository": {

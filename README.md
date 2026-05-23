@@ -270,6 +270,36 @@ You can also generate a report from the MCP tool:
 }
 ```
 
+### Prove It Locally
+
+Splice includes a deterministic local validation/demo run. It starts a throwaway web app on `127.0.0.1`, drives Chromium through the advertised failure modes, and writes two human-viewable artifacts:
+
+- a local validation report with pass/fail results
+- a Command Center report populated with forensics, verified action plans, security audit findings, branches, telemetry, and live-feed events
+
+```bash
+npm test
+```
+
+or:
+
+```bash
+npm run demo:local
+```
+
+The validation covers:
+
+- Agent State Forensics detecting and recovering from an overlay obstruction
+- Verified Intent Actions planning, executing, and verifying a form workflow
+- Semantic Security lens prompt-injection redaction
+- non-GET secret egress blocking
+- encrypted snapshot save/load
+- security audit feedback
+- OpenClaw gateway handshake and status command
+- Command Center report generation
+
+The command prints the exact report paths when it finishes.
+
 ### Environment Variables
 
 | Variable | Default | Description |
@@ -319,8 +349,11 @@ Multi-agent coordination tools:
 - `get_canonical_context`
 - `acquire_branch_ownership`
 - `promote_finding`
-- `request_quorum`
+- `resolve_conflict`
 - `handoff_branch`
+- `get_coordination_health`
+- `get_summons`
+- `acknowledge_summon`
 - `get_product_intelligence`
 
 ---
@@ -331,9 +364,10 @@ Multi-agent coordination tools:
 npm install
 npm run build
 npm test
+python3 -m compileall python/splice_mcp
 ```
 
-The test suite launches Playwright Chromium. On locked-down local environments, browser launch may require host permissions even when TypeScript compilation succeeds.
+The test suite launches Playwright Chromium against a local fixture app, so it does not require public internet access. On locked-down local environments, browser launch may require host permissions even when TypeScript compilation succeeds.
 
 Package shape can be checked with:
 
@@ -379,4 +413,3 @@ Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md), [SECU
 ## License
 
 MIT. See [LICENSE](LICENSE).
-

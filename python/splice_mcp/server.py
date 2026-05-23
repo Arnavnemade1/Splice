@@ -1,4 +1,5 @@
 import asyncio
+import atexit
 import httpx
 import json
 import subprocess
@@ -22,7 +23,10 @@ async def call_bridge(action: str, args: Dict[str, Any] = None) -> Any:
         try:
             response = await client.post(BRIDGE_URL, json={"action": action, "args": args}, timeout=30.0)
             response.raise_for_status()
-            return response.json()
+            payload = response.json()
+            if not payload.get("ok"):
+                raise RuntimeError(payload.get("error", "unknown bridge error"))
+            return payload.get("result")
         except Exception as e:
             raise RuntimeError(f"Bridge error on {action}: {str(e)}")
 
@@ -47,7 +51,7 @@ async def handle_list_tools() -> list[types.Tool]:
                 "type": "object",
                 "properties": {
                     "intent": {"type": "string", "description": "Optional search intent."},
-                    "lens": {"type": "string", "enum": ["UX", "Security", "Behavior", "Performance"], "description": "Extraction lens."},
+                    "lens": {"type": "string", "enum": ["UX", "Security", "Behavior", "Performance", "Network", "Vision"], "description": "Extraction lens."},
                     "maxTokens": {"type": "number", "description": "Max tokens to return."}
                 }
             }
@@ -59,7 +63,7 @@ async def handle_list_tools() -> list[types.Tool]:
                 "type": "object",
                 "properties": {
                     "elementId": {"type": "string", "description": "The Splice ID of the element."},
-                    "interaction": {"type": "string", "enum": ["click", "type", "hover"], "description": "The action."},
+                    "interaction": {"type": "string", "enum": ["click", "type", "focus", "select", "press"], "description": "The action."},
                     "value": {"type": "string", "description": "Value to type (if applicable)."}
                 },
                 "required": ["elementId", "interaction"]
@@ -149,6 +153,7 @@ def start_ts_bridge():
         return
         
     bridge_process = subprocess.Popen(cmd, cwd=project_root)
+    atexit.register(lambda: bridge_process and bridge_process.terminate())
     time.sleep(2)
     
     try:
@@ -177,5 +182,8 @@ async def main():
     if bridge_process:
         bridge_process.terminate()
 
-if __name__ == "__main__":
+def cli():
     asyncio.run(main())
+
+if __name__ == "__main__":
+    cli()

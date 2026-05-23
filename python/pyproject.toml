@@ -19,7 +19,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
-splice-mcp = "splice_mcp.server:main"
+splice-mcp = "splice_mcp.server:cli"
 
 [project.urls]
 Homepage = "https://github.com/Arnavnemade1/Splice"

@@ -337,6 +337,12 @@ export class BrowserManager {
     const page = this.getActivePage();
     const telemetry = this.telemetry.get(this.activeBranch);
     const result = await SemanticExtractor.extract(page, intent, lens, maxTokens, telemetry?.getLogs() || []);
+    const securityFlags = new Set<string>();
+    const collectSecurityFlags = (node: SemanticNode) => {
+      node.securityFlags?.forEach(flag => securityFlags.add(flag));
+      node.children?.forEach(collectSecurityFlags);
+    };
+    collectSecurityFlags(result.tree);
 
     this.metrics.tokensSavedEstimate += result.tokensSaved;
     this.pushLiveFeed('semantic_tree', `lens=${lens}, intent=${intent || 'none'}, saved=${result.tokensSaved}t`);
@@ -345,6 +351,7 @@ export class BrowserManager {
       lens, 
       intent, 
       networkSummary: result.tree.networkSummary,
+      securityFlags: Array.from(securityFlags),
       tokensSaved: result.tokensSaved 
     });
     
@@ -740,10 +747,14 @@ export class BrowserManager {
       const afterText = await page.locator('body').innerText({ timeout: 1500 }).catch(() => '');
       const changed = beforeUrl !== afterUrl || beforeTitle !== afterTitle;
       const intentVisible = keywords.some(keyword => afterText.toLowerCase().includes(keyword));
+      const obstructionResolved = diagnosis.state === 'ui_obstruction' && afterDiagnosis.state !== 'ui_obstruction';
+      const validationProgress = diagnosis.state === 'validation_blocked' &&
+        afterDiagnosis.signals.invalidFields <= diagnosis.signals.invalidFields &&
+        afterDiagnosis.signals.disabledControls <= diagnosis.signals.disabledControls;
       const domainStillAllowed = !constraints.noNavigationOutsideDomain || (() => {
         try { return new URL(afterUrl).host === currentHost; } catch { return true; }
       })();
-      const passed = domainStillAllowed && (changed || intentVisible || afterDiagnosis.state === 'ready');
+      const passed = domainStillAllowed && (changed || intentVisible || obstructionResolved || validationProgress || afterDiagnosis.state === 'ready');
 
       plan.verification = {
         executed: true,
@@ -751,6 +762,8 @@ export class BrowserManager {
         evidence: [
           changed ? `Page changed from "${beforeTitle || beforeUrl}" to "${afterTitle || afterUrl}".` : 'No URL or title change observed.',
           intentVisible ? 'Post-action page text still contains intent terms.' : 'Intent terms were not found in the post-action body text.',
+          obstructionResolved ? 'The previous UI obstruction is no longer present.' : 'No obstruction-resolution signal observed.',
+          validationProgress ? 'Validation-blocking signals did not increase after the action.' : 'No validation-progress signal observed.',
           `Post-action diagnosis: ${afterDiagnosis.state}.`,
           domainStillAllowed ? 'Domain constraint passed.' : 'Domain constraint failed.'
         ]
