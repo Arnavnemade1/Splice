@@ -23,6 +23,20 @@ browser.onReliabilityEvent = (kind, detail) => {
 };
 browser.journalStatsProvider = () => journal.getStats() as unknown as Record<string, unknown>;
 
+const SPLICE_PLAYBOOK = `# Splice Agent Playbook
+
+Splice is a cognition and safety layer for browser work — it does not replace your agent, it makes your agent reliable on real web apps. Follow this loop:
+
+1. **navigate** to the target URL.
+2. **diagnose_agent_state** — never act blind. It classifies the page (ready, ui_obstruction, validation_blocked, auth_required, captcha, network_failure, ...) with evidence, a recommended next tool, and a trend that warns when you are stuck repeating the same failing approach.
+3. **compile_verified_action** — express what you want in natural language ("click the pricing link", "type work email"). Splice ranks candidates, produces preconditions/postconditions/risk/alternatives, and (with execute: true) only acts when confidence and preconditions hold, then verifies the outcome. Prefer this over raw interact.
+4. **interact** — low-level fallback when you already know the exact data-splice-id from the semantic tree.
+5. On failure, read the typed error envelope: it carries a stable code (TARGET_NOT_FOUND, BROWSER_CRASHED, TIMEOUT, CAPTCHA_REQUIRED, ...), a recoverable flag, and the suggestedNextTool to call.
+
+Guardrails that are always on: prompt-injection redaction in semantic trees, a secret egress firewall on non-GET requests, encrypted snapshots, and a crash-self-healing browser (get_runtime_health shows recovery state).
+
+Efficiency: pass intent + maxTokens to get_semantic_tree_optimized to prune the DOM; pass agentId on calls to get per-agent tracking and in-action optimization directives; use fork_state to test risky actions on a shadow branch before committing.`;
+
 const server = new Server(
   {
     name: "splice-enterprise-browser",
@@ -33,6 +47,7 @@ const server = new Server(
       resources: {},
       tools: {},
     },
+    instructions: SPLICE_PLAYBOOK,
   }
 );
 
@@ -63,6 +78,12 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
         name: "Live Heartbeat Feed",
         mimeType: "application/json",
         description: "A real-time rolling window of the last 5 agent actions and 5 console logs — the agent's heartbeat.",
+      },
+      {
+        uri: "splice://guide/agent-playbook",
+        name: "Splice Agent Playbook",
+        mimeType: "text/markdown",
+        description: "The recommended cognition loop for any agent using Splice: diagnose → compile verified action → verify → recover. Read this first.",
       }
     ],
   };
@@ -131,6 +152,12 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     };
   }
 
+  if (request.params.uri === "splice://guide/agent-playbook") {
+    return {
+      contents: [{ uri: request.params.uri, mimeType: "text/markdown", text: SPLICE_PLAYBOOK }],
+    };
+  }
+
   throw new Error(`Resource not found: ${request.params.uri}`);
 });
 
@@ -140,7 +167,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
     tools: [
       {
         name: "navigate",
-        description: "Navigate the active browser branch to a specific URL.",
+        description: "Navigate the active browser branch to a URL. Transient network failures are retried automatically; cookie banners are auto-dismissed; the page is waited to stability. Follow with diagnose_agent_state before acting.",
+        annotations: { title: "Navigate", readOnlyHint: false, destructiveHint: false, openWorldHint: true },
         inputSchema: {
           type: "object",
           properties: {
@@ -152,7 +180,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "get_semantic_tree_optimized",
-        description: "Extract the Semantic Tree using a specialized lens (UX, Security, Performance) and intent pruning.",
+        description: "Extract an AI-optimized semantic tree of the current page, pruned by your intent and viewed through a lens (UX, Security, Performance, Network, Behavior, Vision). Returns stable data-splice-id handles for every actionable element — these IDs are what interact and compile_verified_action operate on. Hostile page text (prompt injection) is redacted before it reaches you. Example: { intent: 'find checkout form', lens: 'UX', maxTokens: 1200 }.",
+        annotations: { title: "Semantic Tree", readOnlyHint: true },
         inputSchema: {
           type: "object",
           properties: {
@@ -166,7 +195,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "interact",
-        description: "Interact with an element using its splice ID (found in the semantic tree). Also handles conflict resolution between agents.",
+        description: "Low-level: perform click/type/focus/select/press on an element by its data-splice-id from the semantic tree. Self-heals stale IDs via text fallback and waits for stability afterward. Prefer compile_verified_action when working from natural-language intent — it adds candidate ranking, preconditions, and post-action verification.",
+        annotations: { title: "Interact (low-level)", destructiveHint: true },
         inputSchema: {
           type: "object",
           properties: {
@@ -180,7 +210,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "diagnose_agent_state",
-        description: "Agent State Forensics: classify why the current browser workflow is ready, stuck, obstructed, blocked by validation, waiting on auth, or failing due to network/CAPTCHA state.",
+        description: "Agent State Forensics — call this before acting and whenever something fails. Classifies the page as ready, ui_obstruction, validation_blocked, auth_required, captcha, navigation_pending, network_failure, or stale_or_missing_target, with confidence, evidence, and a recommended next tool. Includes a predictive trend: it detects when you are stuck (same failing state 3+ times on one URL) and forecasts whether repeating your approach will work. Costs one cheap DOM scan; saves entire wasted action loops.",
+        annotations: { title: "State Forensics", readOnlyHint: true },
         inputSchema: {
           type: "object",
           properties: {
@@ -196,13 +227,15 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "compile_verified_action",
-        description: "Verified Intent Actions: compile a natural-language browser intent into a target, preconditions, postconditions, risk score, alternatives, and optional execution with verification.",
+        description: "Verified Intent Actions — the recommended way to act. Compiles a natural-language intent ('click the pricing link', 'type work email') into a ranked target with preconditions, postconditions, risk, expectedOutcome, and alternatives. With execute: true it acts only when confidence and preconditions hold, then verifies the result against the page (URL/title/text change, obstruction resolution, validation progress). With includeVision: true it returns a pixel crop of the chosen target for vision-model confirmation.",
+        annotations: { title: "Verified Intent Action", destructiveHint: true },
         inputSchema: {
           type: "object",
           properties: {
             intent: { type: "string", description: "The browser intent, e.g. 'click the pricing link' or 'fill email field'." },
             value: { type: "string", description: "Optional value for type/select/press actions." },
             execute: { type: "boolean", description: "If true, execute only when confidence and preconditions are sufficient." },
+            includeVision: { type: "boolean", description: "If true, include targetPreview: a base64 PNG crop of the chosen target element for hybrid vision+DOM confirmation." },
             constraints: {
               type: "object",
               properties: {
@@ -673,8 +706,8 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
     }
 
     if (request.params.name === "compile_verified_action") {
-      const { intent, value, constraints, execute } = request.params.arguments as any;
-      const plan = await browser.compileVerifiedAction({ intent, value, constraints, execute: execute === true });
+      const { intent, value, constraints, execute, includeVision } = request.params.arguments as any;
+      const plan = await browser.compileVerifiedAction({ intent, value, constraints, execute: execute === true, includeVision: includeVision === true });
       return { content: [{ type: "text", text: JSON.stringify(plan, null, 2) }] };
     }
 

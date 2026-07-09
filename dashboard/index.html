@@ -561,6 +561,35 @@
       line-height: 1.5;
     }
 
+    /* Timeline tools */
+    .timeline-tools {
+      padding: 12px 18px 0;
+    }
+    #timeline-filter {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: rgba(255,255,255,0.03);
+      color: var(--text);
+      font: 500 12px Inter, system-ui, sans-serif;
+      padding: 9px 12px;
+      outline: none;
+    }
+    #timeline-filter:focus { border-color: rgba(65, 230, 162, 0.45); }
+    #timeline-filter::placeholder { color: var(--quiet); }
+
+    .export-btn {
+      border: 1px solid var(--line-strong);
+      border-radius: 999px;
+      background: var(--green-bg);
+      color: var(--green);
+      font: 700 11px Inter, system-ui, sans-serif;
+      padding: 5px 11px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .export-btn:hover { border-color: rgba(65, 230, 162, 0.55); }
+
     ::-webkit-scrollbar { width: 8px; height: 8px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); border-radius: 999px; }
@@ -614,7 +643,10 @@
       <section class="panel">
         <div class="panel-head">
           <div class="panel-title">Causal Timeline</div>
-          <div class="pill">Live</div>
+          <button class="export-btn" id="export-audit" title="Download the full session evidence as JSON">Export Audit</button>
+        </div>
+        <div class="timeline-tools">
+          <input type="search" id="timeline-filter" placeholder="Filter events… (e.g. navigate, diagnosis, security)" autocomplete="off">
         </div>
         <div class="scroll" id="timeline"></div>
       </section>
@@ -726,6 +758,52 @@
 
   <script>
     // Data injected by BrowserManager.ts
+  </script>
+  <script>
+    // ─── Command Center interactivity (works on top of injected data) ───
+    (() => {
+      // Timeline filter: client-side substring match over event cards.
+      const filter = document.getElementById('timeline-filter');
+      const timeline = document.getElementById('timeline');
+      if (filter && timeline) {
+        filter.addEventListener('input', () => {
+          const query = filter.value.trim().toLowerCase();
+          timeline.querySelectorAll('.timeline-item').forEach((item) => {
+            item.style.display = !query || item.textContent.toLowerCase().includes(query) ? '' : 'none';
+          });
+        });
+      }
+
+      // Export Audit: download every injected evidence stream as one JSON file.
+      const exportBtn = document.getElementById('export-audit');
+      if (exportBtn) {
+        exportBtn.addEventListener('click', () => {
+          const grab = (name) => { try { return eval(name); } catch { return null; } };
+          const payload = {
+            exportedAt: new Date().toISOString(),
+            generator: 'Splice Command Center',
+            microSnapshots: grab('microSnapshots'),
+            metrics: grab('metrics'),
+            liveFeed: grab('liveFeed'),
+            securityAudit: grab('audit'),
+            canonicalContext: grab('ccs'),
+            coordinationTax: grab('taxMetrics'),
+            summons: grab('summonsList'),
+            runtimeHealth: grab('runtimeHealth'),
+            agentProfiles: grab('agentProfiles'),
+          };
+          const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'splice-audit-' + Date.now() + '.json';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        });
+      }
+    })();
   </script>
 </body>
 </html>

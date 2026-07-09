@@ -20,9 +20,28 @@ Splice gives AI coding agents a browser they can understand, audit, and recover 
 
 ## Why Splice
 
+**Splice does not run its own agents — it supercharges yours.** Keep Claude Desktop, Claude Code, Cursor, Aider, or your custom MCP client and your own prompting style. Add Splice as an MCP server, and the agent you already have becomes dramatically more reliable, debuggable, and safe on real web apps.
+
 Modern web agents fail in boring, expensive ways: stale refs, hidden modals, disabled buttons, route transitions, validation traps, login expiry, CAPTCHAs, and silent clicks that did nothing. Most browser tools expose more page data. Splice exposes browser understanding.
 
-Splice is built for coding agents that need to inspect, operate, debug, and improve real web applications through the Model Context Protocol.
+### Cognition, not just execution
+
+Execution-focused browser tools answer "how do I click that?". Splice answers the questions that actually burn agent runs: *why did that fail, what should I do instead, did it actually work, and can I trust this page?*
+
+| Capability | Execution-focused tools (Browser Use, Steel, agent-browser, AutoBrowser, …) | Splice |
+| --- | --- | --- |
+| Click / type / navigate | ✅ | ✅ |
+| Explain *why* an action failed (forensics with evidence + confidence) | — | ✅ `diagnose_agent_state` |
+| Detect that the agent is stuck and predict if retrying will work | — | ✅ predictive trend layer |
+| Preconditions, postconditions, risk, and alternatives before acting | — | ✅ `compile_verified_action` |
+| Verify the action actually worked afterwards | — | ✅ post-action verification |
+| Prompt-injection redaction before page text reaches the agent | — | ✅ always on |
+| Secret egress firewall on outbound requests | — | ✅ always on |
+| Crash self-healing + reproducible run journal | — | ✅ runtime reliability engine |
+| Live per-agent performance tracking with in-run corrective directives | — | ✅ agent optimizer |
+| Local observability dashboard with exportable audit evidence | — | ✅ Command Center |
+
+The goal: make Splice the default cognitive and safety layer for the MCP agent ecosystem — the layer every agent stack assumes is there, the way systems assume a kernel.
 
 | Agent problem | Splice answer |
 | --- | --- |
@@ -104,7 +123,7 @@ The Command Center renders each tracked agent as a performance card — status (
 
 ### Agent State Forensics
 
-Splice can diagnose the current browser state before an agent wastes another step.
+Splice can diagnose the current browser state before an agent wastes another step — and it watches the trend across diagnoses: if the same failing state recurs 3+ times on one URL, the diagnosis flags `trend.likelyStuck` and forecasts whether repeating the current approach can work.
 
 ```json
 {
@@ -137,7 +156,7 @@ Use the MCP tool:
 
 ### Verified Intent Actions
 
-Splice compiles natural-language intent into a browser action plan with evidence.
+Splice compiles natural-language intent into a browser action plan with evidence, an `expectedOutcome` forecast, and — with `includeVision: true` — a pixel crop of the chosen target (`targetPreview`) so a vision model can confirm the DOM pick matches what is actually on screen.
 
 ```json
 {
@@ -307,7 +326,11 @@ splice-mcp
 
 The Python wrapper auto-starts a localhost bridge (`dist/bridge_server.js`, `127.0.0.1:4000`, override with `SPLICE_BRIDGE_PORT`) that shares the Node core — including the self-healing browser, run journal, typed error envelopes, and agent analytics. It exposes `splice_get_runtime_health`, `splice_export_run_journal`, and `splice_get_agent_analytics` alongside the core browsing tools.
 
-### Claude Desktop Example
+### Enhance Your Existing Agent
+
+Splice is agent-agnostic: any MCP client picks up the full toolset plus the built-in agent playbook (served as MCP server instructions and as the `splice://guide/agent-playbook` resource), so agents know the recommended loop — navigate → diagnose → compile verified action → verify → recover — without any prompt changes on your side.
+
+**Claude Desktop** (`claude_desktop_config.json`):
 
 ```json
 {
@@ -319,6 +342,29 @@ The Python wrapper auto-starts a localhost bridge (`dist/bridge_server.js`, `127
   }
 }
 ```
+
+**Claude Code**:
+
+```bash
+claude mcp add splice -- node /absolute/path/to/Splice/dist/index.js
+```
+
+**Cursor** (`.cursor/mcp.json` in your project or `~/.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "splice": {
+      "command": "node",
+      "args": ["/absolute/path/to/Splice/dist/index.js"]
+    }
+  }
+}
+```
+
+**Python-first stacks**: install the wrapper (below) and point your client at `splice-mcp` — it shares the same browser core over a localhost bridge.
+
+No agent rewrite, no prompt surgery: your agent simply gains forensics, verified actions, redaction, egress control, crash recovery, and observability the next time it touches a browser.
 
 ### Command Center
 

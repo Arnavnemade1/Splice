@@ -84,6 +84,17 @@ export interface AgentStateDiagnosis {
     recentNetworkErrors: number;
     actionableElements: number;
   };
+  /** Predictive layer: how the state is evolving across recent diagnoses. */
+  trend?: {
+    /** How many consecutive diagnoses (including this one) returned the same state. */
+    repeatedStateCount: number;
+    /** The state seen in the previous diagnosis, if any. */
+    previousState?: AgentFailureClass;
+    /** True when the workflow appears wedged: same non-ready state 3+ times on the same URL. */
+    likelyStuck: boolean;
+    /** Heuristic forecast of what happens if the agent repeats its current approach. */
+    prediction: string;
+  };
 }
 
 export interface VerifiedActionPlan {
@@ -110,6 +121,10 @@ export interface VerifiedActionPlan {
     passed: boolean;
     evidence: string[];
   };
+  /** One-sentence forecast of what the page should look like if the action succeeds. */
+  expectedOutcome?: string;
+  /** Hybrid vision: base64 PNG crop of the chosen target (requested via includeVision). */
+  targetPreview?: string;
 }
 
 // ─── Multi-Agent Collaboration Types ───────────────────────────────────────

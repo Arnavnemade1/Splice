@@ -33,12 +33,24 @@ export class OpenClawGateway {
           console.error("[OpenClaw Gateway] New OpenClaw client connected.");
           this.activeConnections.add(ws);
 
-          // Send immediate handshake confirmation
+          // Send immediate handshake confirmation with advertised capabilities
           ws.send(JSON.stringify({
             event: 'handshake',
             status: 'connected',
             version: '2.1.0',
             engine: 'Splice Enterprise Browser Core',
+            capabilities: [
+              'navigate',
+              'interact',
+              'diagnose',
+              'compile_verified_action',
+              'get_semantic_tree',
+              'run_security_audit',
+              'capture_screenshot',
+              'session_status',
+              'get_runtime_health',
+              'get_agent_analytics'
+            ],
             timestamp: Date.now()
           }));
 
@@ -147,6 +159,32 @@ export class OpenClawGateway {
           const { goal, lastActions } = args || {};
           const diagnosis = await this.browser.diagnoseAgentState(goal, lastActions);
           result = diagnosis;
+          break;
+        }
+
+        case 'compile_verified_action': {
+          const { intent, value, constraints, execute, includeVision } = args || {};
+          if (!intent) throw new Error('Missing "intent" parameter for compile_verified_action');
+          result = await this.browser.compileVerifiedAction({
+            intent,
+            value,
+            constraints,
+            execute: execute === true,
+            includeVision: includeVision === true
+          });
+          break;
+        }
+
+        case 'get_runtime_health': {
+          result = this.browser.getRuntimeHealth();
+          break;
+        }
+
+        case 'get_agent_analytics': {
+          const { agentId } = args || {};
+          result = agentId
+            ? this.browser.agentTracker.getProfile(agentId) ?? { error: `No tracked activity for agent "${agentId}".` }
+            : this.browser.agentTracker.getAllProfiles();
           break;
         }
 

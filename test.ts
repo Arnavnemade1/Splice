@@ -203,6 +203,18 @@ async function main() {
       return `${diagnosis.state} at ${Math.round(diagnosis.confidence * 100)}% confidence`;
     });
 
+    await step('Forensics trend predicts a stuck workflow', async () => {
+      // The subscribe modal is still up on first navigation. Re-diagnosing the
+      // same obstruction on the same URL should trip the predictive trend.
+      let diagnosis = await browser.diagnoseAgentState('submit checkout form');
+      for (let i = 0; i < 3; i++) diagnosis = await browser.diagnoseAgentState('submit checkout form');
+      if (!diagnosis.trend) throw new Error('Diagnosis is missing the trend layer.');
+      if (diagnosis.trend.repeatedStateCount < 3) throw new Error(`Expected repeatedStateCount >= 3, got ${diagnosis.trend.repeatedStateCount}.`);
+      if (!diagnosis.trend.likelyStuck) throw new Error('Trend did not flag a stuck workflow.');
+      if (!diagnosis.trend.prediction) throw new Error('Trend produced no prediction.');
+      return `stuck after ${diagnosis.trend.repeatedStateCount} repeats; predicted next-step guidance present`;
+    });
+
     await step('Verified Intent Actions dismiss overlay', async () => {
       const plan = await browser.compileVerifiedAction({
         intent: 'close subscribe modal',
@@ -213,6 +225,19 @@ async function main() {
         throw new Error(`Action did not verify: ${JSON.stringify(plan.verification)}`);
       }
       return `${plan.plan[0]?.target} verified`;
+    });
+
+    await step('Hybrid vision preview and expected outcome', async () => {
+      const plan = await browser.compileVerifiedAction({
+        intent: 'go to pricing',
+        includeVision: true,
+        constraints: { noNavigationOutsideDomain: true },
+      });
+      if (!plan.expectedOutcome) throw new Error('Plan is missing expectedOutcome forecast.');
+      if (!plan.targetPreview || plan.targetPreview.length < 100) {
+        throw new Error('includeVision did not return a base64 target preview.');
+      }
+      return `expectedOutcome + ${Math.round(plan.targetPreview.length / 1024)}KB target preview`;
     });
 
     await step('Validation diagnosis catches incomplete form', async () => {
@@ -437,22 +462,33 @@ async function main() {
       if (handshake.event !== 'handshake' || handshake.status !== 'connected') {
         throw new Error(`Unexpected handshake: ${JSON.stringify(handshake)}`);
       }
-      const response = await new Promise<any>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('OpenClaw status command timed out.')), 5000);
-        ws.on('message', (data) => {
+      if (!Array.isArray(handshake.capabilities) || !handshake.capabilities.includes('compile_verified_action')) {
+        throw new Error('Handshake did not advertise cognition capabilities.');
+      }
+      const sendCommand = (command: string, args: any = {}) => new Promise<any>((resolve, reject) => {
+        const id = `validation-${command}`;
+        const timer = setTimeout(() => reject(new Error(`OpenClaw ${command} command timed out.`)), 8000);
+        const onMessage = (data: any) => {
           const msg = JSON.parse(data.toString());
-          if (msg.command === 'session_status') {
+          if (msg.id === id || msg.command === command) {
             clearTimeout(timer);
+            ws.off('message', onMessage);
             resolve(msg);
           }
-        });
-        ws.once('error', reject);
-        ws.send(JSON.stringify({ id: 'validation-status', command: 'session_status' }));
+        };
+        ws.on('message', onMessage);
+        ws.send(JSON.stringify({ id, command, args }));
       });
+      const status = await sendCommand('session_status');
+      if (status.status !== 'success') throw new Error(`Status command failed: ${JSON.stringify(status)}`);
+      // New cognition-parity commands over the gateway.
+      const health = await sendCommand('get_runtime_health');
+      if (health.status !== 'success' || !health.data?.browserConnected) throw new Error('Gateway get_runtime_health failed.');
+      const plan = await sendCommand('compile_verified_action', { intent: 'go to docs', constraints: { noNavigationOutsideDomain: true } });
+      if (plan.status !== 'success' || !plan.data?.expectedOutcome) throw new Error('Gateway compile_verified_action failed.');
       ws.close();
       await browser.toggleOpenClawGateway(false);
-      if (response.status !== 'success') throw new Error(`Status command failed: ${JSON.stringify(response)}`);
-      return handshake.engine;
+      return `${handshake.engine} — ${handshake.capabilities.length} capabilities, cognition commands verified`;
     });
 
     await step('Command Center report generation', async () => {
@@ -461,6 +497,17 @@ async function main() {
       const html = fs.readFileSync(commandCenterPath, 'utf8');
       if (!html.includes('Splice Command Center')) throw new Error('Generated dashboard HTML is invalid.');
       return commandCenterPath;
+    });
+
+    await step('Command Center exposes filter and audit export', async () => {
+      const html = fs.readFileSync(commandCenterPath, 'utf8');
+      if (!html.includes('id="timeline-filter"')) throw new Error('Timeline filter control missing from dashboard.');
+      if (!html.includes('id="export-audit"')) throw new Error('Audit export control missing from dashboard.');
+      if (!html.includes('splice-audit-')) throw new Error('Audit export handler not wired into dashboard.');
+      if (!html.includes('runtimeHealth') || !html.includes('agentProfiles')) {
+        throw new Error('Dashboard export payload does not include runtime health and agent profiles.');
+      }
+      return 'timeline filter + one-click audit export wired';
     });
   } finally {
     await browser.close().catch(() => {});

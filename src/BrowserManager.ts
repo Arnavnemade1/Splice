@@ -56,6 +56,9 @@ export class BrowserManager {
   /** Per-agent performance tracking and in-action optimization. */
   public readonly agentTracker: AgentTracker = new AgentTracker();
 
+  /** Rolling history of recent diagnoses — feeds the predictive trend layer. */
+  private diagnosisHistory: Array<{ state: AgentStateDiagnosis['state']; url: string; timestamp: number }> = [];
+
   // OpenClaw Gateway instance
   private openclawGateway: OpenClawGateway | null = null;
 
@@ -700,13 +703,66 @@ export class BrowserManager {
       }
     };
 
+    diagnosis.trend = this.computeDiagnosisTrend(state, domSignals.url);
+    if (diagnosis.trend.likelyStuck) {
+      diagnosis.evidence.push(
+        `Stuck signal: "${state}" has been diagnosed ${diagnosis.trend.repeatedStateCount} times in a row on this URL — repeating the same approach is unlikely to work.`
+      );
+    }
+
     this.saveMicroSnapshot('agent_state_diagnosis', {
       state: diagnosis.state,
       confidence: diagnosis.confidence,
       summary: diagnosis.summary,
-      signals: diagnosis.signals
+      signals: diagnosis.signals,
+      likelyStuck: diagnosis.trend?.likelyStuck ?? false
     });
     return diagnosis;
+  }
+
+  /**
+   * Predictive trend layer: compares this diagnosis against recent history
+   * to detect wedged workflows before the agent burns more steps on them.
+   */
+  private computeDiagnosisTrend(state: AgentStateDiagnosis['state'], url: string): NonNullable<AgentStateDiagnosis['trend']> {
+    const previous = this.diagnosisHistory[this.diagnosisHistory.length - 1];
+    this.diagnosisHistory.push({ state, url, timestamp: Date.now() });
+    if (this.diagnosisHistory.length > 20) this.diagnosisHistory.shift();
+
+    let repeatedStateCount = 0;
+    for (let i = this.diagnosisHistory.length - 1; i >= 0; i--) {
+      const entry = this.diagnosisHistory[i];
+      if (entry.state !== state || entry.url !== url) break;
+      repeatedStateCount++;
+    }
+
+    const likelyStuck = state !== 'ready' && repeatedStateCount >= 3;
+
+    const predictionByState: Record<string, string> = {
+      ready: 'The next verified action should execute cleanly.',
+      navigation_pending: repeatedStateCount >= 2
+        ? 'The page has stayed in a loading state across diagnoses — suspect a hung request; check telemetry or re-navigate.'
+        : 'The page is likely to settle shortly; re-diagnose before acting.',
+      ui_obstruction: likelyStuck
+        ? 'The overlay is not going away on its own — target its dismiss control explicitly or fork a branch to test alternatives.'
+        : 'Dismissing the obstruction should return the page to a ready state.',
+      validation_blocked: likelyStuck
+        ? 'The same validation failure keeps recurring — the field requirements likely differ from what the agent assumes; inspect the invalid fields directly.'
+        : 'Satisfying the highlighted validation should unblock submission.',
+      auth_required: 'Without loading an authenticated snapshot or credentials, further actions on this page will keep failing.',
+      captcha: 'No automated action will progress past the CAPTCHA; human intervention is required.',
+      network_failure: 'If the endpoint keeps failing, retries will not help — inspect the failing request before continuing.',
+      stale_or_missing_target: 'Re-extracting the semantic tree should surface fresh element IDs.',
+      ambiguous_target: 'Adding requireExactText or a more specific intent should disambiguate the target.',
+      unknown: 'Gather more evidence (semantic tree, screenshot) before acting.'
+    };
+
+    return {
+      repeatedStateCount,
+      previousState: previous?.state,
+      likelyStuck,
+      prediction: predictionByState[state] ?? predictionByState.unknown
+    };
   }
 
   async compileVerifiedAction(input: {
@@ -718,8 +774,9 @@ export class BrowserManager {
       requireExactText?: boolean;
     };
     execute?: boolean;
+    includeVision?: boolean;
   }): Promise<VerifiedActionPlan> {
-    const { intent, value, constraints = {}, execute = false } = input;
+    const { intent, value, constraints = {}, execute = false, includeVision = false } = input;
     if (!intent || intent.trim().length === 0) throw new Error('Intent is required.');
 
     await this.ensureHealthy();
@@ -888,6 +945,24 @@ export class BrowserManager {
         reason: candidate.disabled ? 'Disabled alternate.' : candidate.obstructed ? 'Obstructed alternate.' : 'Lower semantic score.'
       }))
     };
+
+    plan.expectedOutcome = blockedByPolicy
+      ? 'No action will execute: the intent matched a destructive pattern and avoidDestructiveActions is set.'
+      : inferredAction === 'click'
+        ? `Clicking "${best.label || best.id}" should ${best.href ? `navigate toward ${best.href}` : 'trigger an in-page state change'} and a follow-up diagnosis should report ready.`
+        : inferredAction === 'type'
+          ? `"${best.label || best.id}" should contain the provided value and any dependent validation or submit controls should unlock.`
+          : `The ${inferredAction} action should update the state of "${best.label || best.id}" without navigating away.`;
+
+    // Hybrid vision: attach a pixel crop of the chosen target so a vision
+    // model (or a human) can confirm the DOM pick matches what is on screen.
+    if (includeVision && best.id) {
+      try {
+        plan.targetPreview = await this.captureNodeScreenshot(best.id);
+      } catch (e) {
+        plan.evidence.push(`Vision preview unavailable: ${errorMessage(e)}`);
+      }
+    }
 
     if (execute && plan.plan.length > 0 && confidence >= 0.45 && !best.disabled && !best.obstructed) {
       const step = plan.plan[0];
