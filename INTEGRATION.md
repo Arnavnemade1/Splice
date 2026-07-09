@@ -2,6 +2,8 @@
 
 Splice Enterprise is not a standard NPM library that you import directly into your UI. It is a **Model Context Protocol (MCP) Server**. This means it runs as a standalone sidecar process and securely exposes its web-browsing capabilities to your AI Agents over standard I/O.
 
+> **Shortcut:** `splice init` (or `node dist/cli.js init`) scaffolds a `splice.config.json` and prints the exact client snippets shown below with your local paths filled in, and `splice doctor` verifies the environment before your first launch. The manual walkthrough that follows is for when you want to understand or customize the wiring.
+
 The server runs headless by default. Set `SPLICE_AUTO_OPEN_DASHBOARD=1` only when you want Splice to open the local observability dashboard during startup.
 
 Here is how you add Splice to your agent projects, whether it's a generic swarm or your specific `Ace Trading Daemon`.
@@ -133,3 +135,9 @@ If you just want to use Claude's desktop app with Splice, add this to your `clau
 When your agent calls `get_semantic_tree_optimized`, it can now pass a `maxTokens` budget. 
 
 If your LLM context window is tight (e.g., you are using a cheaper model like `gpt-4o-mini` with a small remaining context window), your agent can request `maxTokens: 2000`. Splice will iteratively truncate massive text blocks and infinitely scrolling lists until the DOM fits perfectly within your budget. No more `context_length_exceeded` errors in production!
+
+## Delta Observations on Long Sessions
+
+After the first full read, your agent can pass `deltaOnly: true` (with the same `intent` as the previous read) to receive only what changed since the last observation — added/removed elements, text and value mutations, and URL/title transitions — instead of the entire tree. Every full-tree response carries a `snapshotHash`; feed it back as `lastSnapshotHash` and Splice automatically returns the full tree whenever your view of the page has gone stale, so a single call always yields a usable observation. On churn-heavy pages, add `structuralOnly: true` to suppress text-only mutations.
+
+Splice also watches for waste on your behalf: full reads that return an unchanged page get a `[Token Optimizer]` hint attached, agents that average heavy tree reads receive an inline `deltaOnly` directive, and `compile_verified_action` accepts `compact: true` to trim plan responses to essentials.

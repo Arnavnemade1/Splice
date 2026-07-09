@@ -12,6 +12,8 @@ import { CryptoManager } from './CryptoManager.js';
 import { SecurityAuditor } from './SecurityAuditor.js';
 import { AgentCoordinator } from './AgentCoordinator.js';
 import { AgentTracker } from './AgentTracker.js';
+import { RecoveryMemory } from './RecoveryMemory.js';
+import type { SemanticDelta, FullTreeFallback, SpeculativeBranchSummary } from './types.js';
 import { OpenClawGateway } from './OpenClawGateway.js';
 import { discordNotifier } from './DiscordWebhook.js';
 import type { AuditOptions } from './SecurityAuditor.js';
@@ -59,6 +61,15 @@ export class BrowserManager {
   /** Rolling history of recent diagnoses — feeds the predictive trend layer. */
   private diagnosisHistory: Array<{ state: AgentStateDiagnosis['state']; url: string; timestamp: number }> = [];
 
+  /** Delta-first observations: last flattened semantic snapshot per branch. */
+  private treeSnapshots: Map<string, { hash: string; url: string; title: string; index: Map<string, { type: string; text?: string; value?: string; tag?: string }> }> = new Map();
+
+  /** Token efficiency: consecutive full tree reads per branch whose content did not change. */
+  private identicalReads: Map<string, number> = new Map();
+
+  /** Learning loop: persisted recovery patterns per domain+state. */
+  public recoveryMemory!: RecoveryMemory;
+
   // OpenClaw Gateway instance
   private openclawGateway: OpenClawGateway | null = null;
 
@@ -66,7 +77,8 @@ export class BrowserManager {
     tokensSavedEstimate: 0,
     preventedErrors: 0,
     captchaInterruptions: 0,
-    selfHealCount: 0
+    selfHealCount: 0,
+    redundantObservationTokens: 0
   };
 
   // Live feed — ring buffer of last 20 actions
@@ -90,6 +102,10 @@ export class BrowserManager {
 
     // Initialize encryption vault — auto-generates key if needed
     this.vault = new CryptoManager(this.spliceDir);
+    this.recoveryMemory = new RecoveryMemory(this.spliceDir);
+
+    // Watch mode from config/env: launch with a visible Chromium window.
+    if (process.env.SPLICE_WATCH_MODE === '1') this.headless = false;
 
     await this.launchBrowser();
     await this.createBranch('main');
@@ -463,21 +479,68 @@ export class BrowserManager {
     this.saveMicroSnapshot('navigate', { url });
   }
 
-  async speculativeFork(urls: string[]) {
+  async speculativeFork(urls: string[]): Promise<SpeculativeBranchSummary[]> {
     await this.ensureHealthy();
     const context = this.contexts.get(this.activeBranch);
     if (!context) throw new Error('Active branch not found');
     const storageState = await context.storageState();
 
+    const loads: Array<Promise<SpeculativeBranchSummary>> = [];
     for (const url of urls) {
       const branchId = this.branchIdForUrl(url);
       if (!this.contexts.has(branchId)) {
         await this.createBranch(branchId, storageState);
         const newPage = this.pages.get(branchId)!;
-        newPage.goto(url, { waitUntil: 'networkidle' }).catch(() => {});
+        loads.push(
+          newPage.goto(url, { waitUntil: 'networkidle' })
+            .then(() => this.snapshotSpeculativeBranch(branchId, url))
+            .catch((): SpeculativeBranchSummary => ({ branchId, url, status: 'loading' }))
+        );
+      } else {
+        // Branch already exists (repeat call): report its current comparison.
+        loads.push(Promise.resolve({
+          branchId,
+          url,
+          status: this.treeSnapshots.has(branchId) ? 'ready' : 'loading',
+          title: this.treeSnapshots.get(branchId)?.title,
+          comparedToActive: this.compareBranchToActive(branchId),
+        }));
       }
     }
     this.pushLiveFeed('speculative_fork', `Pre-loading ${urls.length} URLs`);
+
+    // Bounded wait: report whatever settles within the budget; slower pages
+    // keep pre-loading in the background and are marked 'loading'.
+    const summaries = await Promise.all(loads.map((load, i) =>
+      Promise.race([
+        load,
+        new Promise<SpeculativeBranchSummary>(resolve =>
+          setTimeout(() => resolve({ branchId: this.branchIdForUrl(urls[i]), url: urls[i], status: 'loading' }), 6000)
+        ),
+      ])
+    ));
+    for (const s of summaries.filter(s => s.status === 'ready' && s.comparedToActive)) {
+      this.saveMicroSnapshot('speculative_delta', { branchId: s.branchId, url: s.url, summary: s.comparedToActive!.summary });
+    }
+    return summaries;
+  }
+
+  /** Snapshot a pre-loaded speculative branch and compare it to the active branch. */
+  private async snapshotSpeculativeBranch(branchId: string, url: string): Promise<SpeculativeBranchSummary> {
+    const page = this.pages.get(branchId);
+    if (!page) return { branchId, url, status: 'loading' };
+    // No intent: an unpruned snapshot doubles as the branch's delta baseline,
+    // so deltaOnly works immediately after commit_branch.
+    const { tree } = await SemanticExtractor.extract(page, undefined, 'UX', undefined, []);
+    const title = await page.title().catch(() => '');
+    this.updateTreeSnapshot(tree, page.url(), title, branchId);
+    return {
+      branchId,
+      url,
+      status: 'ready',
+      title,
+      comparedToActive: this.compareBranchToActive(branchId),
+    };
   }
 
   // -------------------------
@@ -498,15 +561,204 @@ export class BrowserManager {
     this.metrics.tokensSavedEstimate += result.tokensSaved;
     this.pushLiveFeed('semantic_tree', `lens=${lens}, intent=${intent || 'none'}, saved=${result.tokensSaved}t`);
     
-    this.saveMicroSnapshot('semantic_tree', { 
-      lens, 
-      intent, 
+    this.saveMicroSnapshot('semantic_tree', {
+      lens,
+      intent,
       networkSummary: result.tree.networkSummary,
       securityFlags: Array.from(securityFlags),
-      tokensSaved: result.tokensSaved 
+      tokensSaved: result.tokensSaved
     });
-    
+
+    // Update the delta baseline for this branch, tracking redundant reads:
+    // an unchanged hash means this full tree re-sent bytes the agent already had.
+    const title = await page.title().catch(() => '');
+    const prevHash = this.treeSnapshots.get(this.activeBranch)?.hash;
+    const newHash = this.updateTreeSnapshot(result.tree, page.url(), title);
+    if (prevHash && prevHash === newHash) {
+      this.identicalReads.set(this.activeBranch, (this.identicalReads.get(this.activeBranch) ?? 0) + 1);
+      this.metrics.redundantObservationTokens += Math.round(JSON.stringify(result.tree).length / 4);
+    } else {
+      this.identicalReads.set(this.activeBranch, 0);
+    }
+
     return result.tree;
+  }
+
+  /**
+   * Token efficiency: a nudge for the tool layer to attach to full tree
+   * responses when the page has not changed since the previous read —
+   * i.e. the agent just paid full price for information it already had.
+   */
+  getObservationEfficiencyHint(): string | null {
+    const repeats = this.identicalReads.get(this.activeBranch) ?? 0;
+    if (repeats < 1) return null;
+    return `[Token Optimizer] This full tree is identical to your previous read (${repeats} redundant read(s), ~${this.metrics.redundantObservationTokens} tokens re-sent this session). Pass deltaOnly: true with the same intent to receive only what changed.`;
+  }
+
+  // -------------------------
+  // DELTA-FIRST OBSERVATIONS
+  // -------------------------
+  private flattenTree(tree: SemanticNode): Map<string, { type: string; text?: string; value?: string; tag?: string }> {
+    const index = new Map<string, { type: string; text?: string; value?: string; tag?: string }>();
+    const walk = (node: SemanticNode) => {
+      if (node.id && node.id !== 'root' && node.type !== 'system') {
+        index.set(node.id, { type: node.type, text: node.text, value: node.value, tag: node.attributes?.tagName });
+      }
+      node.children?.forEach(walk);
+    };
+    walk(tree);
+    return index;
+  }
+
+  private updateTreeSnapshot(tree: SemanticNode, url: string, title: string, branchId: string = this.activeBranch): string {
+    const index = this.flattenTree(tree);
+    const hash = createHash('sha256')
+      .update(JSON.stringify(Array.from(index.entries())))
+      .digest('hex')
+      .slice(0, 12);
+    this.treeSnapshots.set(branchId, { hash, url, title, index });
+    return hash;
+  }
+
+  /** Hash of the current delta baseline for the active branch, if one exists. */
+  getSnapshotHash(): string | null {
+    return this.treeSnapshots.get(this.activeBranch)?.hash ?? null;
+  }
+
+  /** Core diff between two flattened snapshots, keyed by stable data-splice-id. */
+  private diffIndexes(
+    previous: Map<string, { type: string; text?: string; value?: string; tag?: string }>,
+    current: Map<string, { type: string; text?: string; value?: string; tag?: string }>
+  ): { added: SemanticDelta['added']; removed: SemanticDelta['removed']; changed: SemanticDelta['changed']; unchangedCount: number } {
+    const added: SemanticDelta['added'] = [];
+    const removed: SemanticDelta['removed'] = [];
+    const changed: SemanticDelta['changed'] = [];
+    let unchangedCount = 0;
+
+    for (const [id, node] of current) {
+      const prev = previous.get(id);
+      if (!prev) {
+        added.push({ id, type: node.type, text: node.text?.slice(0, 120), tag: node.tag });
+      } else {
+        let mutated = false;
+        if ((prev.text ?? '') !== (node.text ?? '')) {
+          changed.push({ id, field: 'text', before: (prev.text ?? '').slice(0, 120), after: (node.text ?? '').slice(0, 120) });
+          mutated = true;
+        }
+        if ((prev.value ?? '') !== (node.value ?? '')) {
+          changed.push({ id, field: 'value', before: (prev.value ?? '').slice(0, 120), after: (node.value ?? '').slice(0, 120) });
+          mutated = true;
+        }
+        if (!mutated) unchangedCount++;
+      }
+    }
+    for (const [id, node] of previous) {
+      if (!current.has(id)) removed.push({ id, text: node.text?.slice(0, 120), tag: node.tag });
+    }
+    return { added, removed, changed, unchangedCount };
+  }
+
+  /**
+   * Cross-branch comparison for speculative pre-loads. data-splice-ids are
+   * per-page, so branches are compared by content signature (tag + text)
+   * rather than by id — this answers "what does that page have that this
+   * one doesn't", not "which node mutated".
+   */
+  private compareBranchToActive(branchId: string): SpeculativeBranchSummary['comparedToActive'] {
+    const active = this.treeSnapshots.get(this.activeBranch);
+    const other = this.treeSnapshots.get(branchId);
+    if (!active || !other) return null;
+    const sig = (n: { type: string; text?: string; tag?: string }) => `${n.tag || n.type}|${(n.text || '').slice(0, 80)}`;
+    const activeSigs = new Set(Array.from(active.index.values()).map(sig));
+    const otherSigs = new Set(Array.from(other.index.values()).map(sig));
+    const unique = Array.from(otherSigs).filter(s => !activeSigs.has(s));
+    const missing = Array.from(activeSigs).filter(s => !otherSigs.has(s));
+    return {
+      uniqueElements: unique.length,
+      missingElements: missing.length,
+      uniqueSample: unique.slice(0, 5).map(s => s.split('|')[1]).filter(Boolean),
+      summary: `${unique.length} element(s) unique to this branch, ${missing.length} active-branch element(s) absent`,
+    };
+  }
+
+  /**
+   * Delta-first observation: extract a fresh semantic snapshot and return
+   * ONLY what changed since the previous one on this branch — new elements,
+   * removed elements, text/value mutations, and URL/title transitions.
+   * Dramatically cheaper than re-reading the full tree on long sessions.
+   *
+   * Falls back to the full tree (FullTreeFallback) when no baseline exists or
+   * when the caller's lastSnapshotHash no longer matches the server baseline,
+   * so a single call always yields a usable observation. Use the same intent
+   * across calls — intent-based pruning changes which elements are visible,
+   * and mixing intents produces spurious added/removed entries.
+   *
+   * With structuralOnly, text-only mutations (tickers, timestamps, counters)
+   * are suppressed as churn: only added/removed elements and value changes
+   * are reported, with textChangesIgnored counting what was filtered.
+   */
+  async getSemanticDelta(intent?: string, lens: any = 'UX', lastSnapshotHash?: string, structuralOnly?: boolean): Promise<SemanticDelta | FullTreeFallback> {
+    const previous = this.treeSnapshots.get(this.activeBranch);
+    const tree = await this.getSemanticTree(intent, lens);
+    const current = this.treeSnapshots.get(this.activeBranch)!;
+
+    if (!previous) {
+      return {
+        fullTreeRequired: true,
+        reason: 'No prior snapshot existed for this branch. The full tree is returned and the baseline is now established — subsequent deltaOnly calls will diff against it.',
+        snapshotHash: current.hash,
+        tree,
+      };
+    }
+    if (lastSnapshotHash && lastSnapshotHash !== previous.hash) {
+      return {
+        fullTreeRequired: true,
+        reason: `Your lastSnapshotHash (${lastSnapshotHash}) does not match the server baseline (${previous.hash}) — the page was observed again since your last read. The full tree is returned; the new baseline is ${current.hash}.`,
+        snapshotHash: current.hash,
+        tree,
+      };
+    }
+
+    const { added, removed, changed: allChanged, unchangedCount } = this.diffIndexes(previous.index, current.index);
+
+    // structuralOnly: text churn is noise on live pages — keep structure and value changes.
+    const changed = structuralOnly ? allChanged.filter(c => c.field !== 'text') : allChanged;
+    const textChangesIgnored = structuralOnly ? allChanged.length - changed.length : undefined;
+
+    const delta: SemanticDelta = {
+      deltaOf: previous.hash,
+      snapshotHash: current.hash,
+      url: { before: previous.url, after: current.url, changed: previous.url !== current.url },
+      title: { before: previous.title, after: current.title, changed: previous.title !== current.title },
+      added: added.slice(0, 40),
+      removed: removed.slice(0, 40),
+      changed: changed.slice(0, 40),
+      unchangedCount,
+      summary: [
+        previous.url !== current.url ? `navigated ${previous.url} → ${current.url}` : null,
+        previous.title !== current.title ? `title "${previous.title}" → "${current.title}"` : null,
+        `${added.length} added, ${removed.length} removed, ${changed.length} changed, ${unchangedCount} unchanged`,
+        textChangesIgnored ? `${textChangesIgnored} text-only change(s) suppressed as churn` : null,
+      ].filter(Boolean).join('; '),
+    };
+    if (textChangesIgnored !== undefined) delta.textChangesIgnored = textChangesIgnored;
+
+    // Credit the savings: the agent received this delta instead of the full tree.
+    const saved = Math.max(0, Math.round((JSON.stringify(tree).length - JSON.stringify(delta).length) / 4));
+    delta.estimatedTokensSaved = saved;
+    this.metrics.tokensSavedEstimate += saved;
+
+    this.saveMicroSnapshot('semantic_delta', {
+      summary: delta.summary,
+      added: delta.added.length,
+      removed: delta.removed.length,
+      changed: delta.changed.length,
+      urlChanged: delta.url.changed,
+      addedSample: delta.added.slice(0, 3).map(a => a.text || a.id),
+      removedSample: delta.removed.slice(0, 3).map(r => r.text || r.id),
+      changedSample: delta.changed.slice(0, 3).map(c => `${c.id}: "${c.before}" → "${c.after}"`),
+    });
+    return delta;
   }
 
   // -------------------------
@@ -710,6 +962,8 @@ export class BrowserManager {
       );
     }
 
+    diagnosis.recommendedRecoveryStrategy = this.buildRecoveryStrategy(domSignals.url, state);
+
     this.saveMicroSnapshot('agent_state_diagnosis', {
       state: diagnosis.state,
       confidence: diagnosis.confidence,
@@ -763,6 +1017,41 @@ export class BrowserManager {
       likelyStuck,
       prediction: predictionByState[state] ?? predictionByState.unknown
     };
+  }
+
+  private domainOf(url: string): string {
+    try { return new URL(url).host; } catch { return ''; }
+  }
+
+  /**
+   * Learning loop: surface a recovery strategy for the diagnosed state,
+   * preferring patterns that verifiably worked on this domain before.
+   */
+  private buildRecoveryStrategy(url: string, state: AgentStateDiagnosis['state']): NonNullable<AgentStateDiagnosis['recommendedRecoveryStrategy']> {
+    const generalAdvice: Record<string, string> = {
+      ready: 'No recovery needed — compile the next verified intent action.',
+      ui_obstruction: 'Compile a verified action targeting the dismiss/close control of the obstruction.',
+      validation_blocked: 'Inspect the invalid fields via the semantic tree, fill required values, then retry submission.',
+      auth_required: 'Load an authenticated snapshot (load_snapshot) or pause for credentials via the host agent policy.',
+      captcha: 'Call request_human_intervention — automated retries will not pass a CAPTCHA.',
+      navigation_pending: 'Wait briefly and re-diagnose; if it persists, check telemetry for a hung request.',
+      network_failure: 'Inspect the failing endpoint in telemetry before retrying navigation.',
+      stale_or_missing_target: 'Re-extract the semantic tree (optionally deltaOnly) to refresh element IDs.',
+      ambiguous_target: 'Re-compile the intent with requireExactText or a more specific description.',
+      unknown: 'Capture an annotated screenshot and a semantic tree to gather more evidence.'
+    };
+
+    const domain = this.domainOf(url);
+    const learned = domain && state !== 'ready' ? this.recoveryMemory.lookup(domain, state) : [];
+    if (learned.length > 0) {
+      const top = learned[0];
+      return {
+        source: 'learned',
+        advice: `On ${domain}, "${state}" was previously recovered ${top.successCount}× by ${top.action} via intent "${top.intent}"${top.targetLabel ? ` (target: "${top.targetLabel}")` : ''}. Try that first.`,
+        learnedPatterns: learned.map(p => ({ intent: p.intent, action: p.action, targetLabel: p.targetLabel, successCount: p.successCount }))
+      };
+    }
+    return { source: 'general', advice: generalAdvice[state] ?? generalAdvice.unknown };
   }
 
   async compileVerifiedAction(input: {
@@ -982,6 +1271,10 @@ export class BrowserManager {
       })();
       const passed = domainStillAllowed && (changed || intentVisible || obstructionResolved || validationProgress || afterDiagnosis.state === 'ready');
 
+      // Delta-first: compare against the baseline captured at compile time.
+      const delta = await this.getSemanticDelta(intent).catch(() => null);
+      const deltaSummary = delta && 'summary' in delta ? delta.summary : null;
+
       plan.verification = {
         executed: true,
         passed,
@@ -990,10 +1283,19 @@ export class BrowserManager {
           intentVisible ? 'Post-action page text still contains intent terms.' : 'Intent terms were not found in the post-action body text.',
           obstructionResolved ? 'The previous UI obstruction is no longer present.' : 'No obstruction-resolution signal observed.',
           validationProgress ? 'Validation-blocking signals did not increase after the action.' : 'No validation-progress signal observed.',
+          deltaSummary ? `Delta since action: ${deltaSummary}.` : 'No delta computed.',
           `Post-action diagnosis: ${afterDiagnosis.state}.`,
           domainStillAllowed ? 'Domain constraint passed.' : 'Domain constraint failed.'
         ]
       };
+      if (delta && 'summary' in delta) plan.delta = delta;
+
+      // Learning loop: if this action verifiably recovered a non-ready state,
+      // remember the (domain, state) → action pattern for future diagnoses.
+      if (passed && diagnosis.state !== 'ready') {
+        this.recoveryMemory.recordSuccess(currentHost, diagnosis.state, intent, inferredAction, best.label || best.tagName);
+        this.pushLiveFeed('recovery_learned', `${diagnosis.state} recovered via "${intent}" on ${currentHost}`);
+      }
     } else {
       plan.verification = {
         executed: false,
@@ -1473,6 +1775,12 @@ export class BrowserManager {
         document.getElementById('stat-prevented').textContent = metrics.preventedErrors ?? 0;
         document.getElementById('stat-heals').textContent = metrics.selfHealCount ?? 0;
         document.getElementById('stat-vulns').textContent = audit ? audit.totals.critical + audit.totals.warning : 0;
+        const statTokens = document.getElementById('stat-tokens');
+        if (statTokens) {
+          const saved = metrics.tokensSavedEstimate ?? 0;
+          statTokens.textContent = saved >= 10000 ? \`\${Math.round(saved / 1000)}k\` : String(saved);
+          statTokens.title = \`~\${saved} tokens saved by pruning and deltas; ~\${metrics.redundantObservationTokens ?? 0} re-sent by unchanged full reads\`;
+        }
         document.getElementById('active-branch').textContent = liveFeed.activeBranch || 'main';
         document.getElementById('watch-mode').textContent = liveFeed.watchMode ? 'On' : 'Off';
         document.getElementById('branch-count').textContent = liveFeed.branches.length;
@@ -1540,6 +1848,31 @@ export class BrowserManager {
               </div>
             \`).join('')
             : empty('Run compile_verified_action to generate preconditions and postconditions.');
+        }
+
+        const deltaFeed = document.getElementById('delta-feed');
+        const deltas = microSnapshots.filter(s => s.type === 'semantic_delta').slice(0, 4);
+        if (deltaFeed) {
+          deltaFeed.innerHTML = deltas.length
+            ? deltas.map(d => {
+              const mutations = (d.added ?? 0) + (d.removed ?? 0) + (d.changed ?? 0);
+              const kind = d.urlChanged ? 'navigation' : (mutations ? 'mutation' : 'stable');
+              const details = [
+                (d.addedSample || []).length ? \`New: \${d.addedSample.map(esc).join(', ')}.\` : '',
+                (d.removedSample || []).length ? \`Removed: \${d.removedSample.map(esc).join(', ')}.\` : '',
+                (d.changedSample || []).length ? \`Changed: \${d.changedSample.map(esc).join(' | ')}.\` : '',
+              ].filter(Boolean).join(' ');
+              return \`
+                <div class="info-card">
+                  <div class="card-head">
+                    <div class="card-title">\${esc(d.summary || 'State change')}</div>
+                    <div class="tag \${kind === 'navigation' ? 'blue' : (kind === 'mutation' ? 'amber' : 'green')}">\${kind}</div>
+                  </div>
+                  <div class="card-body">\${details || 'No element-level changes since the previous snapshot.'}</div>
+                </div>
+              \`;
+            }).join('')
+            : empty('Call get_semantic_tree_optimized with deltaOnly: true to record incremental state changes.');
         }
 
         const specGrid = document.getElementById('spec-grid');
@@ -1664,6 +1997,7 @@ export class BrowserManager {
                       <span>recent <b>\${recent}%</b></span>
                       <span>actions <b>\${p.totalActions}</b></span>
                       <span>avg <b>\${p.avgDurationMs}ms</b></span>
+                      \${p.tokensReturnedEstimate ? \`<span>tokens <b>\${p.tokensReturnedEstimate}</b></span>\` : ''}
                       \${p.consecutiveFailures > 0 ? \`<span>streak <b style="color:var(--red)">\${p.consecutiveFailures}\u2715</b></span>\` : ''}
                     </div>
                     <div class="conf-bar"><div class="conf-fill \${fillClass}" style="width:\${rate}%"></div></div>
@@ -1880,4 +2214,31 @@ export class BrowserManager {
       }
     }
   }
+}
+
+/**
+ * Token efficiency: trim a verified action plan to what an agent needs to
+ * decide its next step — the ranked plan, confidence/risk, the outcome
+ * forecast, and the verification verdict with a delta summary. Alternatives,
+ * compile-time evidence, and the full delta are dropped. Used by the
+ * compile_verified_action tool when compact: true is requested.
+ */
+export function compactVerifiedPlan(plan: VerifiedActionPlan): Record<string, unknown> {
+  const slim: Record<string, unknown> = {
+    intent: plan.intent,
+    confidence: plan.confidence,
+    risk: plan.risk,
+    plan: plan.plan,
+  };
+  if (plan.expectedOutcome) slim.expectedOutcome = plan.expectedOutcome;
+  if (plan.targetPreview) slim.targetPreview = plan.targetPreview;
+  if (plan.verification) {
+    slim.verification = {
+      executed: plan.verification.executed,
+      passed: plan.verification.passed,
+      evidence: plan.verification.evidence.slice(0, 3),
+    };
+  }
+  if (plan.delta) slim.deltaSummary = plan.delta.summary;
+  return slim;
 }

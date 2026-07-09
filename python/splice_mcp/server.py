@@ -57,6 +57,19 @@ async def handle_list_tools() -> list[types.Tool]:
             }
         ),
         types.Tool(
+            name="splice_get_semantic_delta",
+            description="Return only what changed on the page since the previous semantic observation (added/removed elements, text/value mutations, URL/title transitions). Falls back to the full tree when no baseline exists or lastSnapshotHash is stale.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "intent": {"type": "string", "description": "Search intent — keep identical to your previous observation so the diff reflects real page changes."},
+                    "lens": {"type": "string", "enum": ["UX", "Security", "Behavior", "Performance", "Network", "Vision"], "description": "Extraction lens."},
+                    "lastSnapshotHash": {"type": "string", "description": "Optional snapshotHash from your last observation for staleness detection."},
+                    "structuralOnly": {"type": "boolean", "description": "Suppress text-only churn (tickers, timestamps); report only added/removed elements and value changes."}
+                }
+            }
+        ),
+        types.Tool(
             name="splice_interact",
             description="Interact with an element on the page.",
             inputSchema={
@@ -145,6 +158,8 @@ async def handle_call_tool(
         
     elif name == "splice_get_semantic_tree":
         result = await call_bridge("getSemanticTree", arguments)
+    elif name == "splice_get_semantic_delta":
+        result = await call_bridge("getSemanticDelta", arguments)
         return [types.TextContent(type="text", text=json.dumps(result))]
         
     elif name == "splice_interact":

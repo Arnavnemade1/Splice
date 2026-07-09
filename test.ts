@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { WebSocket } from 'ws';
 import { BrowserManager } from './src/BrowserManager.js';
@@ -128,47 +129,128 @@ async function step(name: string, fn: () => Promise<string | void>) {
 function writeReport(reportPath: string) {
   const passed = results.filter(r => r.status === 'PASS').length;
   const failed = results.filter(r => r.status === 'FAIL').length;
+  const passRate = results.length ? Math.round((passed / results.length) * 100) : 0;
   const html = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Splice Local Validation</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
-:root { color-scheme: dark; --bg:#080a0d; --panel:#11161d; --line:#243040; --text:#f6f8fb; --muted:#9aa7b8; --green:#41e6a2; --red:#ff5577; --blue:#5ab8ff; }
+:root {
+  color-scheme: dark;
+  --bg: #05060a;
+  --surface: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.012));
+  --line: rgba(255,255,255,0.07);
+  --line-strong: rgba(255,255,255,0.14);
+  --text: #f6f8fc;
+  --muted: #9aa5b8;
+  --quiet: #626e84;
+  --brand-a: #34f5c5;
+  --brand-b: #38bdf8;
+  --brand-c: #a78bfa;
+  --brand-gradient: linear-gradient(135deg, var(--brand-a), var(--brand-b) 55%, var(--brand-c));
+  --green: #3ce9a4;
+  --red: #ff5c7c;
+  --blue: #58b6ff;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
 * { box-sizing: border-box; }
-body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); }
-main { width: min(1120px, calc(100vw - 32px)); margin: 0 auto; padding: 44px 0; }
-header { display: flex; justify-content: space-between; gap: 24px; align-items: end; margin-bottom: 28px; }
-h1 { margin: 0; font-size: clamp(28px, 4vw, 48px); letter-spacing: 0; }
-p { color: var(--muted); margin: 8px 0 0; }
-.scores { display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 10px; min-width: 260px; }
-.score, .row { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
-.score { padding: 18px; }
-.num { font: 800 34px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
-.label { margin-top: 7px; color: var(--muted); font-size: 12px; text-transform: uppercase; font-weight: 800; }
+body {
+  margin: 0;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: -0.006em;
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(255,255,255,0.022) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255,255,255,0.022) 1px, transparent 1px);
+  background-size: 34px 34px;
+  mask-image: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent 70%);
+}
+body::after {
+  content: ""; position: fixed; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(52% 42% at 10% -12%, rgba(52,245,197,0.09), transparent 62%),
+    radial-gradient(46% 38% at 90% -14%, rgba(167,139,250,0.085), transparent 60%);
+}
+main { position: relative; z-index: 1; width: min(1120px, calc(100vw - 32px)); margin: 0 auto; padding: 52px 0 64px; }
+header { display: flex; justify-content: space-between; gap: 28px; align-items: end; margin-bottom: 18px; flex-wrap: wrap; }
+.brand { display: flex; gap: 16px; align-items: center; }
+.mark {
+  width: 46px; height: 46px; flex: none; border-radius: 13px; display: grid; place-items: center;
+  background: var(--brand-gradient); color: #04060a; font-size: 21px; font-weight: 900;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.12), 0 8px 28px -6px rgba(56,189,248,0.45), inset 0 1px 0 rgba(255,255,255,0.45);
+}
+h1 { margin: 0; font-size: clamp(24px, 3.4vw, 38px); font-weight: 800; letter-spacing: -0.025em; }
+h1 .wordmark { background: var(--brand-gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
+p.lede { color: var(--muted); margin: 6px 0 0; font-size: 14px; }
+.scores { display: grid; grid-template-columns: repeat(3, minmax(108px, 1fr)); gap: 10px; }
+.score {
+  position: relative; overflow: hidden; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--surface); padding: 16px 18px;
+  transition: transform .25s var(--ease), border-color .25s var(--ease);
+}
+.score::before {
+  content: ""; position: absolute; top: 0; left: 10%; right: 10%; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.22), transparent);
+}
+.score:hover { transform: translateY(-2px); border-color: var(--line-strong); }
+.num { font: 700 30px/1 "JetBrains Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.label { margin-top: 8px; color: var(--quiet); font-size: 9.5px; text-transform: uppercase; font-weight: 700; letter-spacing: 0.11em; }
+.meter { height: 4px; border-radius: 999px; background: rgba(255,255,255,0.06); overflow: hidden; margin: 22px 0 26px; }
+.meter-fill {
+  height: 100%; border-radius: 999px; width: ${passRate}%;
+  background: ${failed ? 'linear-gradient(90deg, var(--red), #f7c95c)' : 'var(--brand-gradient)'};
+  box-shadow: 0 0 12px ${failed ? 'rgba(255,92,124,0.5)' : 'rgba(52,245,197,0.5)'};
+  animation: fill 1s var(--ease) both;
+}
+@keyframes fill { from { width: 0; } }
 .grid { display: grid; gap: 10px; }
-.row { display: grid; grid-template-columns: 82px minmax(180px, 1fr) minmax(220px, 1.4fr); gap: 14px; align-items: center; padding: 14px 16px; }
-.badge { width: fit-content; border-radius: 6px; padding: 5px 9px; font: 800 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
-.PASS { color: var(--green); background: rgba(65,230,162,.12); }
-.FAIL { color: var(--red); background: rgba(255,85,119,.12); }
-.name { font-weight: 800; }
-.detail { color: var(--muted); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
-@media (max-width: 760px) { header, .row { display: grid; } .row { grid-template-columns: 1fr; } .scores { min-width: 0; } }
+.row {
+  display: grid; grid-template-columns: 82px minmax(180px, 1fr) minmax(220px, 1.4fr); gap: 14px; align-items: center;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px;
+  transition: transform .25s var(--ease), border-color .25s var(--ease), box-shadow .25s var(--ease);
+}
+.row:hover { transform: translateY(-1px); border-color: var(--line-strong); box-shadow: 0 10px 32px -14px rgba(0,0,0,0.65); }
+.badge {
+  width: fit-content; border-radius: 999px; padding: 5px 11px; border: 1px solid transparent;
+  font: 800 10.5px "JetBrains Mono", ui-monospace, monospace; letter-spacing: 0.06em;
+}
+.PASS { color: var(--green); background: rgba(60,233,164,0.10); border-color: rgba(60,233,164,0.25); }
+.FAIL { color: var(--red); background: rgba(255,92,124,0.10); border-color: rgba(255,92,124,0.28); }
+.name { font-weight: 700; font-size: 13.5px; letter-spacing: -0.01em; }
+.detail { color: var(--muted); font: 11.5px/1.5 "JetBrains Mono", ui-monospace, monospace; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: no-preference) {
+  .row { animation: rise .5s var(--ease) both; }
+  ${results.map((_, i) => `.row:nth-child(${i + 1}) { animation-delay: ${Math.min(i * 0.03, 0.45).toFixed(2)}s; }`).join('\n  ')}
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+}
+@media (max-width: 760px) { .row { grid-template-columns: 1fr; } .scores { grid-template-columns: repeat(3, 1fr); width: 100%; } }
 </style>
 </head>
 <body>
 <main>
   <header>
-    <div>
-      <h1>Splice Local Validation</h1>
-      <p>Deterministic proof run for browser cognition, security, OpenClaw, and dashboard features.</p>
+    <div class="brand">
+      <div class="mark">S</div>
+      <div>
+        <h1><span class="wordmark">Splice</span> Local Validation</h1>
+        <p class="lede">Deterministic proof run for browser cognition, security, OpenClaw, and dashboard features.</p>
+      </div>
     </div>
     <div class="scores">
       <div class="score"><div class="num" style="color:var(--green)">${passed}</div><div class="label">Passed</div></div>
       <div class="score"><div class="num" style="color:${failed ? 'var(--red)' : 'var(--blue)'}">${failed}</div><div class="label">Failed</div></div>
+      <div class="score"><div class="num" style="color:${failed ? 'var(--red)' : 'var(--green)'}">${passRate}%</div><div class="label">Pass Rate</div></div>
     </div>
   </header>
+  <div class="meter"><div class="meter-fill"></div></div>
   <section class="grid">
     ${results.map(r => `<div class="row"><span class="badge ${r.status}">${r.status}</span><span class="name">${escapeHtml(r.name)}</span><span class="detail">${escapeHtml(r.detail)}</span></div>`).join('')}
   </section>
@@ -273,7 +355,231 @@ async function main() {
       }
       const title = await browser.getActivePage().title();
       if (title !== 'Checkout Complete') throw new Error(`Expected success title, got ${title}.`);
-      return 'email filled, submit clicked, postcondition verified';
+      if (!submitPlan.delta || !submitPlan.delta.summary) throw new Error('Executed plan is missing the post-action delta.');
+      if (!submitPlan.verification.evidence.some(e => e.includes('Delta since action'))) {
+        throw new Error('Verification evidence does not include the delta summary.');
+      }
+      return 'email filled, submit clicked, postcondition + post-action delta verified';
+    });
+
+    await step('Delta observations report only what changed', async () => {
+      // Establish a baseline, mutate the page, then ask for the delta.
+      await browser.getSemanticTree('delta probe', 'UX');
+      await browser.executeScript(`(() => {
+        const probe = document.createElement('button');
+        probe.id = 'delta-probe';
+        probe.textContent = 'Delta probe button';
+        document.querySelector('main').appendChild(probe);
+      })()`);
+      const delta = await browser.getSemanticDelta('delta probe');
+      if ('fullTreeRequired' in delta) throw new Error(`Expected a delta, got full-tree fallback: ${delta.reason}`);
+      if (!delta.added.some(a => (a.text || '').includes('Delta probe button'))) {
+        throw new Error(`New probe button missing from delta.added: ${JSON.stringify(delta.added)}`);
+      }
+      if (!delta.snapshotHash || delta.deltaOf === delta.snapshotHash) throw new Error('Snapshot hash did not advance after a DOM mutation.');
+
+      // Mutate the probe's text: the next delta must report it as changed, not added.
+      await browser.executeScript(`document.getElementById('delta-probe').textContent = 'Delta probe button clicked'`);
+      const second = await browser.getSemanticDelta('delta probe');
+      if ('fullTreeRequired' in second) throw new Error('Second delta unexpectedly fell back to the full tree.');
+      const textChange = second.changed.find(c => c.field === 'text' && c.after.includes('clicked'));
+      if (!textChange) throw new Error(`Text mutation missing from delta.changed: ${JSON.stringify(second.changed)}`);
+
+      // Remove the probe: the final delta must report it as removed.
+      await browser.executeScript(`document.getElementById('delta-probe').remove()`);
+      const third = await browser.getSemanticDelta('delta probe');
+      if ('fullTreeRequired' in third) throw new Error('Third delta unexpectedly fell back to the full tree.');
+      if (!third.removed.some(r => (r.text || '').includes('Delta probe'))) {
+        throw new Error(`Removed probe missing from delta.removed: ${JSON.stringify(third.removed)}`);
+      }
+      return `added → changed ("${textChange.before}" → "${textChange.after}") → removed all tracked`;
+    });
+
+    await step('Stale snapshot hash falls back to the full tree', async () => {
+      const stale = await browser.getSemanticDelta('delta probe', 'UX', 'deadbeefcafe');
+      if (!('fullTreeRequired' in stale)) throw new Error('Mismatched lastSnapshotHash did not trigger the full-tree fallback.');
+      if (!stale.tree || stale.tree.type !== 'root') throw new Error('Full-tree fallback did not include the fresh tree.');
+      if (!stale.snapshotHash) throw new Error('Full-tree fallback did not include the new baseline hash.');
+      const fresh = await browser.getSemanticDelta('delta probe', 'UX', stale.snapshotHash);
+      if ('fullTreeRequired' in fresh) throw new Error(`Matching hash still fell back to the full tree: ${fresh.reason}`);
+      return `stale hash → full tree (${stale.snapshotHash}); matching hash → delta (${fresh.summary})`;
+    });
+
+    await step('Structural-only deltas suppress text churn', async () => {
+      await browser.executeScript(`(() => {
+        const ticker = document.createElement('button');
+        ticker.id = 'churn-probe';
+        ticker.textContent = 'Churn probe ticker 1';
+        document.querySelector('main').appendChild(ticker);
+      })()`);
+      await browser.getSemanticDelta('churn probe'); // absorb the addition into the baseline
+      await browser.executeScript(`document.getElementById('churn-probe').textContent = 'Churn probe ticker 2'`);
+      const structural = await browser.getSemanticDelta('churn probe', 'UX', undefined, true);
+      await browser.executeScript(`document.getElementById('churn-probe').remove()`);
+      if ('fullTreeRequired' in structural) throw new Error('Structural delta unexpectedly fell back to the full tree.');
+      if (structural.changed.some(c => c.field === 'text')) throw new Error(`Text churn was not suppressed: ${JSON.stringify(structural.changed)}`);
+      if (!structural.textChangesIgnored) throw new Error('textChangesIgnored counter is missing.');
+      if (typeof structural.estimatedTokensSaved !== 'number') throw new Error('Delta is missing its token-savings estimate.');
+      return `${structural.textChangesIgnored} text change(s) suppressed; ~${structural.estimatedTokensSaved} tokens saved vs full tree`;
+    });
+
+    await step('Speculative fork reports how branches differ', async () => {
+      const summaries = await browser.speculativeFork([`${fixture.url}/pricing`]);
+      if (summaries.length !== 1) throw new Error(`Expected one branch summary, got ${summaries.length}.`);
+      const s = summaries[0];
+      if (!s.branchId.startsWith('speculative-')) throw new Error(`Malformed branch id: ${s.branchId}`);
+      if (s.status !== 'ready') return `branch ${s.branchId} still pre-loading (bounded wait respected)`;
+      if (!s.comparedToActive || typeof s.comparedToActive.uniqueElements !== 'number' || !s.comparedToActive.summary) {
+        throw new Error(`Ready branch is missing its comparison: ${JSON.stringify(s)}`);
+      }
+      return `branch ${s.branchId}: ${s.comparedToActive.summary}`;
+    });
+
+    await step('Recovery memory learns and surfaces past fixes', async () => {
+      const host = new URL(fixture.url).host;
+      const learned = browser.recoveryMemory.lookup(host, 'ui_obstruction');
+      if (!learned.length) throw new Error('Overlay dismissal was not recorded as a recovery pattern.');
+      // Re-inject an obstruction: the next diagnosis should recommend the learned fix.
+      await browser.executeScript(`(() => {
+        const modal = document.createElement('div');
+        modal.className = 'modal';
+        modal.id = 'relapse-modal';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-label', 'Subscribe to continue');
+        modal.innerHTML = '<div class="modal-card"><h2>Subscribe to continue</h2><button aria-label="Close subscribe modal">Close</button></div>';
+        document.body.appendChild(modal);
+      })()`);
+      const diagnosis = await browser.diagnoseAgentState('submit checkout form');
+      await browser.executeScript(`document.getElementById('relapse-modal')?.remove()`);
+      if (diagnosis.state !== 'ui_obstruction') throw new Error(`Expected ui_obstruction relapse, got ${diagnosis.state}.`);
+      const strategy = diagnosis.recommendedRecoveryStrategy;
+      if (!strategy || strategy.source !== 'learned') throw new Error(`Expected a learned strategy, got: ${JSON.stringify(strategy)}`);
+      if (!strategy.learnedPatterns?.length) throw new Error('Learned strategy is missing its supporting patterns.');
+      return `${learned[0].successCount}× proven pattern surfaced: ${strategy.learnedPatterns[0].action} via "${strategy.learnedPatterns[0].intent}"`;
+    });
+
+    await step('Recovery memory decays stale patterns', async () => {
+      const { RecoveryMemory } = await import('./src/RecoveryMemory.js');
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'splice-recovery-'));
+      const day = 86_400_000;
+      // 5 successes 40 days ago decays to ~0.69 — still listed, but a single
+      // success from an hour ago (score ~1) must outrank it.
+      fs.writeFileSync(path.join(dir, 'recovery-memory.json'), JSON.stringify([
+        { domain: 'shop.example', state: 'ui_obstruction', intent: 'close old modal', action: 'click', successCount: 5, lastSuccessAt: Date.now() - 40 * day },
+        { domain: 'shop.example', state: 'ui_obstruction', intent: 'close new modal', action: 'click', successCount: 1, lastSuccessAt: Date.now() - 3_600_000 },
+        // 1 success 90 days ago decays to ~0.01 — withheld entirely.
+        { domain: 'shop.example', state: 'captcha', intent: 'ancient fix', action: 'click', successCount: 1, lastSuccessAt: Date.now() - 90 * day },
+      ]));
+      const memory = new RecoveryMemory(dir);
+      const ranked = memory.lookup('shop.example', 'ui_obstruction');
+      if (ranked.length !== 2) throw new Error(`Expected both obstruction patterns, got ${ranked.length}.`);
+      if (ranked[0].intent !== 'close new modal') throw new Error(`Fresh pattern did not outrank the stale streak: ${JSON.stringify(ranked.map(p => p.intent))}`);
+      if (memory.lookup('shop.example', 'captcha').length !== 0) throw new Error('Fully decayed pattern was still surfaced.');
+      return 'fresh success outranks stale streak; fully decayed patterns withheld';
+    });
+
+    await step('Token optimizer flags redundant full reads', async () => {
+      await browser.getSemanticTree('token audit', 'UX');
+      if (browser.getObservationEfficiencyHint()) throw new Error('Efficiency hint fired before any redundant read.');
+      await browser.getSemanticTree('token audit', 'UX');
+      const hint = browser.getObservationEfficiencyHint();
+      if (!hint || !hint.includes('deltaOnly')) throw new Error(`Identical re-read did not produce a deltaOnly hint: ${hint}`);
+      if (browser.metrics.redundantObservationTokens <= 0) throw new Error('Redundant tokens were not accounted in session metrics.');
+      // Once the page actually changes, the hint must clear.
+      await browser.executeScript(`(() => {
+        const marker = document.createElement('button');
+        marker.id = 'token-audit-marker';
+        marker.textContent = 'Token audit marker';
+        document.querySelector('main').appendChild(marker);
+      })()`);
+      await browser.getSemanticTree('token audit', 'UX');
+      await browser.executeScript(`document.getElementById('token-audit-marker').remove()`);
+      if (browser.getObservationEfficiencyHint()) throw new Error('Efficiency hint persisted after the page changed.');
+      return `unchanged re-read → hint (~${browser.metrics.redundantObservationTokens} redundant tokens tracked); changed page → silent`;
+    });
+
+    await step('Agent tracker steers heavy readers toward deltas', async () => {
+      const tracker = browser.agentTracker;
+      for (let i = 0; i < 3; i++) {
+        tracker.recordAction('heavy-reader', { tool: 'get_semantic_tree_optimized', outcome: 'ok', durationMs: 800, tokensReturned: 2400 });
+      }
+      const profile = tracker.getProfile('heavy-reader');
+      if (!profile || profile.tokensReturnedEstimate !== 7200) throw new Error(`Bad token accounting: ${profile?.tokensReturnedEstimate}`);
+      if (!profile.optimizations.some(o => o.id === 'use-delta-observations')) throw new Error('Heavy reader did not get the delta directive.');
+      const inline = tracker.getInlineDirective('heavy-reader');
+      if (!inline || !inline.includes('Token Optimizer')) throw new Error(`Healthy heavy reader should get an efficiency hint, got: ${inline}`);
+      // An agent already reading cheaply stays unbothered.
+      for (let i = 0; i < 3; i++) {
+        tracker.recordAction('frugal-reader', { tool: 'get_semantic_tree_optimized', outcome: 'ok', durationMs: 300, tokensReturned: 200 });
+      }
+      if (tracker.getInlineDirective('frugal-reader') !== null) throw new Error('Frugal reader should not receive directives.');
+      return 'heavy reader → deltaOnly directive; frugal reader → silent';
+    });
+
+    await step('Compact plans trim token-heavy fields', async () => {
+      const { compactVerifiedPlan } = await import('./src/BrowserManager.js');
+      const plan = await browser.compileVerifiedAction({ intent: 'go to pricing', constraints: { noNavigationOutsideDomain: true } });
+      const slim = compactVerifiedPlan(plan) as any;
+      if (slim.alternatives || slim.evidence || slim.preconditions || slim.postconditions) throw new Error('Compact plan still carries heavy fields.');
+      if (!slim.plan?.length || typeof slim.confidence !== 'number' || !slim.risk) throw new Error('Compact plan lost essential fields.');
+      const fullBytes = JSON.stringify(plan).length;
+      const slimBytes = JSON.stringify(slim).length;
+      if (slimBytes >= fullBytes) throw new Error(`Compact plan did not shrink the payload (${fullBytes} → ${slimBytes}).`);
+      return `${fullBytes}B → ${slimBytes}B (${Math.round((1 - slimBytes / fullBytes) * 100)}% smaller)`;
+    });
+
+    await step('Config loader layers defaults, file, and env', async () => {
+      const { resolveConfig } = await import('./src/config.js');
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'splice-config-'));
+      const configPath = path.join(dir, 'splice.config.json');
+      fs.writeFileSync(configPath, JSON.stringify({ enableOpenClaw: true, openclawGatewayPort: 19999, bridgePort: 4555 }));
+      const resolved = resolveConfig({ configPath, env: { OPENCLAW_GATEWAY_PORT: '20001' } });
+      if (!resolved.values.enableOpenClaw || resolved.sources.enableOpenClaw !== 'file') throw new Error('File value was not honored.');
+      if (resolved.values.openclawGatewayPort !== 20001 || resolved.sources.openclawGatewayPort !== 'env') throw new Error('Env did not override the file.');
+      if (resolved.sources.bridgePort !== 'file' || resolved.sources.autoOpenDashboard !== 'default') throw new Error('Source attribution is wrong.');
+      // Unknown keys and secrets warn without breaking startup.
+      fs.writeFileSync(configPath, JSON.stringify({ enableOpenClaw: true, typoKey: 1, encryptionKey: 'nope' }));
+      const noisy = resolveConfig({ configPath, env: {} });
+      if (!noisy.warnings.some(w => w.includes('typoKey'))) throw new Error('Unknown key did not warn.');
+      if (!noisy.warnings.some(w => w.includes('SPLICE_ENCRYPTION_KEY'))) throw new Error('Secret-in-file did not warn.');
+      if (!noisy.values.enableOpenClaw) throw new Error('Valid keys must survive warnings.');
+      return 'env > file > default, with typed warnings for bad keys';
+    });
+
+    await step('CLI scaffolds, inspects, and diagnoses a workspace', async () => {
+      const { spawnSync } = await import('node:child_process');
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'splice-cli-'));
+      const cli = path.join(process.cwd(), 'dist_test', 'src', 'cli.js');
+      const run = (...args: string[]) => spawnSync('node', [cli, ...args], { cwd: dir, encoding: 'utf8' as const });
+
+      const init = run('init');
+      if (init.status !== 0 || !fs.existsSync(path.join(dir, 'splice.config.json'))) throw new Error(`init failed: ${init.stderr}`);
+      if (!init.stdout.includes('mcpServers') || !init.stdout.includes('claude mcp add splice')) throw new Error('init did not print MCP client snippets.');
+
+      const refused = run('init');
+      if (refused.status === 0) throw new Error('init overwrote an existing config without --force.');
+
+      const forced = run('init', '--force', '--openclaw');
+      if (forced.status !== 0) throw new Error(`init --force failed: ${forced.stderr}`);
+      if (JSON.parse(fs.readFileSync(path.join(dir, 'splice.config.json'), 'utf8')).enableOpenClaw !== true) {
+        throw new Error('init --openclaw did not enable the gateway in the config.');
+      }
+
+      const show = run('config', '--json');
+      const effective = JSON.parse(show.stdout);
+      if (effective.values.enableOpenClaw !== true || effective.sources.enableOpenClaw !== 'file') {
+        throw new Error(`config --json misreported: ${show.stdout}`);
+      }
+
+      const doctor = run('doctor', '--json');
+      const report = JSON.parse(doctor.stdout);
+      if (doctor.status !== 0 || report.healthy !== true) throw new Error(`doctor reported unhealthy: ${doctor.stdout}`);
+      const names = report.checks.map((c: any) => c.name);
+      for (const expected of ['Node.js runtime', 'Chromium browser', 'Config file', 'OpenClaw gateway port']) {
+        if (!names.includes(expected)) throw new Error(`doctor is missing the "${expected}" check.`);
+      }
+      return `init → refuse → --force → config --json → doctor (${report.checks.length} checks) all verified`;
     });
 
     await step('Secret egress firewall blocks non-GET leak', async () => {
@@ -508,6 +814,14 @@ async function main() {
         throw new Error('Dashboard export payload does not include runtime health and agent profiles.');
       }
       return 'timeline filter + one-click audit export wired';
+    });
+
+    await step('Command Center visualizes state changes', async () => {
+      const html = fs.readFileSync(commandCenterPath, 'utf8');
+      if (!html.includes('id="delta-feed"')) throw new Error('State Changes panel missing from dashboard.');
+      if (!html.includes('semantic_delta')) throw new Error('No semantic_delta events were injected into the dashboard.');
+      if (!html.includes('id="stat-tokens"')) throw new Error('Tokens Saved stat tile missing from dashboard.');
+      return 'State Changes panel + Tokens Saved tile present with injected delta events';
     });
   } finally {
     await browser.close().catch(() => {});

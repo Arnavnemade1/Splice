@@ -17,6 +17,8 @@ export interface AgentActionRecord {
   outcome: 'ok' | 'error';
   durationMs: number;
   errorCode?: string;
+  /** Rough size of the tool response delivered to the agent (chars / 4). */
+  tokensReturned?: number;
   timestamp: number;
 }
 
@@ -42,6 +44,8 @@ export interface AgentPerformanceProfile {
   recentSuccessRate: number;
   errorBreakdown: Record<string, number>;
   toolUsage: Record<string, number>;
+  /** Rough total tokens this agent has received from tool responses. */
+  tokensReturnedEstimate: number;
   firstSeenAt: number;
   lastActionAt: number;
   optimizations: AgentOptimization[];
@@ -114,6 +118,7 @@ export class AgentTracker {
       recentSuccessRate: Number(recentSuccessRate.toFixed(3)),
       errorBreakdown,
       toolUsage,
+      tokensReturnedEstimate: records.reduce((sum, r) => sum + (r.tokensReturned ?? 0), 0),
       firstSeenAt: state.firstSeenAt,
       lastActionAt: records[records.length - 1].timestamp,
       optimizations: [],
@@ -136,7 +141,15 @@ export class AgentTracker {
    */
   getInlineDirective(agentId: string): string | null {
     const profile = this.getProfile(agentId);
-    if (!profile || profile.status === 'optimal') return null;
+    if (!profile) return null;
+    if (profile.status === 'optimal') {
+      // Healthy agents stay unbothered — except when they are visibly burning
+      // tokens on redundant observations: efficiency hints pay for themselves.
+      const efficiency = profile.optimizations.find((o) => o.id === 'use-delta-observations');
+      return efficiency
+        ? `[Token Optimizer] ${efficiency.directive}${efficiency.suggestedTool ? ` → call ${efficiency.suggestedTool}` : ''}`
+        : null;
+    }
     const top = profile.optimizations[0];
     if (!top) return null;
     const label = profile.status === 'critical' ? 'AGENT OPTIMIZER (critical)' : 'Agent Optimizer';
@@ -189,6 +202,18 @@ export class AgentTracker {
         directive: 'Multiple timeout/network failures — enable resource blocking and re-check runtime health before continuing.',
         suggestedTool: 'get_runtime_health',
       });
+    }
+    const treeReads = records.filter((r) => r.tool === 'get_semantic_tree_optimized' && (r.tokensReturned ?? 0) > 0);
+    if (treeReads.length >= 3) {
+      const avgTokens = Math.round(treeReads.reduce((sum, r) => sum + (r.tokensReturned ?? 0), 0) / treeReads.length);
+      if (avgTokens > 1500) {
+        out.push({
+          id: 'use-delta-observations',
+          severity: 'hint',
+          directive: `${treeReads.length} semantic tree reads averaging ~${avgTokens} tokens each — after the first full read, pass deltaOnly: true (with the same intent) to receive only what changed.`,
+          suggestedTool: 'get_semantic_tree_optimized',
+        });
+      }
     }
     if (profile.avgDurationMs > 20_000) {
       out.push({

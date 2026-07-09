@@ -1,3 +1,6 @@
+// Must be first: applies splice.config.json to process.env before any module
+// reads its environment variables.
+import "./config.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -6,7 +9,7 @@ import {
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { BrowserManager } from "./BrowserManager.js";
+import { BrowserManager, compactVerifiedPlan } from "./BrowserManager.js";
 import { RunJournal } from "./RunJournal.js";
 import { classifyError, withTimeout, errorMessage } from "./Resilience.js";
 import fs from "node:fs";
@@ -35,12 +38,12 @@ Splice is a cognition and safety layer for browser work — it does not replace 
 
 Guardrails that are always on: prompt-injection redaction in semantic trees, a secret egress firewall on non-GET requests, encrypted snapshots, and a crash-self-healing browser (get_runtime_health shows recovery state).
 
-Efficiency: pass intent + maxTokens to get_semantic_tree_optimized to prune the DOM; pass agentId on calls to get per-agent tracking and in-action optimization directives; use fork_state to test risky actions on a shadow branch before committing.`;
+Efficiency: pass intent + maxTokens to get_semantic_tree_optimized to prune the DOM; after the first read, pass deltaOnly: true (with the same intent) to receive only what changed since your last observation instead of the whole tree; pass agentId on calls to get per-agent tracking and in-action optimization directives; use fork_state to test risky actions on a shadow branch before committing.`;
 
 const server = new Server(
   {
     name: "splice-enterprise-browser",
-    version: "2.1.0",
+    version: "2.2.0",
   },
   {
     capabilities: {
@@ -180,14 +183,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "get_semantic_tree_optimized",
-        description: "Extract an AI-optimized semantic tree of the current page, pruned by your intent and viewed through a lens (UX, Security, Performance, Network, Behavior, Vision). Returns stable data-splice-id handles for every actionable element — these IDs are what interact and compile_verified_action operate on. Hostile page text (prompt injection) is redacted before it reaches you. Example: { intent: 'find checkout form', lens: 'UX', maxTokens: 1200 }.",
+        description: "Extract an AI-optimized semantic tree of the current page, pruned by your intent and viewed through a lens (UX, Security, Performance, Network, Behavior, Vision). Returns stable data-splice-id handles for every actionable element — these IDs are what interact and compile_verified_action operate on — plus a snapshotHash identifying this observation. Hostile page text (prompt injection) is redacted before it reaches you. On long sessions, pass deltaOnly: true (with the SAME intent as your previous read) to receive only what changed since the last observation: added/removed elements, text and value mutations, and URL/title transitions. If no baseline exists or your lastSnapshotHash is stale, the full tree is returned instead (fullTreeRequired: true) and the baseline is re-established. Example: { intent: 'find checkout form', lens: 'UX', maxTokens: 1200 } then { intent: 'find checkout form', deltaOnly: true }.",
         annotations: { title: "Semantic Tree", readOnlyHint: true },
         inputSchema: {
           type: "object",
           properties: {
-            intent: { type: "string", description: "Your current goal (e.g. 'checkout', 'login', 'read article'). Used to prune irrelevant DOM elements." },
+            intent: { type: "string", description: "Your current goal (e.g. 'checkout', 'login', 'read article'). Used to prune irrelevant DOM elements. Keep it identical across deltaOnly calls so diffs reflect real page changes, not pruning changes." },
             lens: { type: "string", enum: ["UX", "Security", "Performance", "Vision"], description: "The Semantic Lens to view the page through." },
             maxTokens: { type: "number", description: "The maximum number of tokens to return. Triggers aggressive truncation if exceeded." },
+            deltaOnly: { type: "boolean", description: "If true, return only the changes since the previous observation on this branch (added/removed/changed elements, URL/title transitions) instead of the full tree. Falls back to the full tree when no baseline exists." },
+            lastSnapshotHash: { type: "string", description: "Optional with deltaOnly: the snapshotHash from your last observation. If it no longer matches the server baseline, the full tree is returned so you never act on a stale diff." },
+            structuralOnly: { type: "boolean", description: "Optional with deltaOnly: suppress text-only mutations (tickers, timestamps, counters) and report only added/removed elements and value changes. textChangesIgnored counts what was filtered." },
             agentId: { type: "string", description: "Optional agent identifier for per-agent tracking and in-action optimization." }
           },
           required: ["intent"],
@@ -236,6 +242,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             value: { type: "string", description: "Optional value for type/select/press actions." },
             execute: { type: "boolean", description: "If true, execute only when confidence and preconditions are sufficient." },
             includeVision: { type: "boolean", description: "If true, include targetPreview: a base64 PNG crop of the chosen target element for hybrid vision+DOM confirmation." },
+            compact: { type: "boolean", description: "If true, trim the response to essentials — plan, confidence, risk, expectedOutcome, and the verification verdict with a delta summary. Drops alternatives and compile-time evidence to save tokens on long sessions." },
             constraints: {
               type: "object",
               properties: {
@@ -261,7 +268,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "speculative_fork",
-        description: "Proactively fork branches and navigate to a list of URLs in the background to reduce latency when you later navigate to them.",
+        description: "Proactively fork branches and navigate to a list of URLs in the background to reduce latency when you later navigate to them. Pages that finish loading within the wait budget return a comparison against the active branch (elements unique to the pre-loaded page, active-branch elements it lacks) so you can pick the right branch without visiting each one; slower pages are marked 'loading' and keep pre-loading in the background.",
         inputSchema: {
           type: "object",
           properties: {
@@ -636,7 +643,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       durationMs,
     });
     if (agentId) {
-      browser.agentTracker.recordAction(agentId, { tool: toolName, outcome: "ok", durationMs });
+      // Token accounting: rough estimate of what this response costs the agent.
+      const tokensReturned = Array.isArray(result?.content)
+        ? Math.round(result.content.reduce((sum: number, c: any) => sum + (typeof c?.text === "string" ? c.text.length : 0), 0) / 4)
+        : 0;
+      browser.agentTracker.recordAction(agentId, { tool: toolName, outcome: "ok", durationMs, tokensReturned });
       // In-action optimization: if the agent's live health has degraded,
       // attach a corrective directive directly to the successful response.
       const directive = browser.agentTracker.getInlineDirective(agentId);
@@ -687,9 +698,21 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
     }
 
     if (request.params.name === "get_semantic_tree_optimized") {
-      const { intent, lens, maxTokens } = request.params.arguments as any;
+      const { intent, lens, maxTokens, deltaOnly, lastSnapshotHash, structuralOnly } = request.params.arguments as any;
+      if (deltaOnly === true) {
+        const delta = await browser.getSemanticDelta(intent, lens || "UX", lastSnapshotHash, structuralOnly === true);
+        return { content: [{ type: "text", text: JSON.stringify(delta, null, 2) }] };
+      }
       const tree = await browser.getSemanticTree(intent, lens || "UX", maxTokens);
-      return { content: [{ type: "text", text: JSON.stringify(tree, null, 2) }] };
+      // snapshotHash is additive: existing clients keep the same tree shape,
+      // delta-aware clients feed it back via lastSnapshotHash.
+      const content: Array<{ type: string; text: string }> = [
+        { type: "text", text: JSON.stringify({ ...tree, snapshotHash: browser.getSnapshotHash() }, null, 2) },
+      ];
+      // Token efficiency: if this full read re-sent an unchanged page, say so.
+      const hint = browser.getObservationEfficiencyHint();
+      if (hint) content.push({ type: "text", text: hint });
+      return { content };
     }
 
     if (request.params.name === "interact") {
@@ -706,9 +729,10 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
     }
 
     if (request.params.name === "compile_verified_action") {
-      const { intent, value, constraints, execute, includeVision } = request.params.arguments as any;
+      const { intent, value, constraints, execute, includeVision, compact } = request.params.arguments as any;
       const plan = await browser.compileVerifiedAction({ intent, value, constraints, execute: execute === true, includeVision: includeVision === true });
-      return { content: [{ type: "text", text: JSON.stringify(plan, null, 2) }] };
+      const payload = compact === true ? compactVerifiedPlan(plan) : plan;
+      return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
     }
 
     if (request.params.name === "fork_state") {
@@ -719,8 +743,13 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
 
     if (request.params.name === "speculative_fork") {
       const { urls } = request.params.arguments as { urls: string[] };
-      await browser.speculativeFork(urls);
-      return { content: [{ type: "text", text: `Speculatively forked and pre-loaded ${urls.length} branches in the background.` }] };
+      const summaries = await browser.speculativeFork(urls);
+      return {
+        content: [{
+          type: "text",
+          text: `Speculatively forked ${urls.length} branches. How each pre-loaded page differs from the active branch:\n${JSON.stringify(summaries, null, 2)}`,
+        }],
+      };
     }
 
     if (request.params.name === "commit_branch") {

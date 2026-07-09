@@ -11,6 +11,9 @@
  * errors carry { ok: false, error, errorCode, errorEnvelope }.
  */
 
+// Must be first: applies splice.config.json to process.env before any module
+// reads its environment variables.
+import './config.js';
 import http from 'node:http';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -67,6 +70,8 @@ async function dispatch(action: string, args: Record<string, any>): Promise<unkn
       return { ok: true, url: args.url };
     case 'getSemanticTree':
       return browser.getSemanticTree(args.intent, args.lens || 'UX', args.maxTokens);
+    case 'getSemanticDelta':
+      return browser.getSemanticDelta(args.intent, args.lens || 'UX', args.lastSnapshotHash, args.structuralOnly === true);
     case 'interact': {
       // Python wrapper sends "interaction"; Node tools send "action".
       const interaction = args.interaction || args.action;

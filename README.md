@@ -39,6 +39,9 @@ Execution-focused browser tools answer "how do I click that?". Splice answers th
 | Secret egress firewall on outbound requests | — | ✅ always on |
 | Crash self-healing + reproducible run journal | — | ✅ runtime reliability engine |
 | Live per-agent performance tracking with in-run corrective directives | — | ✅ agent optimizer |
+| Observe only what changed instead of re-reading the whole page | — | ✅ delta observations |
+| Detect wasted tokens mid-run and steer the agent to cheaper reads | — | ✅ token efficiency engine |
+| Remember which fixes worked on a domain and recommend them next time | — | ✅ recovery memory |
 | Local observability dashboard with exportable audit evidence | — | ✅ Command Center |
 
 The goal: make Splice the default cognitive and safety layer for the MCP agent ecosystem — the layer every agent stack assumes is there, the way systems assume a kernel.
@@ -54,6 +57,8 @@ The goal: make Splice the default cognitive and safety layer for the MCP agent e
 | "What if the browser crashes mid-run?" | The Runtime Reliability layer auto-relaunches, rebuilds crashed branches, and restores last-known URLs — no restart required. |
 | "Can I reproduce a failed run?" | The append-only Run Journal records every tool call (redacted args, outcome, duration, error code) as JSONL on disk. |
 | "Is my agent thrashing?" | Agent Tracking profiles every agent live and injects corrective optimization directives into tool responses mid-run. |
+| "Do I have to re-read the whole page every step?" | Delta observations return only added/removed/changed elements and navigation transitions, with snapshot-hash staleness detection. |
+| "Why relearn the same fix every run?" | Recovery memory persists which action recovered each failure state per domain and recommends it in future diagnoses. |
 
 ---
 
@@ -201,6 +206,47 @@ Use the MCP tool:
 
 Splice generates AI-optimized semantic trees with lenses for UX, security, performance, network, behavior, and vision workflows. Intent pruning and token budgets keep page observations compact without losing actionable controls.
 
+Every full-tree response includes a `snapshotHash` identifying the observation.
+
+### Delta-Based Observations
+
+On long sessions, re-reading the entire tree after every step is redundant — most of the page never changes. Pass `deltaOnly: true` to `get_semantic_tree_optimized` (with the **same** `intent` as your previous read, since intent pruning changes which elements are visible) to receive only what changed since your last observation:
+
+```json
+{
+  "deltaOf": "1f0c72a9b4e3",
+  "snapshotHash": "4f53cda18c2b",
+  "url": { "before": "https://shop.example/cart", "after": "https://shop.example/checkout", "changed": true },
+  "title": { "before": "Cart", "after": "Checkout", "changed": true },
+  "added": [{ "id": "button-14", "type": "interactive", "text": "Place order", "tag": "button" }],
+  "removed": [{ "id": "button-9", "text": "Proceed to checkout", "tag": "button" }],
+  "changed": [{ "id": "generic-3", "field": "text", "before": "3 items", "after": "3 items — $42.00" }],
+  "unchangedCount": 27,
+  "summary": "navigated https://shop.example/cart → https://shop.example/checkout; title \"Cart\" → \"Checkout\"; 1 added, 1 removed, 1 changed, 27 unchanged"
+}
+```
+
+Optionally pass `lastSnapshotHash` (the `snapshotHash` from your last observation): if it no longer matches the server baseline, Splice returns the full tree instead (`fullTreeRequired: true`, with the fresh `tree` included) so you never act on a stale diff. The first `deltaOnly` call on a branch also falls back to the full tree and establishes the baseline — a single call always yields a usable observation.
+
+On live pages full of tickers, timestamps, and counters, add `structuralOnly: true` to suppress text-only mutations: only added/removed elements and value changes are reported, with `textChangesIgnored` counting what was filtered. Every delta also carries `estimatedTokensSaved` — what it would have cost to receive the full tree instead.
+
+Executed verified actions attach the same structure as `plan.delta`, so post-action verification tells you exactly what the action changed on the page. Deltas are computed per branch, so forked shadow branches keep independent baselines — and `speculative_fork` snapshots each pre-loaded branch and reports how it differs from the active one (elements unique to the pre-loaded page, active-branch elements it lacks), so an agent can pick the right branch without visiting each one.
+
+### Token Efficiency Engine
+
+Splice actively hunts for tokens an agent is wasting and steers it to cheaper observations:
+
+- **Redundant-read detection** — when a full tree read returns content identical to the previous read, Splice counts the re-sent tokens (`metrics.redundantObservationTokens`) and attaches a `[Token Optimizer]` hint to the response telling the agent to switch to `deltaOnly`.
+- **Per-agent token accounting** — every tool response attributed to an `agentId` is sized (`tokensReturnedEstimate` on the agent profile). An agent averaging heavy full-tree reads gets a `use-delta-observations` directive inline — even while healthy, because efficiency hints pay for themselves.
+- **Compact plans** — pass `compact: true` to `compile_verified_action` to trim the response to essentials (plan, confidence, risk, `expectedOutcome`, verification verdict + delta summary), dropping alternatives and compile-time evidence.
+- **Savings ledger** — token savings from pruning and deltas accumulate in `metrics.tokensSavedEstimate` and render as a stat tile in the Command Center.
+
+### Recovery Memory
+
+When a verified action successfully recovers a non-ready state (dismissing an overlay, fixing a blocked validation), Splice persists the `(domain, state) → action` pattern to `.splice/recovery-memory.json`. Future diagnoses on the same domain surface it as `recommendedRecoveryStrategy` with `source: "learned"` and the proven patterns ranked by success count — so agents stop rediscovering the same fixes on every run. States without local history get sensible general advice (`source: "general"`).
+
+Patterns decay over time: a pattern's rank halves every 14 days without a fresh success, so a fix that worked five times last quarter eventually loses to one that worked once yesterday — and fully decayed patterns are withheld rather than recommending a fix the site may have outgrown.
+
 ### Agentic Security Firewall
 
 - Prompt-injection redaction for hidden or visible hostile instructions
@@ -215,6 +261,7 @@ The local dashboard turns a browser run into an inspectable operations console:
 
 - Causal timeline of browser actions
 - State forensics and verified action plans
+- State changes: delta observations showing added/removed elements, text mutations, and navigation transitions
 - Active branches and speculative execution state
 - Security audit findings
 - Console and network telemetry
@@ -302,15 +349,43 @@ Splice uses a TypeScript core for browser control and a Python MCP wrapper for a
 
 ## Quick Start
 
-### Node MCP Server
-
 ```bash
 git clone https://github.com/Arnavnemade1/Splice.git
 cd Splice
 npm install
 npm run build
-node dist/index.js
+
+node dist/cli.js init     # scaffold splice.config.json + print MCP client snippets
+node dist/cli.js doctor   # verify Node, Chromium, ports, and config health
+node dist/cli.js start    # run the MCP server (stdio)
 ```
+
+`splice init` prints ready-to-paste configuration for Claude Code, Claude Desktop, and Cursor, so wiring Splice into a client is copy/paste rather than hand-written JSON. `splice doctor` catches the common setup failures (missing Chromium, unbuilt dist, occupied gateway port) before your agent hits them. (When installed as a dependency, the same commands are available as the `splice` binary.)
+
+### The Splice CLI
+
+| Command | What it does |
+| --- | --- |
+| `splice start [--openclaw] [--dashboard] [--watch]` | Run the MCP server over stdio. Flags map to config keys for one-off launches. |
+| `splice init [--force] [--openclaw] [--dashboard]` | Scaffold `splice.config.json` and print MCP client snippets. Refuses to overwrite without `--force`. |
+| `splice doctor [--json]` | Health-check the environment: Node version, build, Chromium install, workspace writability, dashboard template, config validity, gateway port. Exits non-zero on failure. |
+| `splice config [--json]` | Print the effective configuration and whether each value came from an env var, the config file, or a default. |
+
+### Configuration
+
+Every knob lives in one JSON file instead of scattered env vars. Settings are layered — **environment variables override `splice.config.json`, which overrides defaults** — and the file is discovered via `$SPLICE_CONFIG`, then `./splice.config.json`, then `~/.splice/config.json`:
+
+```json
+{
+  "autoOpenDashboard": false,
+  "enableOpenClaw": false,
+  "openclawGatewayPort": 18789,
+  "bridgePort": 4000,
+  "watchMode": false
+}
+```
+
+`watchMode: true` launches a visible Chromium window instead of headless — handy while developing an agent. Optional string keys: `discordWebhookUrl`, `telemetryUrl`. Secrets are deliberately env-only: `SPLICE_ENCRYPTION_KEY` is never read from the config file, and `splice doctor` warns if you put it there.
 
 ### Python MCP Wrapper
 
@@ -324,7 +399,7 @@ python -m pip install -e .
 splice-mcp
 ```
 
-The Python wrapper auto-starts a localhost bridge (`dist/bridge_server.js`, `127.0.0.1:4000`, override with `SPLICE_BRIDGE_PORT`) that shares the Node core — including the self-healing browser, run journal, typed error envelopes, and agent analytics. It exposes `splice_get_runtime_health`, `splice_export_run_journal`, and `splice_get_agent_analytics` alongside the core browsing tools.
+The Python wrapper auto-starts a localhost bridge (`dist/bridge_server.js`, `127.0.0.1:4000`, override with `SPLICE_BRIDGE_PORT`) that shares the Node core — including the self-healing browser, run journal, typed error envelopes, and agent analytics. It exposes `splice_get_runtime_health`, `splice_export_run_journal`, `splice_get_agent_analytics`, and `splice_get_semantic_delta` alongside the core browsing tools.
 
 ### Enhance Your Existing Agent
 
@@ -404,6 +479,16 @@ The validation covers:
 
 - Agent State Forensics detecting and recovering from an overlay obstruction
 - Verified Intent Actions planning, executing, and verifying a form workflow
+- delta observations tracking added, changed, and removed elements across mutations
+- stale-snapshot detection falling back to the full tree
+- structural-only deltas suppressing text churn
+- speculative fork branch comparisons against the active page
+- recovery memory learning a successful fix and recommending it on relapse
+- time decay ranking fresh recovery patterns above stale streaks
+- the token optimizer flagging redundant full reads and steering heavy readers to deltas
+- compact verified plans shrinking response payloads
+- the config loader layering env vars over splice.config.json over defaults
+- the CLI scaffolding a workspace (`init`), inspecting it (`config`), and diagnosing it (`doctor`)
 - Semantic Security lens prompt-injection redaction
 - non-GET secret egress blocking
 - encrypted snapshot save/load
@@ -415,12 +500,19 @@ The command prints the exact report paths when it finishes.
 
 ### Environment Variables
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `SPLICE_AUTO_OPEN_DASHBOARD` | `0` | Set to `1` to auto-open the Command Center dashboard on startup. |
-| `SPLICE_ENABLE_OPENCLAW` | `0` | Set to `1` to start the OpenClaw WebSocket gateway on boot. |
-| `OPENCLAW_GATEWAY_PORT` | `18789` | Override the OpenClaw gateway port. Only used if `SPLICE_ENABLE_OPENCLAW=1`. |
-| `DISCORD_WEBHOOK_URL` | _(unset)_ | Full Discord webhook URL for automated event notifications. _(on hold)_ |
+Every variable (except secrets and `SPLICE_CONFIG` itself) has a `splice.config.json` equivalent; env vars always win when both are set.
+
+| Variable | Config key | Default | Description |
+| --- | --- | --- | --- |
+| `SPLICE_CONFIG` | — | _(unset)_ | Explicit path to a config file, overriding discovery. |
+| `SPLICE_AUTO_OPEN_DASHBOARD` | `autoOpenDashboard` | `0` | Set to `1` to auto-open the Command Center dashboard on startup. |
+| `SPLICE_ENABLE_OPENCLAW` | `enableOpenClaw` | `0` | Set to `1` to start the OpenClaw WebSocket gateway on boot. |
+| `OPENCLAW_GATEWAY_PORT` | `openclawGatewayPort` | `18789` | Override the OpenClaw gateway port. Only used if the gateway is enabled. |
+| `SPLICE_BRIDGE_PORT` | `bridgePort` | `4000` | Port for the Python bridge server. |
+| `SPLICE_WATCH_MODE` | `watchMode` | `0` | Set to `1` to launch a visible Chromium window instead of headless. |
+| `DISCORD_WEBHOOK_URL` | `discordWebhookUrl` | _(unset)_ | Full Discord webhook URL for automated event notifications. _(on hold)_ |
+| `SPLICE_TELEMETRY_URL` | `telemetryUrl` | _(unset)_ | Opt-in endpoint for anonymized recovery-pattern telemetry (hashed domain, state, action kind — never URLs, selectors, or page content). Unset means nothing is sent. |
+| `SPLICE_ENCRYPTION_KEY` | _(env-only by design)_ | _(auto-generated)_ | Hex key for the snapshot vault. Never read from the config file. |
 
 ---
 
@@ -429,12 +521,12 @@ The command prints the exact report paths when it finishes.
 Core browser tools:
 
 - `navigate`
-- `get_semantic_tree_optimized`
+- `get_semantic_tree_optimized` — full tree, or only what changed via `deltaOnly` / `lastSnapshotHash` / `structuralOnly`
 - `interact`
 - `diagnose_agent_state`
-- `compile_verified_action`
+- `compile_verified_action` — pass `compact: true` for a token-trimmed response
 - `fork_state`
-- `speculative_fork`
+- `speculative_fork` — pre-loaded branches report how they differ from the active page
 - `commit_branch`
 - `save_snapshot`
 - `load_snapshot`

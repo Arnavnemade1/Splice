@@ -1,5 +1,7 @@
 node_modules/
 .splice/
+.claude/settings.local.json
+splice.config.json
 dist/
 dist_test/
 coverage/

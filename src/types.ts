@@ -45,6 +45,8 @@ export interface SessionMetrics {
   preventedErrors: number;
   captchaInterruptions: number;
   selfHealCount: number;
+  /** Tokens re-sent by full tree reads whose content was identical to the previous read. */
+  redundantObservationTokens: number;
 }
 
 export type AgentFailureClass =
@@ -95,6 +97,63 @@ export interface AgentStateDiagnosis {
     /** Heuristic forecast of what happens if the agent repeats its current approach. */
     prediction: string;
   };
+  /** Learning loop: how to recover this state, learned from past verified successes on this domain. */
+  recommendedRecoveryStrategy?: {
+    source: 'learned' | 'general';
+    advice: string;
+    /** Present when source is 'learned': past patterns that worked here, most-proven first. */
+    learnedPatterns?: Array<{ intent: string; action: string; targetLabel?: string; successCount: number }>;
+  };
+}
+
+/** Delta-first observation: what changed since the previous semantic snapshot. */
+export interface SemanticDelta {
+  /** Hash of the baseline snapshot this delta was computed against. */
+  deltaOf: string;
+  /** Hash of the fresh snapshot — pass it back as lastSnapshotHash on the next delta call. */
+  snapshotHash: string;
+  url: { before: string; after: string; changed: boolean };
+  title: { before: string; after: string; changed: boolean };
+  added: Array<{ id: string; type: string; text?: string; tag?: string }>;
+  removed: Array<{ id: string; text?: string; tag?: string }>;
+  changed: Array<{ id: string; field: 'text' | 'value'; before: string; after: string }>;
+  unchangedCount: number;
+  summary: string;
+  /** Present with structuralOnly: how many text-only mutations were suppressed as churn. */
+  textChangesIgnored?: number;
+  /** Rough tokens saved by receiving this delta instead of the full tree. */
+  estimatedTokensSaved?: number;
+}
+
+/** How a speculatively pre-loaded branch differs from the active branch. */
+export interface SpeculativeBranchSummary {
+  branchId: string;
+  url: string;
+  /** 'ready' when the page loaded and was compared within the wait budget; 'loading' when it is still pre-loading in the background. */
+  status: 'ready' | 'loading';
+  title?: string;
+  comparedToActive?: {
+    /** Elements present on this branch but not on the active branch (by tag + text signature). */
+    uniqueElements: number;
+    /** Active-branch elements absent from this branch. */
+    missingElements: number;
+    uniqueSample: string[];
+    summary: string;
+  } | null;
+}
+
+/**
+ * Returned instead of a SemanticDelta when no meaningful diff is possible —
+ * either no baseline exists yet, or the client's lastSnapshotHash no longer
+ * matches the server baseline. The fresh full tree is included so the client
+ * never needs a second round-trip; the new baseline is established.
+ */
+export interface FullTreeFallback {
+  fullTreeRequired: true;
+  reason: string;
+  /** Hash of the fresh snapshot — pass it back as lastSnapshotHash on the next delta call. */
+  snapshotHash: string;
+  tree: SemanticNode;
 }
 
 export interface VerifiedActionPlan {
@@ -125,6 +184,8 @@ export interface VerifiedActionPlan {
   expectedOutcome?: string;
   /** Hybrid vision: base64 PNG crop of the chosen target (requested via includeVision). */
   targetPreview?: string;
+  /** Delta-first: what changed on the page as a result of this action. */
+  delta?: SemanticDelta;
 }
 
 // ─── Multi-Agent Collaboration Types ───────────────────────────────────────

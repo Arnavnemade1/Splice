@@ -1,9 +1,12 @@
 {
   "name": "splice",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Secure browser infrastructure and observability for autonomous web agents.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "splice": "./dist/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -20,6 +23,8 @@
     "build": "tsc",
     "build:test": "tsc -p tsconfig.test.json",
     "clean": "rm -rf dist dist_test",
+    "start": "node dist/cli.js start",
+    "doctor": "node dist/cli.js doctor",
     "test": "npm run build:test && node dist_test/test.js",
     "validate:local": "npm test",
     "demo:local": "npm test",

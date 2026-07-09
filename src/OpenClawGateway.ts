@@ -37,7 +37,7 @@ export class OpenClawGateway {
           ws.send(JSON.stringify({
             event: 'handshake',
             status: 'connected',
-            version: '2.1.0',
+            version: '2.2.0',
             engine: 'Splice Enterprise Browser Core',
             capabilities: [
               'navigate',
@@ -45,6 +45,7 @@ export class OpenClawGateway {
               'diagnose',
               'compile_verified_action',
               'get_semantic_tree',
+              'get_semantic_delta',
               'run_security_audit',
               'capture_screenshot',
               'session_status',
@@ -192,6 +193,12 @@ export class OpenClawGateway {
           const { intent, lens, maxTokens } = args || {};
           const tree = await this.browser.getSemanticTree(intent, lens, maxTokens);
           result = tree;
+          break;
+        }
+
+        case 'get_semantic_delta': {
+          const { intent, lens, lastSnapshotHash, structuralOnly } = args || {};
+          result = await this.browser.getSemanticDelta(intent, lens, lastSnapshotHash, structuralOnly === true);
           break;
         }
 
