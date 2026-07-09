@@ -6,6 +6,12 @@
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "4477", "--bind", "127.0.0.1"],
       "port": 4477
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "5001", "--bind", "127.0.0.1", "--directory", "/Users/arnavnemade/Splice/web"],
+      "port": 5001
     }
   ]
 }

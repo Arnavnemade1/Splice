@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Browser cognition infrastructure for autonomous coding agents. Real understanding. Verified actions. Reliable recovery.">
+  <title>Splice — Browser infrastructure for AI agents</title>
+  <link rel="icon" type="image/png" href="../assets/logo.png">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Doto:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="page-wrapper">
+    <!-- Navigation -->
+    <nav class="navbar">
+      <div class="nav-container">
+        <a href="#" class="nav-logo">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5" fill="none"/>
+            <path d="M12 4 Q18 8, 18 12 Q18 16, 12 20 Q6 16, 6 12 Q6 8, 12 4" fill="currentColor" opacity="0.7"/>
+          </svg>
+          Splice
+        </a>
+        <div class="nav-menu">
+          <a href="#why" class="nav-link">Why Splice</a>
+          <a href="#capabilities" class="nav-link">Capabilities</a>
+          <a href="#workflow" class="nav-link">Workflow</a>
+          <a href="#integration" class="nav-link">Integration</a>
+          <a href="#docs" class="nav-link">Docs</a>
+          <a href="https://github.com/Arnavnemade1/Splice" class="nav-link nav-github" target="_blank">GitHub</a>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+      <div class="hero-bg"></div>
+      <div class="hero-content">
+        <div class="hero-text">
+          <h1 class="hero-title">
+            Cognition, not just screenshots
+          </h1>
+          <p class="hero-subtitle">
+            Give your AI agents a browser they understand. Real diagnostics. Verified actions. Reliable recovery.
+          </p>
+          <div class="hero-cta">
+            <a href="#get-started" class="btn btn-primary">Get Started</a>
+            <a href="https://github.com/Arnavnemade1/Splice" class="btn btn-secondary" target="_blank">Read Docs</a>
+          </div>
+        </div>
+        <div class="hero-visual">
+          <div class="hero-card">
+            <div class="card-header">
+              <span class="status-badge">LIVE</span>
+            </div>
+            <div class="card-body">
+              <code class="code-snippet">$ splice init
+Scaffold splice.config.json
+
+$ splice doctor
+✓ Node 20+
+✓ Chromium installed
+✓ Workspace ready
+
+$ splice start
+Listening on port 8765</code>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Why Splice -->
+    <section class="why-splice" id="why">
+      <div class="container">
+        <div class="section-header">
+          <h2>Why Splice</h2>
+          <p>Most browser tools stop at execution. Splice is cognition.</p>
+        </div>
+
+        <div class="comparison-grid">
+          <div class="comparison-item">
+            <h3>Execution-focused tools</h3>
+            <ul>
+              <li>✓ Click, type, navigate</li>
+              <li>✓ Raw DOM or screenshots</li>
+              <li>✗ Why did that fail?</li>
+              <li>✗ Did it actually work?</li>
+              <li>✗ What should I try next?</li>
+            </ul>
+          </div>
+          <div class="comparison-item featured">
+            <h3>Splice</h3>
+            <ul>
+              <li>✓ Click, type, navigate</li>
+              <li>✓ Semantic understanding</li>
+              <li>✓ Diagnose failures with evidence</li>
+              <li>✓ Verify outcomes</li>
+              <li>✓ Recommend recovery patterns</li>
+              <li class="highlight">✓ See what changed (deltas)</li>
+              <li class="highlight">✓ Real-time performance steering</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="problem-statement">
+          <h3>The problem agents face</h3>
+          <p>Stale refs. Hidden modals. Disabled buttons. Route transitions. Login expiry. Silent clicks. Form validation traps. CAPTCHAs.</p>
+          <p>Most tools expose more page data. Splice exposes browser understanding.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Capabilities -->
+    <section class="capabilities" id="capabilities">
+      <div class="container">
+        <div class="section-header">
+          <h2>Core Capabilities</h2>
+          <p>Browser intelligence built for real-world complexity</p>
+        </div>
+
+        <div class="capabilities-grid">
+          <div class="capability-card">
+            <div class="capability-icon">◆</div>
+            <h3>Diagnose</h3>
+            <p>Understand why actions fail. Splice produces forensic evidence: what changed, why it matters, and what to try next.</p>
+          </div>
+
+          <div class="capability-card">
+            <div class="capability-icon">▶</div>
+            <h3>Verify</h3>
+            <p>After every action, confirm it worked. Compile intent into preconditions, execution plan, and post-action assertions.</p>
+          </div>
+
+          <div class="capability-card">
+            <div class="capability-icon">↻</div>
+            <h3>Recover</h3>
+            <p>Remember what worked. Recovery memory learns domain-specific patterns and surfaces them when you need them.</p>
+          </div>
+
+          <div class="capability-card">
+            <div class="capability-icon">Δ</div>
+            <h3>Observe Efficiently</h3>
+            <p>First read gets the full tree. Subsequent reads receive only what changed—added elements, text mutations, URL transitions.</p>
+          </div>
+
+          <div class="capability-card">
+            <div class="capability-icon">⚡</div>
+            <h3>Optimize Runtime</h3>
+            <p>Token efficiency engine detects wasted reads mid-run and steers your agent toward cheaper observations.</p>
+          </div>
+
+          <div class="capability-card">
+            <div class="capability-icon">🔒</div>
+            <h3>Defend</h3>
+            <p>Redact prompt injection attempts and hostile page content before page text reaches your agent.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Workflow -->
+    <section class="workflow" id="workflow">
+      <div class="container">
+        <div class="section-header">
+          <h2>Designed for developers</h2>
+          <p>Fast setup. Clear visibility. Intentional control.</p>
+        </div>
+
+        <div class="workflow-steps">
+          <div class="workflow-step">
+            <div class="step-number">1</div>
+            <h3>Initialize</h3>
+            <p><code>splice init</code> scaffolds your config and prints ready-to-paste MCP snippets for Claude Desktop, Claude Code, or Cursor.</p>
+          </div>
+
+          <div class="workflow-step">
+            <div class="step-number">2</div>
+            <h3>Verify</h3>
+            <p><code>splice doctor</code> health-checks Node, Chromium, workspace state, and configuration before your first run.</p>
+          </div>
+
+          <div class="workflow-step">
+            <div class="step-number">3</div>
+            <h3>Launch</h3>
+            <p><code>splice start</code> runs the MCP server. Your agent immediately gains access to browser capabilities and real-time diagnostics.</p>
+          </div>
+
+          <div class="workflow-step">
+            <div class="step-number">4</div>
+            <h3>Observe</h3>
+            <p>Open the Command Center dashboard for live per-agent metrics, action audit trails, token usage, and exportable evidence.</p>
+          </div>
+        </div>
+
+        <div class="workflow-visual">
+          <div class="code-block">
+            <div class="code-header">Example: Compile and verify an action</div>
+            <code class="code-snippet">{
+  "tool": "compile_verified_action",
+  "input": {
+    "intent": "Log in with credentials",
+    "constraints": ["avoid_otp", "production_account"],
+    "execute": true
+  }
+}
+
+// Response includes:
+// - preconditions (login form visible?)
+// - plan (click email → type → click submit)
+// - postconditions (redirect to dashboard?)
+// - evidence (screenshots, state changes)
+// - confidence (80%)</code>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Integration -->
+    <section class="integration" id="integration">
+      <div class="container">
+        <div class="section-header">
+          <h2>Works with your stack</h2>
+          <p>Splice is an MCP server. Integrate it anywhere the MCP SDK runs.</p>
+        </div>
+
+        <div class="integration-options">
+          <div class="integration-option">
+            <h3>Claude Desktop</h3>
+            <p>Add Splice to your claude_desktop_config.json and use it in conversations with Claude.</p>
+            <code class="code-inline">"args": ["node", "/path/to/Splice/dist/index.js"]</code>
+          </div>
+
+          <div class="integration-option">
+            <h3>Claude Code</h3>
+            <p>Equip your coding assistant with browser capabilities and real-time diagnostics.</p>
+            <code class="code-inline">splice start # then add to MCP servers</code>
+          </div>
+
+          <div class="integration-option">
+            <h3>Custom Agents</h3>
+            <p>Use the MCP SDK to connect your own agents. Splice exposes all tools over stdio.</p>
+            <code class="code-inline">StdioClientTransport({ command: "node", args: [...] })</code>
+          </div>
+
+          <div class="integration-option">
+            <h3>OpenClaw Gateway</h3>
+            <p>For external systems, Splice can expose a WebSocket gateway with full capability access.</p>
+            <code class="code-inline">OPENCLAW_GATEWAY_PORT=18789</code>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features Highlight -->
+    <section class="features" id="features">
+      <div class="container">
+        <div class="section-header">
+          <h2>Built for scale</h2>
+          <p>Enterprise-ready observability and reliability</p>
+        </div>
+
+        <div class="features-list">
+          <div class="feature">
+            <div class="feature-badge">Delta Observations</div>
+            <p>Incremental snapshots return only changes. Full-tree fallback when baselines drift. Save tokens on long sessions.</p>
+          </div>
+
+          <div class="feature">
+            <div class="feature-badge">Recovery Memory</div>
+            <p>Patterns decay over time (half-life: 14 days). Proven fixes surface when needed. Anonymized telemetry optional.</p>
+          </div>
+
+          <div class="feature">
+            <div class="feature-badge">Token Efficiency</div>
+            <p>Per-agent token accounting with real-time optimization directives. Detect wasted reads and steer toward cheaper paths.</p>
+          </div>
+
+          <div class="feature">
+            <div class="feature-badge">Runtime Reliability</div>
+            <p>Crash self-healing. Reproducible run journals. Live per-agent tracking with corrective directives mid-run.</p>
+          </div>
+
+          <div class="feature">
+            <div class="feature-badge">Command Center</div>
+            <p>Exportable audit evidence. Real-time state changes. Tokens saved. Per-agent analytics dashboard.</p>
+          </div>
+
+          <div class="feature">
+            <div class="feature-badge">Security First</div>
+            <p>Redaction engine. Secret egress firewall. Hostile content filtering. Deterministic, auditable on-page logic.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Configuration -->
+    <section class="configuration" id="docs">
+      <div class="container">
+        <div class="section-header">
+          <h2>Configuration & CLI</h2>
+          <p>Three-layer config resolution with source attribution</p>
+        </div>
+
+        <div class="config-explanation">
+          <h3>Environment variables</h3>
+          <p>Settings resolve in order: environment variables > <code>splice.config.json</code> > defaults. Every configuration source is visible with <code>splice config --json</code>.</p>
+
+          <div class="config-table">
+            <div class="config-row header">
+              <div>Setting</div>
+              <div>Environment Variable</div>
+              <div>Description</div>
+            </div>
+            <div class="config-row">
+              <div><code>autoOpenDashboard</code></div>
+              <div><code>SPLICE_AUTO_OPEN_DASHBOARD</code></div>
+              <div>Open Command Center on startup</div>
+            </div>
+            <div class="config-row">
+              <div><code>enableOpenClaw</code></div>
+              <div><code>SPLICE_ENABLE_OPENCLAW</code></div>
+              <div>Enable WebSocket gateway</div>
+            </div>
+            <div class="config-row">
+              <div><code>watchMode</code></div>
+              <div><code>SPLICE_WATCH_MODE</code></div>
+              <div>Launch visible Chromium window</div>
+            </div>
+          </div>
+
+          <div class="cli-commands">
+            <h3>CLI Commands</h3>
+            <div class="command-box">
+              <div class="command">
+                <code>splice init [--openclaw] [--dashboard] [--watch]</code>
+                <span>Scaffold config and print client wiring</span>
+              </div>
+              <div class="command">
+                <code>splice doctor</code>
+                <span>Health check: Node, Chromium, ports, workspace</span>
+              </div>
+              <div class="command">
+                <code>splice start [--openclaw]</code>
+                <span>Run the MCP server</span>
+              </div>
+              <div class="command">
+                <code>splice config [--json]</code>
+                <span>Show effective configuration with sources</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Get Started -->
+    <section class="get-started" id="get-started">
+      <div class="container">
+        <div class="start-content">
+          <h2>Ready to go</h2>
+          <p>Get Splice running in three commands</p>
+
+          <div class="start-steps">
+            <div class="start-step">
+              <span class="step-badge">$</span>
+              <code>npm install splice</code>
+            </div>
+            <div class="start-step">
+              <span class="step-badge">$</span>
+              <code>splice init</code>
+            </div>
+            <div class="start-step">
+              <span class="step-badge">$</span>
+              <code>splice start</code>
+            </div>
+          </div>
+
+          <div class="start-cta">
+            <a href="https://github.com/Arnavnemade1/Splice" class="btn btn-primary btn-large" target="_blank">
+              View on GitHub
+            </a>
+            <a href="https://github.com/Arnavnemade1/Splice#quick-start" class="btn btn-secondary btn-large" target="_blank">
+              Full Documentation
+            </a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="container">
+        <div class="footer-content">
+          <div class="footer-section">
+            <h4>Splice</h4>
+            <p>Browser infrastructure for autonomous coding agents.</p>
+            <div class="footer-links">
+              <a href="https://github.com/Arnavnemade1/Splice" target="_blank">GitHub</a>
+              <a href="https://github.com/Arnavnemade1/Splice/blob/main/LICENSE" target="_blank">License (MIT)</a>
+            </div>
+          </div>
+          <div class="footer-section">
+            <h4>Resources</h4>
+            <ul>
+              <li><a href="https://github.com/Arnavnemade1/Splice/blob/main/README.md">README</a></li>
+              <li><a href="https://github.com/Arnavnemade1/Splice/blob/main/INTEGRATION.md">Integration Guide</a></li>
+              <li><a href="https://github.com/Arnavnemade1/Splice/issues">Issues</a></li>
+            </ul>
+          </div>
+          <div class="footer-section">
+            <h4>Community</h4>
+            <ul>
+              <li><a href="https://github.com/Arnavnemade1/Splice">Contribute</a></li>
+              <li><a href="https://github.com/Arnavnemade1/Splice/discussions">Discussions</a></li>
+              <li><a href="https://modelcontextprotocol.io/">MCP Spec</a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="footer-bottom">
+          <p>&copy; 2024 Splice. MIT licensed.</p>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script src="scripts.js"></script>
+</body>
+</html>

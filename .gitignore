@@ -18,3 +18,4 @@ python/splice_mcp/__pycache__/
 *.d.ts.map
 !src/**/*.ts
 !test.ts
+!web/**/*.js
