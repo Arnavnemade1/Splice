@@ -7,16 +7,26 @@ import {
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { BrowserManager } from "./BrowserManager.js";
+import { RunJournal } from "./RunJournal.js";
+import { classifyError, withTimeout, errorMessage } from "./Resilience.js";
 import fs from "node:fs";
 import path from "node:path";
 import { discordNotifier } from "./DiscordWebhook.js";
 
+const spliceDir = path.join(process.cwd(), ".splice");
+fs.mkdirSync(spliceDir, { recursive: true });
+
+const journal = new RunJournal(spliceDir);
 const browser = new BrowserManager();
+browser.onReliabilityEvent = (kind, detail) => {
+  journal.record({ kind, outcome: "info", detail });
+};
+browser.journalStatsProvider = () => journal.getStats() as unknown as Record<string, unknown>;
 
 const server = new Server(
   {
     name: "splice-enterprise-browser",
-    version: "2.0.0",
+    version: "2.1.0",
   },
   {
     capabilities: {
@@ -135,6 +145,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             url: { type: "string", description: "The full URL to navigate to" },
+            agentId: { type: "string", description: "Optional agent identifier for per-agent tracking and in-action optimization." },
           },
           required: ["url"],
         },
@@ -147,7 +158,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             intent: { type: "string", description: "Your current goal (e.g. 'checkout', 'login', 'read article'). Used to prune irrelevant DOM elements." },
             lens: { type: "string", enum: ["UX", "Security", "Performance", "Vision"], description: "The Semantic Lens to view the page through." },
-            maxTokens: { type: "number", description: "The maximum number of tokens to return. Triggers aggressive truncation if exceeded." }
+            maxTokens: { type: "number", description: "The maximum number of tokens to return. Triggers aggressive truncation if exceeded." },
+            agentId: { type: "string", description: "Optional agent identifier for per-agent tracking and in-action optimization." }
           },
           required: ["intent"],
         },
@@ -177,7 +189,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "array",
               items: { type: "string" },
               description: "Optional recent action summaries, newest last."
-            }
+            },
+            agentId: { type: "string", description: "Optional agent identifier for per-agent tracking and in-action optimization." }
           }
         },
       },
@@ -197,7 +210,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 avoidDestructiveActions: { type: "boolean", description: "Block destructive intents such as delete, pay, buy, transfer, or cancellation." },
                 requireExactText: { type: "boolean", description: "Require candidate labels to include intent terms." }
               }
-            }
+            },
+            agentId: { type: "string", description: "Optional agent identifier for per-agent tracking and in-action optimization." }
           },
           required: ["intent"],
         },
@@ -439,6 +453,31 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["title", "description"]
         }
       },
+      {
+        name: "get_runtime_health",
+        description: "Runtime Reliability: Report live server health — browser connectivity, branch states with last-known URLs, crash/recovery counters, uptime, and run-journal statistics. Call this after any BROWSER_CRASHED or TIMEOUT error to confirm the session recovered.",
+        inputSchema: { type: "object", properties: {} }
+      },
+      {
+        name: "export_run_journal",
+        description: "Runtime Reliability: Export the append-only run journal (every tool call with redacted arguments, outcome, duration, and errors) for reproducibility and post-mortem analysis of long autonomous runs.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            limit: { type: "number", description: "Maximum number of most-recent entries to return (default: 50)." }
+          }
+        }
+      },
+      {
+        name: "get_agent_analytics",
+        description: "Agent Tracking: Live per-agent performance profiles — success rates, latency, failure streaks, error-class breakdown, tool usage — plus ranked in-action optimization directives for each agent. Pass agentId to inspect one agent, or omit for all tracked agents.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            agentId: { type: "string", description: "Optional: return the profile for a single agent instead of all tracked agents." }
+          }
+        }
+      },
       // ─── Multi-Agent Collaboration Tools ──────────────────────────────────────
       {
         name: "register_agent",
@@ -534,8 +573,80 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
+// Per-tool deadlines so a hung page or dead socket can never stall the
+// agent loop indefinitely. 0 = no deadline (human-in-the-loop tools).
+const TOOL_TIMEOUTS_MS: Record<string, number> = {
+  navigate: 90_000,
+  speculative_fork: 120_000,
+  run_security_audit: 300_000,
+  get_product_intelligence: 180_000,
+  request_human_intervention: 0,
+};
+const DEFAULT_TOOL_TIMEOUT_MS = 120_000;
+
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  const toolName = request.params.name;
+  const startedAt = Date.now();
+  const agentId = typeof (request.params.arguments as any)?.agentId === "string"
+    ? (request.params.arguments as any).agentId as string
+    : undefined;
   try {
+    const timeoutMs = TOOL_TIMEOUTS_MS[toolName] ?? DEFAULT_TOOL_TIMEOUT_MS;
+    const execution = dispatchTool(request);
+    const result = timeoutMs > 0 ? await withTimeout(execution, timeoutMs, toolName) : await execution;
+    const durationMs = Date.now() - startedAt;
+    journal.record({
+      kind: "tool_call",
+      tool: toolName,
+      arguments: request.params.arguments,
+      outcome: "ok",
+      durationMs,
+    });
+    if (agentId) {
+      browser.agentTracker.recordAction(agentId, { tool: toolName, outcome: "ok", durationMs });
+      // In-action optimization: if the agent's live health has degraded,
+      // attach a corrective directive directly to the successful response.
+      const directive = browser.agentTracker.getInlineDirective(agentId);
+      if (directive && Array.isArray(result?.content)) {
+        result.content.push({ type: "text", text: directive });
+      }
+    }
+    return result;
+  } catch (error: unknown) {
+    const classified = classifyError(error);
+    const durationMs = Date.now() - startedAt;
+    journal.record({
+      kind: "tool_call",
+      tool: toolName,
+      arguments: request.params.arguments,
+      outcome: "error",
+      durationMs,
+      errorCode: classified.code,
+      detail: classified.message,
+    });
+    if (agentId) {
+      browser.agentTracker.recordAction(agentId, { tool: toolName, outcome: "error", durationMs, errorCode: classified.code });
+    }
+    const directive = agentId ? browser.agentTracker.getInlineDirective(agentId) : null;
+    if (classified.code === "CAPTCHA_REQUIRED") {
+      return {
+        content: [{ type: "text", text: "ERROR: CAPTCHA detected. Please call the 'request_human_intervention' tool." }],
+        isError: true,
+      };
+    }
+    const errorText = `Error executing tool '${toolName}': ${classified.message}\n${JSON.stringify({ error: classified.toEnvelope() }, null, 2)}`;
+    return {
+      content: [{
+        type: "text",
+        text: directive ? `${errorText}\n\n${directive}` : errorText,
+      }],
+      isError: true,
+    };
+  }
+});
+
+async function dispatchTool(request: { params: { name: string; arguments?: Record<string, unknown> } }): Promise<any> {
+  {
     if (request.params.name === "navigate") {
       const { url } = request.params.arguments as { url: string };
       await browser.navigate(url);
@@ -674,16 +785,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (request.params.name === "run_diagnostics") {
+      const health = browser.getRuntimeHealth();
       const results = {
-        playwright: "OK",
-        chromium: "OK",
-        vault: "OK",
+        chromium: health.browserConnected ? "OK" : "DISCONNECTED (will auto-recover on next call)",
+        vault: fs.existsSync(path.join(spliceDir, ".key")) || process.env.SPLICE_ENCRYPTION_KEY ? "OK" : "NO KEY",
+        journal: journal.getStats().totalEntries > 0 ? "OK" : "EMPTY",
         network: "OK",
+        crashCount: health.browserCrashCount,
         timestamp: new Date().toISOString()
       };
       // Simple connectivity check
       try { await browser.navigate("https://example.com"); } catch { results.network = "FAIL"; }
-      
+
       return { content: [{ type: "text", text: `Splice Health Check:\n${JSON.stringify(results, null, 2)}` }] };
     }
 
@@ -944,29 +1057,109 @@ ${recommendations || "- No major friction points detected. The current UI appear
       return { content: [{ type: "text", text: `Agent "${agentId}" successfully acknowledged summon "${summonId}". You are now assigned to help the user on branch 'main'.` }] };
     }
 
-    throw new Error(`Tool not found: ${request.params.name}`);
-  } catch (error: any) {
-    if (error.message.includes("CAPTCHA_REQUIRED")) {
-       return {
-         content: [{ type: "text", text: "ERROR: CAPTCHA detected. Please call the 'request_human_intervention' tool." }],
-         isError: true,
-       };
+    if (request.params.name === "get_runtime_health") {
+      const health = browser.getRuntimeHealth();
+      const journalStats = journal.getStats();
+      return {
+        content: [{
+          type: "text",
+          text: JSON.stringify({ ...health, journal: journalStats }, null, 2),
+        }],
+      };
     }
-    return {
-      content: [{ type: "text", text: `Error executing tool: ${error.message}` }],
-      isError: true,
-    };
+
+    if (request.params.name === "get_agent_analytics") {
+      const { agentId } = (request.params.arguments as any) || {};
+      if (agentId) {
+        const profile = browser.agentTracker.getProfile(agentId);
+        if (!profile) {
+          return {
+            content: [{ type: "text", text: `No tracked activity for agent "${agentId}". Actions are tracked when tools are called with an agentId argument.` }],
+          };
+        }
+        return { content: [{ type: "text", text: JSON.stringify(profile, null, 2) }] };
+      }
+      const profiles = browser.agentTracker.getAllProfiles();
+      if (profiles.length === 0) {
+        return {
+          content: [{ type: "text", text: "No agent activity tracked yet. Pass agentId on tool calls (e.g. interact) to enable per-agent tracking and in-action optimization." }],
+        };
+      }
+      const summary = profiles.map((p) =>
+        `${p.agentId}: ${p.status.toUpperCase()} — ${Math.round(p.successRate * 100)}% success over ${p.totalActions} action(s), avg ${p.avgDurationMs}ms${p.optimizations[0] ? `\n  ↳ ${p.optimizations[0].directive}` : ""}`
+      ).join("\n");
+      return {
+        content: [{
+          type: "text",
+          text: `=== AGENT PERFORMANCE ANALYTICS ===\n${summary}\n\n=== FULL PROFILES ===\n${JSON.stringify(profiles, null, 2)}`,
+        }],
+      };
+    }
+
+    if (request.params.name === "export_run_journal") {
+      const { limit } = (request.params.arguments as any) || {};
+      const entries = journal.tail(typeof limit === "number" && limit > 0 ? Math.min(limit, 500) : 50);
+      return {
+        content: [{
+          type: "text",
+          text: [
+            `Run journal: ${journal.journalPath}`,
+            `Session: ${journal.sessionId} — ${entries.length} most recent entries below.`,
+            JSON.stringify(entries, null, 2),
+          ].join("\n"),
+        }],
+      };
+    }
+
+    throw new Error(`Tool not found: ${request.params.name}`);
   }
+}
+
+// ─── Process-level runtime reliability ──────────────────────────────────────
+// Long autonomous runs must survive stray async failures. Anything that
+// escapes a tool handler is journaled and absorbed; the browser layer
+// self-heals on the next call instead of taking the whole server down.
+
+let shuttingDown = false;
+
+process.on("unhandledRejection", (reason) => {
+  journal.record({ kind: "crash", outcome: "error", errorCode: "UNHANDLED_REJECTION", detail: errorMessage(reason) });
+  console.error("[Splice Reliability] Unhandled rejection absorbed:", errorMessage(reason));
 });
+
+process.on("uncaughtException", (error) => {
+  journal.record({ kind: "crash", outcome: "error", errorCode: "UNCAUGHT_EXCEPTION", detail: errorMessage(error) });
+  console.error("[Splice Reliability] Uncaught exception absorbed:", errorMessage(error));
+});
+
+async function shutdown(signal: string) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.error(`[Splice] Received ${signal} — shutting down gracefully...`);
+  journal.record({ kind: "lifecycle", outcome: "info", detail: `shutdown_${signal.toLowerCase()}` });
+  try {
+    await withTimeout(browser.close(), 10_000, "graceful shutdown");
+  } catch (e) {
+    console.error("[Splice] Browser close during shutdown failed:", errorMessage(e));
+  }
+  journal.close();
+  process.exit(0);
+}
+
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
 async function main() {
   await browser.init();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Splice Enterprise MCP Server is running...");
+  journal.record({ kind: "lifecycle", outcome: "info", detail: "mcp_server_connected" });
+  console.error(`Splice Enterprise MCP Server is running... (journal: ${journal.journalPath})`);
 }
 
 main().catch((error) => {
+  journal.record({ kind: "crash", outcome: "error", errorCode: "FATAL_STARTUP", detail: errorMessage(error) });
+  journal.close();
   console.error("Fatal error running server:", error);
   process.exit(1);
 });

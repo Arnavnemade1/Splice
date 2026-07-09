@@ -104,6 +104,31 @@ async def handle_list_tools() -> list[types.Tool]:
                 },
                 "required": ["intent"]
             }
+        ),
+        types.Tool(
+            name="splice_get_runtime_health",
+            description="Runtime Reliability: browser connectivity, branch states, crash/recovery counters, uptime, and run-journal statistics.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        types.Tool(
+            name="splice_export_run_journal",
+            description="Runtime Reliability: export the append-only reproducibility log of tool calls (redacted args, outcomes, durations, error codes).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "number", "description": "Max most-recent entries to return (default 50)."}
+                }
+            }
+        ),
+        types.Tool(
+            name="splice_get_agent_analytics",
+            description="Agent Tracking: live per-agent performance profiles (success rate, latency, failure streaks, error breakdown) with ranked in-action optimization directives.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "agentId": {"type": "string", "description": "Optional: profile a single agent instead of all tracked agents."}
+                }
+            }
         )
     ]
 
@@ -133,7 +158,19 @@ async def handle_call_tool(
     elif name == "splice_compile_verified_action":
         result = await call_bridge("compileVerifiedAction", arguments)
         return [types.TextContent(type="text", text=json.dumps(result))]
-            
+
+    elif name == "splice_get_runtime_health":
+        result = await call_bridge("getRuntimeHealth", arguments)
+        return [types.TextContent(type="text", text=json.dumps(result))]
+
+    elif name == "splice_export_run_journal":
+        result = await call_bridge("exportRunJournal", arguments)
+        return [types.TextContent(type="text", text=json.dumps(result))]
+
+    elif name == "splice_get_agent_analytics":
+        result = await call_bridge("getAgentAnalytics", arguments)
+        return [types.TextContent(type="text", text=json.dumps(result))]
+
     raise ValueError(f"Unknown tool: {name}")
 
 def start_ts_bridge():
@@ -171,7 +208,7 @@ async def main():
             write_stream,
             InitializationOptions(
                 server_name="splice-mcp-python",
-                server_version="1.0.0",
+                server_version="2.1.0",
                 capabilities=server.get_capabilities(
                     notification_options=NotificationOptions(),
                     experimental_capabilities={},

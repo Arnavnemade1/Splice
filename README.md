@@ -32,10 +32,75 @@ Splice is built for coding agents that need to inspect, operate, debug, and impr
 | "Can the page inject instructions?" | Prompt-injection scanning redacts hostile text before it reaches the agent. |
 | "Can a site leak secrets?" | Egress firewall blocks outbound secret patterns in non-GET requests. |
 | "What happened during the run?" | Command Center renders timeline, forensics, verified plans, branches, audits, and telemetry. |
+| "What if the browser crashes mid-run?" | The Runtime Reliability layer auto-relaunches, rebuilds crashed branches, and restores last-known URLs — no restart required. |
+| "Can I reproduce a failed run?" | The append-only Run Journal records every tool call (redacted args, outcome, duration, error code) as JSONL on disk. |
+| "Is my agent thrashing?" | Agent Tracking profiles every agent live and injects corrective optimization directives into tool responses mid-run. |
 
 ---
 
 ## Flagship Features
+
+### Runtime Reliability Engine
+
+Autonomous agents run for long stretches without human intervention, and the browser is the least reliable component in the loop: Chromium processes die, pages crash, networks blip, and calls hang. Splice treats these as recoverable runtime events instead of fatal errors.
+
+- **Self-healing browser** — if the Chromium process dies or a page crashes, the next tool call transparently relaunches the browser, rebuilds affected branches, and restores each branch's last known URL. The agent resumes where it left off.
+- **Typed error taxonomy** — every tool failure returns a machine-readable envelope with a stable `code` (`BROWSER_CRASHED`, `NETWORK_TRANSIENT`, `TARGET_NOT_FOUND`, `TIMEOUT`, `CAPTCHA_REQUIRED`, …), a `recoverable` flag, and a `suggestedNextTool`, so agents can branch on failure class instead of parsing prose.
+- **Bounded retries and hard deadlines** — transient network failures are retried with exponential backoff inside Splice; every tool call has a per-tool deadline so a hung page can never stall the agent loop forever.
+- **Run Journal** — an append-only JSONL log at `.splice/journal/` records every tool call with redacted arguments, outcome, duration, and error code. After a crash or a surprising outcome, the journal replays exactly what the agent did and in what order.
+- **Process-level guards** — unhandled rejections and uncaught exceptions are journaled and absorbed rather than killing the server; `SIGINT`/`SIGTERM` trigger a graceful shutdown that flushes the journal and closes the browser cleanly.
+
+```json
+{
+  "name": "get_runtime_health",
+  "arguments": {}
+}
+```
+
+```json
+{
+  "browserConnected": true,
+  "activeBranch": "main",
+  "browserCrashCount": 1,
+  "lastRecoveryAt": 1783536451617,
+  "branches": [
+    { "branchId": "main", "lastKnownUrl": "https://example.com/", "crashed": false }
+  ],
+  "journal": { "toolCalls": 132, "errors": 3, "crashes": 1, "recoveries": 1 }
+}
+```
+
+### Agent Tracking & In-Action Optimization
+
+Splice tracks every tool call attributed to an agent (pass `agentId` on any core tool) and computes live health: success rate, rolling recent success rate, latency, failure streaks, and an error-class breakdown. The tracker turns that health into ranked optimization directives — and delivers them **in-action**: when an agent's live health degrades, the corrective directive is appended directly to its next tool response, so course-correction happens mid-run instead of in a post-mortem.
+
+```text
+[AGENT OPTIMIZER (critical)] 3 consecutive failures — stop retrying blindly and
+classify the browser state first. → call diagnose_agent_state
+(recent success rate 0%, 3 consecutive failure(s))
+```
+
+Directives are derived from live signals, for example:
+
+| Signal | Directive |
+| --- | --- |
+| ≥3 consecutive failures | Stop retrying; classify the browser state via `diagnose_agent_state`. |
+| Repeated `TARGET_NOT_FOUND` | Element IDs are stale; re-extract the semantic tree. |
+| >40% raw `interact` failure rate | Compile intents into verified actions with precondition gating. |
+| `CAPTCHA_REQUIRED` in recent window | Request human intervention or load an authenticated snapshot. |
+| Repeated timeouts/network blips | Enable resource blocking and check runtime health. |
+| High average latency | Pass a `maxTokens` budget and narrow intents. |
+
+Query the full picture at any time:
+
+```json
+{
+  "name": "get_agent_analytics",
+  "arguments": { "agentId": "executor-2" }
+}
+```
+
+The Command Center renders each tracked agent as a performance card — status (optimal / degraded / critical), success bar, latency, failure streak, and its top directive.
 
 ### Agent State Forensics
 
@@ -162,7 +227,7 @@ When active, connecting OpenClaw agents receive an immediate handshake:
 {
   "event": "handshake",
   "status": "connected",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "engine": "Splice Enterprise Browser Core"
 }
 ```
@@ -239,6 +304,8 @@ cd python
 python -m pip install -e .
 splice-mcp
 ```
+
+The Python wrapper auto-starts a localhost bridge (`dist/bridge_server.js`, `127.0.0.1:4000`, override with `SPLICE_BRIDGE_PORT`) that shares the Node core — including the self-healing browser, run journal, typed error envelopes, and agent analytics. It exposes `splice_get_runtime_health`, `splice_export_run_journal`, and `splice_get_agent_analytics` alongside the core browsing tools.
 
 ### Claude Desktop Example
 
@@ -336,6 +403,12 @@ Safety and observability tools:
 - `toggle_resource_blocking`
 - `toggle_watch_mode`
 - `maintenance_cleanup`
+
+Runtime reliability and agent tracking tools:
+
+- `get_runtime_health` — browser connectivity, branch states, crash/recovery counters, and journal statistics
+- `export_run_journal` — export the append-only reproducibility log of every tool call in the session
+- `get_agent_analytics` — live per-agent performance profiles with ranked in-action optimization directives
 
 OpenClaw and notifications:
 

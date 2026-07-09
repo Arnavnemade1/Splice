@@ -470,6 +470,56 @@
       overflow-wrap: anywhere;
     }
 
+    /* Runtime Reliability meter */
+    .reliability-meter {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel-2);
+      padding: 14px 16px;
+      display: grid;
+      gap: 8px;
+    }
+    .reliability-meter .tax-value.ok { color: var(--green); }
+    .reliability-meter .tax-value.bad { color: var(--red); }
+
+    /* Agent performance cards */
+    .agent-perf-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      padding: 13px 15px;
+      display: grid;
+      gap: 9px;
+    }
+    .agent-perf-card.degraded { border-color: rgba(246, 200, 99, 0.4); }
+    .agent-perf-card.critical { border-color: rgba(255, 85, 119, 0.5); background: var(--red-bg); }
+    .agent-perf-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .agent-perf-stats {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-family: "JetBrains Mono", monospace;
+      font-size: 11px;
+      color: var(--quiet);
+    }
+    .agent-perf-stats b { color: var(--text); font-weight: 600; }
+    .agent-directive {
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--amber);
+      border-left: 2px solid var(--amber);
+      padding-left: 9px;
+    }
+    .agent-perf-card.critical .agent-directive {
+      color: var(--red);
+      border-left-color: var(--red);
+    }
+
     .endpoint-row,
     .log-line {
       display: grid;
@@ -620,10 +670,27 @@
 
       <section class="panel">
         <div class="panel-head">
-          <div class="panel-title">Coordination Health</div>
+          <div class="panel-title">Operations &amp; Coordination</div>
           <div class="pill" id="coord-state-pill">Healthy</div>
         </div>
         <div class="workspace">
+          <div class="section-label">Runtime Reliability
+            <span style="color:var(--quiet);font-weight:400;font-size:10px">self-healing engine</span>
+          </div>
+          <div class="reliability-meter" id="reliability-meter">
+            <div class="tax-row"><span class="tax-label">Browser</span><span class="tax-value ok" id="rel-browser">—</span></div>
+            <div class="tax-row"><span class="tax-label">Uptime</span><span class="tax-value zero" id="rel-uptime">—</span></div>
+            <div class="tax-row"><span class="tax-label">Crashes Survived</span><span class="tax-value zero" id="rel-crashes">0</span></div>
+            <div class="tax-row"><span class="tax-label">Auto-Recoveries</span><span class="tax-value zero" id="rel-recoveries">0</span></div>
+            <div class="tax-row"><span class="tax-label">Journaled Calls</span><span class="tax-value zero" id="rel-journal">0</span></div>
+            <div class="tax-row"><span class="tax-label">Tool Errors</span><span class="tax-value zero" id="rel-errors">0</span></div>
+          </div>
+
+          <div class="section-label">Agent Performance
+            <span style="color:var(--quiet);font-weight:400;font-size:10px">live tracking + optimization</span>
+          </div>
+          <div class="grid" id="agent-perf-feed"></div>
+
           <div class="section-label">Coordination Tax Meter
             <span style="color:var(--quiet);font-weight:400;font-size:10px">non-zero = overhead</span>
           </div>

@@ -37,7 +37,7 @@ export class OpenClawGateway {
           ws.send(JSON.stringify({
             event: 'handshake',
             status: 'connected',
-            version: '2.0.0',
+            version: '2.1.0',
             engine: 'Splice Enterprise Browser Core',
             timestamp: Date.now()
           }));

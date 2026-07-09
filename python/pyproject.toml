@@ -1,6 +1,6 @@
 [project]
 name = "splice-mcp"
-version = "1.0.0"
+version = "2.1.0"
 description = "Python MCP Server and SDK for Splice Enterprise"
 authors = [
     {name = "Splice Team"}

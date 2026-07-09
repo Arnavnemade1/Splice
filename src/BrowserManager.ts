@@ -11,9 +11,11 @@ import { SemanticExtractor } from './SemanticExtractor.js';
 import { CryptoManager } from './CryptoManager.js';
 import { SecurityAuditor } from './SecurityAuditor.js';
 import { AgentCoordinator } from './AgentCoordinator.js';
+import { AgentTracker } from './AgentTracker.js';
 import { OpenClawGateway } from './OpenClawGateway.js';
 import { discordNotifier } from './DiscordWebhook.js';
 import type { AuditOptions } from './SecurityAuditor.js';
+import { SpliceError, withRetry, isTransientError, errorMessage } from './Resilience.js';
 import type { AgentStateDiagnosis, LedgerEntry, SemanticNode, SessionMetrics, VerifiedActionPlan, SummonRequest } from './types.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -35,8 +37,24 @@ export class BrowserManager {
 
   public activeBranch: string = 'main';
 
+  // Runtime reliability state
+  private lastKnownUrls: Map<string, string> = new Map();
+  private crashedBranches: Set<string> = new Set();
+  /** Suppresses crash accounting while Splice itself tears the browser down. */
+  private expectingShutdown = false;
+  private browserCrashCount = 0;
+  private lastRecoveryAt: number | null = null;
+  private startedAt: number = Date.now();
+  /** Called on crash/recovery so the server layer can journal it. */
+  public onReliabilityEvent: ((kind: 'crash' | 'recovery', detail: string) => void) | null = null;
+  /** Set by the server layer so runtime health and the dashboard include journal statistics. */
+  public journalStatsProvider: (() => Record<string, unknown>) | null = null;
+
   /** Multi-agent coordination engine — exposed for MCP tool layer. */
   public readonly coordinator: AgentCoordinator = new AgentCoordinator();
+
+  /** Per-agent performance tracking and in-action optimization. */
+  public readonly agentTracker: AgentTracker = new AgentTracker();
 
   // OpenClaw Gateway instance
   private openclawGateway: OpenClawGateway | null = null;
@@ -70,7 +88,7 @@ export class BrowserManager {
     // Initialize encryption vault — auto-generates key if needed
     this.vault = new CryptoManager(this.spliceDir);
 
-    this.browser = await chromium.launch({ headless: this.headless });
+    await this.launchBrowser();
     await this.createBranch('main');
 
     // Optional OpenClaw Gateway initialization
@@ -93,6 +111,98 @@ export class BrowserManager {
         console.error("[Splice] Failed to auto-launch Command Center:", e);
       }
     }
+  }
+
+  private async launchBrowser() {
+    this.browser = await chromium.launch({ headless: this.headless });
+    // If Chromium dies underneath us (OOM, host kill, crash), mark the
+    // session so the next tool call transparently relaunches instead of
+    // failing every call until the MCP server is restarted.
+    this.browser!.on('disconnected', () => {
+      if (this.browser && !this.expectingShutdown) {
+        this.browserCrashCount++;
+        this.browser = null;
+        this.onReliabilityEvent?.('crash', 'Browser process disconnected unexpectedly');
+        console.error('[Splice Reliability] Browser disconnected — will auto-recover on next call.');
+      }
+    });
+  }
+
+  /**
+   * Runtime reliability gate. Called at the top of every browser-touching
+   * operation: relaunches a dead browser and rebuilds crashed branches,
+   * restoring each branch's last known URL so the agent resumes where it
+   * left off instead of dying mid-run.
+   */
+  public async ensureHealthy(): Promise<void> {
+    if (!this.browser || !this.browser.isConnected()) {
+      const branchesToRestore = new Map(this.lastKnownUrls);
+      const previousActive = this.activeBranch;
+      this.browser = null;
+      this.contexts.clear();
+      this.pages.clear();
+      this.telemetry.clear();
+      this.crashedBranches.clear();
+
+      await this.launchBrowser();
+      await this.createBranch('main');
+      this.activeBranch = 'main';
+
+      const mainUrl = branchesToRestore.get(previousActive) || branchesToRestore.get('main');
+      if (mainUrl && mainUrl !== 'about:blank') {
+        try {
+          await this.getActivePage().goto(mainUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        } catch (e) {
+          console.error(`[Splice Reliability] Could not restore URL after relaunch: ${errorMessage(e)}`);
+        }
+      }
+      this.lastRecoveryAt = Date.now();
+      this.onReliabilityEvent?.('recovery', `Browser relaunched; restored ${mainUrl ?? 'blank session'} on main`);
+      this.pushLiveFeed('auto_recovery', `Browser relaunched after crash (#${this.browserCrashCount})`);
+      return;
+    }
+
+    // Rebuild individual branches whose page crashed or was closed.
+    for (const branchId of Array.from(this.crashedBranches)) {
+      this.crashedBranches.delete(branchId);
+      const lastUrl = this.lastKnownUrls.get(branchId);
+      try {
+        await this.contexts.get(branchId)?.close().catch(() => {});
+        this.contexts.delete(branchId);
+        this.pages.delete(branchId);
+        this.telemetry.delete(branchId);
+        await this.createBranch(branchId);
+        if (lastUrl && lastUrl !== 'about:blank') {
+          await this.pages.get(branchId)!.goto(lastUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        }
+        this.lastRecoveryAt = Date.now();
+        this.onReliabilityEvent?.('recovery', `Branch ${branchId} rebuilt after page crash`);
+        this.pushLiveFeed('auto_recovery', `Branch ${branchId} rebuilt after page crash`);
+      } catch (e) {
+        console.error(`[Splice Reliability] Failed to rebuild branch ${branchId}: ${errorMessage(e)}`);
+      }
+    }
+  }
+
+  /** Live health snapshot for the get_runtime_health MCP tool. */
+  public getRuntimeHealth() {
+    return {
+      browserConnected: !!this.browser && this.browser.isConnected(),
+      activeBranch: this.activeBranch,
+      branches: Array.from(this.contexts.keys()).map((branchId) => ({
+        branchId,
+        lastKnownUrl: this.lastKnownUrls.get(branchId) ?? 'about:blank',
+        crashed: this.crashedBranches.has(branchId),
+      })),
+      browserCrashCount: this.browserCrashCount,
+      lastRecoveryAt: this.lastRecoveryAt,
+      uptimeMs: Date.now() - this.startedAt,
+      headless: this.headless,
+      resourceBlocking: this.resourceBlocking,
+      openclawGatewayActive: !!this.openclawGateway,
+      metrics: this.metrics,
+      journal: this.journalStatsProvider ? this.journalStatsProvider() : null,
+    };
   }
 
   private openDashboard(reportPath: string) {
@@ -124,6 +234,18 @@ export class BrowserManager {
 
     const telemetry = new TelemetryInterceptor(page);
     telemetry.start();
+
+    // Mark crashed/closed pages for lazy rebuild on the next ensureHealthy pass.
+    page.on('crash', () => {
+      this.crashedBranches.add(branchId);
+      this.onReliabilityEvent?.('crash', `Page crashed on branch ${branchId}`);
+      console.error(`[Splice Reliability] Page crashed on branch ${branchId} — queued for rebuild.`);
+    });
+    page.on('close', () => {
+      if (this.pages.get(branchId) === page && this.browser?.isConnected() && !this.expectingShutdown) {
+        this.crashedBranches.add(branchId);
+      }
+    });
 
     // Resource Blocking & V5 Exfiltration Firewall
     await page.route('**/*', (route) => {
@@ -159,6 +281,8 @@ export class BrowserManager {
     this.contexts.set(branchId, context);
     this.pages.set(branchId, page);
     this.telemetry.set(branchId, telemetry);
+    // A freshly built branch is healthy by definition.
+    this.crashedBranches.delete(branchId);
   }
 
   public getActivePage(): Page {
@@ -214,17 +338,23 @@ export class BrowserManager {
     // Save current URL to restore
     const currentUrl = this.pages.get(this.activeBranch)?.url() || 'about:blank';
 
-    // Close old browser
+    // Close old browser (intentional — not a crash)
     if (this.browser) {
-      await this.browser.close();
+      this.expectingShutdown = true;
+      try {
+        await this.browser.close();
+      } finally {
+        this.expectingShutdown = false;
+      }
       this.browser = null;
       this.contexts.clear();
       this.pages.clear();
       this.telemetry.clear();
+      this.crashedBranches.clear();
     }
 
     // Relaunch with new headless setting
-    this.browser = await chromium.launch({ headless: this.headless });
+    await this.launchBrowser();
     await this.createBranch('main');
     this.activeBranch = 'main';
 
@@ -253,6 +383,7 @@ export class BrowserManager {
         page.waitForLoadState('networkidle', { timeout }),
         page.evaluate(async (stableTime) => {
           return new Promise((resolve) => {
+            if (!document.body) { resolve(false); return; }
             let lastMutation = Date.now();
             const observer = new MutationObserver(() => { lastMutation = Date.now(); });
             observer.observe(document.body, { childList: true, subtree: true, attributes: true });
@@ -283,6 +414,7 @@ export class BrowserManager {
   // NAVIGATION & SPECULATION
   // -------------------------
   async navigate(url: string) {
+    await this.ensureHealthy();
     const speculativeBranchId = this.branchIdForUrl(url);
     if (this.contexts.has(speculativeBranchId)) {
       console.error(`[Speculative Execution] Cache hit for ${url}. Instantly switching branch.`);
@@ -295,13 +427,27 @@ export class BrowserManager {
         await new Promise(r => setTimeout(r, 200));
       } catch { /* Already loaded */ }
       this.coordinator.updateBranchStatus(this.activeBranch, url);
+      this.lastKnownUrls.set(this.activeBranch, url);
       this.pushLiveFeed('navigate', `Cache hit → ${url}`);
       return;
     }
 
     const page = this.getActivePage();
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
-    
+    // Transient network failures (DNS blips, connection resets, slow first
+    // byte) are retried with backoff instead of surfacing to the agent.
+    await withRetry(
+      () => page.goto(url, { waitUntil: 'domcontentloaded' }),
+      {
+        retries: 2,
+        isRetryable: isTransientError,
+        onRetry: (attempt, e) => {
+          this.pushLiveFeed('navigate_retry', `Retry #${attempt} for ${url}: ${errorMessage(e).slice(0, 80)}`);
+          console.error(`[Splice Reliability] navigate retry #${attempt} for ${url}: ${errorMessage(e)}`);
+        },
+      }
+    );
+    this.lastKnownUrls.set(this.activeBranch, url);
+
     // Adaptive Wait instead of just networkidle
     await this.waitForStability();
     
@@ -315,6 +461,7 @@ export class BrowserManager {
   }
 
   async speculativeFork(urls: string[]) {
+    await this.ensureHealthy();
     const context = this.contexts.get(this.activeBranch);
     if (!context) throw new Error('Active branch not found');
     const storageState = await context.storageState();
@@ -334,6 +481,7 @@ export class BrowserManager {
   // SEMANTIC EXTRACTION
   // -------------------------
   async getSemanticTree(intent?: string, lens: any = 'UX', maxTokens?: number): Promise<SemanticNode> {
+    await this.ensureHealthy();
     const page = this.getActivePage();
     const telemetry = this.telemetry.get(this.activeBranch);
     const result = await SemanticExtractor.extract(page, intent, lens, maxTokens, telemetry?.getLogs() || []);
@@ -362,6 +510,7 @@ export class BrowserManager {
   // AGENT STATE FORENSICS
   // -------------------------
   async diagnoseAgentState(goal?: string, lastActions: string[] = []): Promise<AgentStateDiagnosis> {
+    await this.ensureHealthy();
     const page = this.getActivePage();
     await page.waitForLoadState('domcontentloaded', { timeout: 3000 }).catch(() => {});
 
@@ -573,9 +722,11 @@ export class BrowserManager {
     const { intent, value, constraints = {}, execute = false } = input;
     if (!intent || intent.trim().length === 0) throw new Error('Intent is required.');
 
-    const page = this.getActivePage();
+    await this.ensureHealthy();
     await this.getSemanticTree(intent, 'UX', 1200);
     const diagnosis = await this.diagnoseAgentState(intent);
+    // Resolve the page only after health checks, which may rebuild the branch.
+    const page = this.getActivePage();
     const keywords = this.tokenizeIntent(intent);
     const inferredAction = this.inferActionFromIntent(intent, value);
     const currentUrl = page.url();
@@ -814,19 +965,15 @@ export class BrowserManager {
     // ── Ownership check — keeps errors local, eliminates conflicting writes ──
     this.coordinator.verifyOwnership(this.activeBranch, agentId);
 
+    await this.ensureHealthy();
     const page = this.getActivePage();
 
-    // CAPTCHA detection & Autonomous Triage
+    // CAPTCHA detection — always route to human intervention rather than
+    // pretending an automated solver handled it.
     const captchaFrames = page.locator('iframe[src*="captcha"], iframe[src*="recaptcha"], iframe[title*="recaptcha"]');
     if (await captchaFrames.count() > 0) {
-      if (process.env.TWOCAPTCHA_API_KEY) {
-        console.log('[CAPTCHA Triage] Attempting automatic 2Captcha solver...');
-        await new Promise(r => setTimeout(r, 2000));
-        console.log('[CAPTCHA Triage] 2Captcha solver successful. Resuming...');
-      } else {
-        this.metrics.captchaInterruptions++;
-        throw new Error('CAPTCHA_REQUIRED: Human intervention requested. Set TWOCAPTCHA_API_KEY for auto-triage.');
-      }
+      this.metrics.captchaInterruptions++;
+      throw new Error('CAPTCHA_REQUIRED: Human intervention requested via request_human_intervention.');
     }
 
     const selector = `[data-splice-id="${elementId}"]`;
@@ -874,9 +1021,10 @@ export class BrowserManager {
 
     await this.performAction(element, action, value);
     this.saveMicroSnapshot('interact', { action, elementId, value, agentId });
-    
+
     // Stability check after interaction
     await this.waitForStability(2000);
+    this.lastKnownUrls.set(this.activeBranch, page.url());
   }
 
   private async performAction(element: any, action: string, value?: string) {
@@ -927,6 +1075,7 @@ export class BrowserManager {
   }
 
   async executeScript(script: string): Promise<any> {
+    await this.ensureHealthy();
     const page = this.getActivePage();
     try {
       // Ensure the page is in a stable state before executing
@@ -1009,7 +1158,12 @@ export class BrowserManager {
 
     const state = JSON.parse(this.vault.readDecrypted(statePath));
 
+    // Detach the maps before closing so the close event is not mistaken
+    // for a crash by the reliability layer.
     const oldContext = this.contexts.get('main');
+    this.contexts.delete('main');
+    this.pages.delete('main');
+    this.telemetry.delete('main');
     if (oldContext) await oldContext.close();
 
     await this.createBranch('main', state);
@@ -1021,6 +1175,7 @@ export class BrowserManager {
   // BRANCH MANAGEMENT
   // -------------------------
   async forkState(agentId?: string): Promise<string> {
+    await this.ensureHealthy();
     const context = this.contexts.get(this.activeBranch);
     if (!context) throw new Error('Active branch not found');
 
@@ -1037,6 +1192,7 @@ export class BrowserManager {
       this.coordinator.acquireOwnership(branchId, agentId);
     }
     this.coordinator.updateBranchStatus(branchId, currentUrl);
+    this.lastKnownUrls.set(branchId, currentUrl);
 
     this.pushLiveFeed('fork_state', `Created branch: ${branchId}${agentId ? ` (owner: ${agentId})` : ''}`);
     return branchId;
@@ -1126,9 +1282,18 @@ export class BrowserManager {
     await visibleBrowser.close();
     fs.unlinkSync(statePath);
 
+    // Detach and close the stale context before rebuilding the branch so
+    // the reliability layer does not classify the swap as a crash.
+    const staleContext = this.contexts.get(this.activeBranch);
+    this.contexts.delete(this.activeBranch);
+    this.pages.delete(this.activeBranch);
+    this.telemetry.delete(this.activeBranch);
+    if (staleContext) await staleContext.close().catch(() => {});
+
     await this.createBranch(this.activeBranch, solvedState);
     const newPage = this.getActivePage();
     await newPage.goto(currentUrl);
+    this.lastKnownUrls.set(this.activeBranch, currentUrl);
 
     console.error(`--- INTERVENTION COMPLETE. AGENT RESUMING ---`);
     this.pushLiveFeed('human_intervention', `Resolved: ${reason}`);
@@ -1203,14 +1368,20 @@ export class BrowserManager {
       console.error("[Dashboard] Failed to load latest audit:", e);
     }
 
+    // Escape "<" so page-derived strings can never close the script tag or
+    // inject markup into the locally rendered dashboard.
+    const toJs = (value: unknown) => JSON.stringify(value).replace(/</g, '\\u003c');
+
     const dataInjection = `
-        const microSnapshots = ${JSON.stringify(snaps)};
-        const metrics = ${JSON.stringify(this.metrics)};
-        const liveFeed = ${JSON.stringify(this.getLiveFeed())};
-        const audit = ${JSON.stringify(latestAudit)};
-        const ccs = ${JSON.stringify(this.coordinator.buildCanonicalContext())};
-        const taxMetrics = ${JSON.stringify(this.coordinator.getCoordinationTaxMetrics())};
-        const summonsList = ${JSON.stringify(this.coordinator.getSummons())};
+        const microSnapshots = ${toJs(snaps)};
+        const metrics = ${toJs(this.metrics)};
+        const liveFeed = ${toJs(this.getLiveFeed())};
+        const audit = ${toJs(latestAudit ?? null)};
+        const ccs = ${toJs(this.coordinator.buildCanonicalContext())};
+        const taxMetrics = ${toJs(this.coordinator.getCoordinationTaxMetrics())};
+        const summonsList = ${toJs(this.coordinator.getSummons())};
+        const runtimeHealth = ${toJs(this.getRuntimeHealth())};
+        const agentProfiles = ${toJs(this.agentTracker.getAllProfiles())};
 
         const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({
           '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
@@ -1375,6 +1546,59 @@ export class BrowserManager {
             : empty('Console telemetry will appear here once pages emit logs.');
         }
 
+        // \u2500\u2500\u2500 Runtime Reliability Panel \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        const relBrowser = document.getElementById('rel-browser');
+        if (relBrowser) {
+          relBrowser.textContent = runtimeHealth.browserConnected ? 'Connected' : 'Recovering';
+          relBrowser.className = 'tax-value ' + (runtimeHealth.browserConnected ? 'ok' : 'bad');
+        }
+        const relUptime = document.getElementById('rel-uptime');
+        if (relUptime) {
+          const mins = Math.floor(runtimeHealth.uptimeMs / 60000);
+          relUptime.textContent = mins >= 60 ? Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm' : mins + 'm';
+        }
+        const setRel = (id, val, badWhenNonzero) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          el.textContent = val;
+          el.className = 'tax-value ' + (badWhenNonzero && val > 0 ? 'nonzero' : 'zero');
+        };
+        setRel('rel-crashes', runtimeHealth.browserCrashCount, true);
+        setRel('rel-recoveries', (runtimeHealth.journal && runtimeHealth.journal.recoveries) || 0, false);
+        setRel('rel-journal', (runtimeHealth.journal && runtimeHealth.journal.toolCalls) || 0, false);
+        setRel('rel-errors', (runtimeHealth.journal && runtimeHealth.journal.errors) || 0, true);
+
+        // \u2500\u2500\u2500 Agent Performance Panel \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+        const agentPerfFeed = document.getElementById('agent-perf-feed');
+        if (agentPerfFeed) {
+          agentPerfFeed.innerHTML = agentProfiles.length
+            ? agentProfiles.map(p => {
+                const rate = Math.round(p.successRate * 100);
+                const recent = Math.round(p.recentSuccessRate * 100);
+                const fillClass = rate < 50 ? 'verylow' : rate < 75 ? 'low' : '';
+                const statusTag = p.status === 'optimal' ? 'green' : p.status === 'degraded' ? 'amber' : 'red';
+                const top = p.optimizations && p.optimizations[0];
+                return \`
+                  <div class="agent-perf-card \${esc(p.status)}">
+                    <div class="agent-perf-head">
+                      <span class="agent-badge">\${esc(p.agentId)}</span>
+                      <span class="tag \${statusTag}">\${esc(p.status)}</span>
+                    </div>
+                    <div class="agent-perf-stats">
+                      <span>success <b>\${rate}%</b></span>
+                      <span>recent <b>\${recent}%</b></span>
+                      <span>actions <b>\${p.totalActions}</b></span>
+                      <span>avg <b>\${p.avgDurationMs}ms</b></span>
+                      \${p.consecutiveFailures > 0 ? \`<span>streak <b style="color:var(--red)">\${p.consecutiveFailures}\u2715</b></span>\` : ''}
+                    </div>
+                    <div class="conf-bar"><div class="conf-fill \${fillClass}" style="width:\${rate}%"></div></div>
+                    \${top ? \`<div class="agent-directive">\${esc(top.directive)}</div>\` : ''}
+                  </div>
+                \`;
+              }).join('')
+            : empty('No agent activity tracked yet. Pass agentId on tool calls to enable live tracking and in-action optimization.');
+        }
+
         // \u2500\u2500\u2500 Coordination Health Panel \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
         const statAgents = document.getElementById('stat-agents');
         if (statAgents) statAgents.textContent = ccs.registeredAgents.length;
@@ -1415,7 +1639,7 @@ export class BrowserManager {
 
         // Evidence Ledger
         const ledgerFeed = document.getElementById('ledger-feed');
-        const conflictedKeys = new Set(${JSON.stringify(this.coordinator.getConflictedKeys())});
+        const conflictedKeys = new Set(${toJs(this.coordinator.getConflictedKeys())});
         if (ledgerFeed) {
           const ledgerEntries = ccs.promotedFindings.slice(0, 6);
           ledgerFeed.innerHTML = ledgerEntries.length
@@ -1569,11 +1793,16 @@ export class BrowserManager {
       this.openclawGateway = null;
     }
     if (this.browser) {
-      await this.browser.close();
-      this.browser = null;
-      this.contexts.clear();
-      this.pages.clear();
-      this.telemetry.clear();
+      this.expectingShutdown = true;
+      try {
+        await this.browser.close();
+      } finally {
+        this.browser = null;
+        this.contexts.clear();
+        this.pages.clear();
+        this.telemetry.clear();
+        this.crashedBranches.clear();
+      }
     }
   }
 }

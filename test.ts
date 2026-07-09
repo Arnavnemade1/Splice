@@ -281,6 +281,147 @@ async function main() {
       return `${report.totals.critical} critical, ${report.totals.warning} warning, ${report.totals.passed} passed`;
     });
 
+    await step('Error taxonomy classifies failures', async () => {
+      const { classifyError, isTransientError } = await import('./src/Resilience.js');
+      const transient = classifyError(new Error('net::ERR_CONNECTION_RESET at https://example.com'));
+      if (transient.code !== 'NETWORK_TRANSIENT' || !transient.recoverable) throw new Error(`Bad transient classification: ${transient.code}`);
+      const crash = classifyError(new Error('Target page, context or browser has been closed'));
+      if (crash.code !== 'BROWSER_CRASHED') throw new Error(`Bad crash classification: ${crash.code}`);
+      const captcha = classifyError(new Error('CAPTCHA_REQUIRED: Human intervention requested.'));
+      if (captcha.code !== 'CAPTCHA_REQUIRED' || captcha.suggestedNextTool !== 'request_human_intervention') throw new Error('Bad CAPTCHA classification');
+      if (isTransientError(new Error('some ordinary failure'))) throw new Error('Ordinary error misclassified as transient');
+      return 'transient/crash/captcha codes verified';
+    });
+
+    await step('Retry with backoff recovers transient failures', async () => {
+      const { withRetry } = await import('./src/Resilience.js');
+      let attempts = 0;
+      const result = await withRetry(async () => {
+        attempts++;
+        if (attempts < 3) throw new Error('ECONNRESET simulated blip');
+        return 'recovered';
+      }, { retries: 3, baseDelayMs: 10 });
+      if (result !== 'recovered' || attempts !== 3) throw new Error(`Unexpected retry behavior: ${attempts} attempts`);
+      return `succeeded on attempt ${attempts}`;
+    });
+
+    await step('Timeout deadline aborts hung operations', async () => {
+      const { withTimeout } = await import('./src/Resilience.js');
+      const hang = new Promise(() => {}); // never resolves
+      try {
+        await withTimeout(hang, 150, 'hang-test');
+        throw new Error('Timeout never fired');
+      } catch (e: any) {
+        if (e.code !== 'TIMEOUT') throw new Error(`Expected TIMEOUT error, got: ${e.message}`);
+      }
+      return 'hung operation aborted at deadline';
+    });
+
+    await step('Run journal persists tool calls and redacts secrets', async () => {
+      const { RunJournal } = await import('./src/RunJournal.js');
+      const journal = new RunJournal(path.join(process.cwd(), '.splice'));
+      journal.record({ kind: 'tool_call', tool: 'navigate', arguments: { url: fixture.url, apiKey: 'sk_live_abcdefghijklmnopqrstuvwx' }, outcome: 'ok', durationMs: 42 });
+      journal.record({ kind: 'tool_call', tool: 'interact', outcome: 'error', errorCode: 'TARGET_NOT_FOUND', detail: 'stale id' });
+      const entries = journal.tail(10);
+      const stats = journal.getStats();
+      journal.close();
+      if (stats.toolCalls !== 2 || stats.errors !== 1) throw new Error(`Bad journal stats: ${JSON.stringify(stats)}`);
+      const navEntry = entries.find(e => e.tool === 'navigate') as any;
+      if (!navEntry) throw new Error('Journal did not persist tool call');
+      if (JSON.stringify(navEntry.arguments).includes('sk_live_')) throw new Error('Journal failed to redact secret argument');
+      fs.unlinkSync(journal.journalPath);
+      return `${stats.totalEntries} entries persisted, secrets redacted`;
+    });
+
+    await step('Crash recovery rebuilds branch and restores URL', async () => {
+      await browser.navigate(fixture.url);
+      // Simulate a page crash: kill the active page out from under the manager.
+      await browser.getActivePage().close();
+      await new Promise(r => setTimeout(r, 200));
+      // The next call must transparently rebuild the branch and restore the URL.
+      const tree = await browser.getSemanticTree('verify recovery', 'UX');
+      if (!tree || tree.type !== 'root') throw new Error('Session did not recover after page crash');
+      const health = browser.getRuntimeHealth();
+      if (!health.browserConnected) throw new Error('Browser reported disconnected after recovery');
+      const mainBranch = health.branches.find(b => b.branchId === 'main');
+      if (!mainBranch || !mainBranch.lastKnownUrl.includes('127.0.0.1')) throw new Error('Last known URL was not restored');
+      return 'branch rebuilt and URL restored automatically';
+    });
+
+    await step('Runtime health snapshot reports live state', async () => {
+      const health = browser.getRuntimeHealth();
+      if (typeof health.uptimeMs !== 'number' || !Array.isArray(health.branches)) throw new Error('Malformed health snapshot');
+      return `connected=${health.browserConnected}, branches=${health.branches.length}, crashes=${health.browserCrashCount}`;
+    });
+
+    await step('Agent tracker profiles per-agent performance', async () => {
+      const tracker = browser.agentTracker;
+      tracker.recordAction('tracked-agent-1', { tool: 'navigate', outcome: 'ok', durationMs: 900 });
+      tracker.recordAction('tracked-agent-1', { tool: 'interact', outcome: 'ok', durationMs: 400 });
+      tracker.recordAction('tracked-agent-1', { tool: 'interact', outcome: 'error', durationMs: 3100, errorCode: 'TARGET_NOT_FOUND' });
+      const profile = tracker.getProfile('tracked-agent-1');
+      if (!profile) throw new Error('No profile for tracked agent');
+      if (profile.totalActions !== 3 || profile.failures !== 1) throw new Error(`Bad counts: ${JSON.stringify(profile)}`);
+      if (profile.errorBreakdown['TARGET_NOT_FOUND'] !== 1) throw new Error('Error breakdown missing');
+      if (profile.toolUsage['interact'] !== 2) throw new Error('Tool usage missing');
+      return `${profile.totalActions} actions, ${Math.round(profile.successRate * 100)}% success`;
+    });
+
+    await step('In-action optimization emits corrective directives', async () => {
+      const tracker = browser.agentTracker;
+      // Simulate a thrashing agent: repeated stale-target failures.
+      for (let i = 0; i < 4; i++) {
+        tracker.recordAction('thrashing-agent', { tool: 'interact', outcome: 'error', durationMs: 3000, errorCode: 'TARGET_NOT_FOUND' });
+      }
+      const profile = tracker.getProfile('thrashing-agent');
+      if (!profile || profile.status !== 'critical') throw new Error(`Expected critical status, got: ${profile?.status}`);
+      const ids = profile.optimizations.map(o => o.id);
+      if (!ids.includes('diagnose-before-retrying')) throw new Error(`Missing failure-streak directive: ${ids.join(', ')}`);
+      if (!ids.includes('refresh-stale-element-ids')) throw new Error(`Missing stale-ID directive: ${ids.join(', ')}`);
+      const inline = tracker.getInlineDirective('thrashing-agent');
+      if (!inline || !inline.includes('AGENT OPTIMIZER (critical)')) throw new Error(`Bad inline directive: ${inline}`);
+      // A healthy agent gets no inline directive.
+      for (let i = 0; i < 6; i++) {
+        tracker.recordAction('healthy-agent', { tool: 'navigate', outcome: 'ok', durationMs: 500 });
+      }
+      if (tracker.getInlineDirective('healthy-agent') !== null) throw new Error('Healthy agent should not receive directives');
+      return `critical agent → ${ids[0]}; healthy agent → silent`;
+    });
+
+    await step('Python bridge parity with {ok, result} envelope', async () => {
+      const { spawn } = await import('node:child_process');
+      const distTestBridge = path.join(process.cwd(), 'dist_test', 'src', 'bridge_server.js');
+      const distBridge = path.join(process.cwd(), 'dist', 'bridge_server.js');
+      const bridgePath = fs.existsSync(distTestBridge) ? distTestBridge : distBridge;
+      const bridge = spawn('node', [bridgePath], { cwd: process.cwd(), env: { ...process.env, SPLICE_BRIDGE_PORT: '4123' }, stdio: ['ignore', 'ignore', 'pipe'] });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const deadline = setTimeout(() => reject(new Error('Bridge did not start in 15s')), 15000);
+          bridge.stderr!.on('data', (d: Buffer) => {
+            if (d.toString().includes('Listening on')) { clearTimeout(deadline); resolve(); }
+          });
+          bridge.on('exit', (code) => reject(new Error(`Bridge exited early (code ${code})`)));
+        });
+        const post = async (action: string, args: any = {}) => {
+          const res = await fetch('http://127.0.0.1:4123', { method: 'POST', body: JSON.stringify({ action, args }), headers: { 'Content-Type': 'application/json' } });
+          return { status: res.status, body: await res.json() as any };
+        };
+        const nav = await post('navigate', { url: fixture.url, agentId: 'py-agent' });
+        if (nav.status !== 200 || !nav.body.ok || !nav.body.result?.ok) throw new Error(`navigate failed: ${JSON.stringify(nav.body)}`);
+        const health = await post('getRuntimeHealth');
+        if (!health.body.ok || !health.body.result?.browserConnected || !health.body.result?.journal) throw new Error('Bridge health missing fields');
+        const analytics = await post('getAgentAnalytics', { agentId: 'py-agent' });
+        if (!analytics.body.ok || analytics.body.result?.agentId !== 'py-agent') throw new Error('Bridge agent analytics not tracking');
+        const bad = await post('nonexistent_action');
+        if (bad.status !== 500 || bad.body.ok !== false || !bad.body.errorCode) throw new Error('Bridge error envelope missing typed code');
+        return 'navigate, health, analytics, and typed errors verified';
+      } finally {
+        bridge.kill('SIGTERM');
+        await new Promise(r => setTimeout(r, 1500));
+        bridge.kill('SIGKILL');
+      }
+    });
+
     await step('OpenClaw gateway handshake and status command', async () => {
       await browser.toggleOpenClawGateway(true);
       const port = Number(process.env.OPENCLAW_GATEWAY_PORT || 18789);
