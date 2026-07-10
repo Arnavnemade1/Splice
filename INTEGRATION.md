@@ -140,4 +140,17 @@ If your LLM context window is tight (e.g., you are using a cheaper model like `g
 
 After the first full read, your agent can pass `deltaOnly: true` (with the same `intent` as the previous read) to receive only what changed since the last observation — added/removed elements, text and value mutations, and URL/title transitions — instead of the entire tree. Every full-tree response carries a `snapshotHash`; feed it back as `lastSnapshotHash` and Splice automatically returns the full tree whenever your view of the page has gone stale, so a single call always yields a usable observation. On churn-heavy pages, add `structuralOnly: true` to suppress text-only mutations.
 
+Deltas can also be anchored to actions instead of observations: state-changing calls return an `actionId` (`act-N`), and passing it as `sinceLastActionId` diffs against the snapshot captured right after that action — useful when several calls happened since. Elements a framework re-created with identical content are reported as `rewrittenIds` rather than phantom add/remove pairs.
+
 Splice also watches for waste on your behalf: full reads that return an unchanged page get a `[Token Optimizer]` hint attached, agents that average heavy tree reads receive an inline `deltaOnly` directive, and `compile_verified_action` accepts `compact: true` to trim plan responses to essentials.
+
+## The One-Call Primitives
+
+Four tools collapse the most expensive agent loops into single calls:
+
+- **`wait_for`** — instead of `read tree → not there yet → read tree again`, pass conditions (`text_present`, `url_matches`, `network_idle`, …) and block until the first one holds. Timeouts never error; they return `timedOut: true` with a hint about whether the page is slow or settled.
+- **`fill_form`** — instead of one `interact` + one observation per field, pass all fields as human labels. Each is resolved (by label / `aria-label` / `aria-labelledby` / placeholder / name), filled, and readback-verified — native inputs, selects, checkboxes, radios, and custom ARIA widgets (`contenteditable`, `role="textbox"/"combobox"/"switch"`) alike. The report includes validation state, an `ambiguous` flag when a field's match was a near-tie (so you can confirm before trusting it), and — with `submitIntent` — a submit `reason` (`not_submittable`, `form_not_ready`, `no_submit_control`) when the form can't be submitted.
+- **`extract_structured`** — instead of pulling a whole tree into context to scrape it, name the fields you want. Splice finds the best table, repeated card group, or label/value structure and returns clean rows.
+- **`assert_page_state`** — instead of a full observation to check "did it work?", pass expectations and get per-expectation pass/fail with evidence.
+
+When an action seems to have done nothing, check `get_page_events` (a dialog may have been auto-handled, a popup opened, or a download saved) and `get_network_activity` (the request may have failed — the insight sentence names the most recent problem).

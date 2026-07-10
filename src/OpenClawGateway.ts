@@ -46,6 +46,12 @@ export class OpenClawGateway {
               'compile_verified_action',
               'get_semantic_tree',
               'get_semantic_delta',
+              'wait_for',
+              'fill_form',
+              'extract_structured',
+              'assert_page_state',
+              'get_network_activity',
+              'get_page_events',
               'run_security_audit',
               'capture_screenshot',
               'session_status',
@@ -144,15 +150,15 @@ export class OpenClawGateway {
           const { url } = args || {};
           if (!url) throw new Error('Missing "url" parameter for navigate');
           await this.browser.navigate(url);
-          result = { success: true, url };
+          result = { success: true, url, actionId: this.browser.getLastActionId() };
           break;
         }
 
         case 'interact': {
           const { elementId, action, value, agentId } = args || {};
           if (!elementId || !action) throw new Error('Missing "elementId" or "action" parameters for interact');
-          await this.browser.interact(elementId, action, value, agentId);
-          result = { success: true, elementId, action };
+          const actionId = await this.browser.interact(elementId, action, value, agentId);
+          result = { success: true, elementId, action, actionId };
           break;
         }
 
@@ -197,8 +203,44 @@ export class OpenClawGateway {
         }
 
         case 'get_semantic_delta': {
-          const { intent, lens, lastSnapshotHash, structuralOnly } = args || {};
-          result = await this.browser.getSemanticDelta(intent, lens, lastSnapshotHash, structuralOnly === true);
+          const { intent, lens, lastSnapshotHash, structuralOnly, sinceLastActionId } = args || {};
+          result = await this.browser.getSemanticDelta(intent, lens, lastSnapshotHash, structuralOnly === true, sinceLastActionId);
+          break;
+        }
+
+        case 'wait_for': {
+          const { conditions, timeoutMs, pollIntervalMs } = args || {};
+          result = await this.browser.waitFor(conditions, { timeoutMs, pollIntervalMs });
+          break;
+        }
+
+        case 'fill_form': {
+          const { fields, submitIntent, agentId } = args || {};
+          result = await this.browser.fillForm({ fields, submitIntent, agentId });
+          break;
+        }
+
+        case 'extract_structured': {
+          const { fields, maxRows } = args || {};
+          result = await this.browser.extractStructured({ fields, maxRows });
+          break;
+        }
+
+        case 'assert_page_state': {
+          const { expectations } = args || {};
+          result = await this.browser.assertPageState(expectations);
+          break;
+        }
+
+        case 'get_network_activity': {
+          const { urlContains, failedOnly, sinceMs, limit } = args || {};
+          result = this.browser.getNetworkActivity({ urlContains, failedOnly: failedOnly === true, sinceMs, limit });
+          break;
+        }
+
+        case 'get_page_events': {
+          const { sinceMs, type, limit } = args || {};
+          result = this.browser.getPageEvents({ sinceMs, type, limit });
           break;
         }
 

@@ -19,6 +19,21 @@ import { discordNotifier } from './DiscordWebhook.js';
 import type { AuditOptions } from './SecurityAuditor.js';
 import { SpliceError, withRetry, isTransientError, errorMessage } from './Resilience.js';
 import type { AgentStateDiagnosis, LedgerEntry, SemanticNode, SessionMetrics, VerifiedActionPlan, SummonRequest } from './types.js';
+import type {
+  NetworkActivitySummary,
+  NetworkRequestRecord,
+  PageEventRecord,
+  WaitCondition,
+  WaitForResult,
+  FormFieldResult,
+  FormFillReport,
+  ExtractionField,
+  StructuredExtraction,
+  PageExpectation,
+  PageAssertionResult,
+  ViewportInspection,
+  ViewportWidget
+} from './types.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -52,6 +67,23 @@ export class BrowserManager {
   /** Set by the server layer so runtime health and the dashboard include journal statistics. */
   public journalStatsProvider: (() => Record<string, unknown>) | null = null;
 
+  // Multi-modal feedback: vision previews attach automatically to key tools
+  // until the per-session budget runs out. Explicit includeVision: true is
+  // never blocked and never counted. Defaults mirror config.ts.
+  private readonly visionByDefault = !['0', 'false'].includes((process.env.SPLICE_VISION_BY_DEFAULT ?? '').trim().toLowerCase());
+  private readonly visionBudget = (() => {
+    const raw = Number(process.env.SPLICE_VISION_BUDGET);
+    return process.env.SPLICE_VISION_BUDGET !== undefined && Number.isFinite(raw) && raw >= 0 ? raw : 20;
+  })();
+  private visionCapturesUsed = 0;
+
+  /** Claim one automatic vision capture from the session budget. */
+  private consumeVisionBudget(): boolean {
+    if (!this.visionByDefault || this.visionCapturesUsed >= this.visionBudget) return false;
+    this.visionCapturesUsed++;
+    return true;
+  }
+
   /** Multi-agent coordination engine — exposed for MCP tool layer. */
   public readonly coordinator: AgentCoordinator = new AgentCoordinator();
 
@@ -63,6 +95,16 @@ export class BrowserManager {
 
   /** Delta-first observations: last flattened semantic snapshot per branch. */
   private treeSnapshots: Map<string, { hash: string; url: string; title: string; index: Map<string, { type: string; text?: string; value?: string; tag?: string }> }> = new Map();
+
+  /**
+   * Action anchors: unpruned snapshots captured after each state-changing
+   * action, keyed by actionId. Lets an agent ask "what changed since action
+   * act-N?" across any number of intervening calls.
+   */
+  private actionAnchors: Map<string, { hash: string; url: string; title: string; tool: string; at: number; index: Map<string, { type: string; text?: string; value?: string; tag?: string }> }> = new Map();
+  private actionCounter = 0;
+  private readonly MAX_ACTION_ANCHORS = 12;
+  private lastActionId: string | null = null;
 
   /** Token efficiency: consecutive full tree reads per branch whose content did not change. */
   private identicalReads: Map<string, number> = new Map();
@@ -84,6 +126,11 @@ export class BrowserManager {
   // Live feed — ring buffer of last 20 actions
   private liveFeed: Array<{ type: string; detail: string; timestamp: number }> = [];
 
+  /** Out-of-band page events (dialogs, popups, downloads) the agent would otherwise miss. */
+  private pageEvents: PageEventRecord[] = [];
+  private readonly MAX_PAGE_EVENTS = 100;
+  private downloadsDir: string;
+
   private spliceDir: string;
   private snapshotsDir: string;
   private vault!: CryptoManager;
@@ -91,6 +138,7 @@ export class BrowserManager {
   constructor() {
     this.spliceDir = path.join(process.cwd(), '.splice');
     this.snapshotsDir = path.join(this.spliceDir, 'snapshots');
+    this.downloadsDir = path.join(this.spliceDir, 'downloads');
   }
 
   async init() {
@@ -219,6 +267,12 @@ export class BrowserManager {
       headless: this.headless,
       resourceBlocking: this.resourceBlocking,
       openclawGatewayActive: !!this.openclawGateway,
+      vision: {
+        autoEnabled: this.visionByDefault,
+        budget: this.visionBudget,
+        used: this.visionCapturesUsed,
+        remaining: Math.max(0, this.visionBudget - this.visionCapturesUsed),
+      },
       metrics: this.metrics,
       journal: this.journalStatsProvider ? this.journalStatsProvider() : null,
     };
@@ -264,6 +318,58 @@ export class BrowserManager {
       if (this.pages.get(branchId) === page && this.browser?.isConnected() && !this.expectingShutdown) {
         this.crashedBranches.add(branchId);
       }
+    });
+
+    // ── Out-of-band event capture ─────────────────────────────────────────
+    // Native dialogs, popups, and downloads silently wedge agents that only
+    // observe the DOM. Splice auto-handles them non-destructively and records
+    // every occurrence so the agent can see what happened and adapt.
+    page.on('dialog', async (dialog) => {
+      const kind = dialog.type();
+      // Alerts and beforeunload have only one safe direction; confirm/prompt
+      // default to dismiss so an unattended agent never accepts a destructive
+      // action it did not plan.
+      const accept = kind === 'alert' || kind === 'beforeunload';
+      try {
+        if (accept) await dialog.accept();
+        else await dialog.dismiss();
+      } catch { /* dialog may already be handled */ }
+      this.recordPageEvent('dialog', branchId, {
+        dialogType: kind,
+        message: dialog.message().slice(0, 300),
+        action: accept ? 'accepted' : 'dismissed'
+      });
+      this.pushLiveFeed('dialog', `${kind} ${accept ? 'accepted' : 'dismissed'}: ${dialog.message().slice(0, 60)}`);
+    });
+
+    page.on('popup', async (popup) => {
+      let url = 'about:blank';
+      try {
+        await popup.waitForLoadState('domcontentloaded', { timeout: 3000 });
+        url = popup.url();
+      } catch { url = popup.url(); }
+      this.recordPageEvent('popup', branchId, {
+        url,
+        note: 'Popup left open. Use navigate(url) on a branch to follow it deliberately.'
+      });
+      this.pushLiveFeed('popup', `Popup opened: ${url.slice(0, 80)}`);
+    });
+
+    page.on('download', async (download) => {
+      const suggested = this.sanitizeFileName(download.suggestedFilename() || `download-${Date.now()}`);
+      const target = path.join(this.downloadsDir, `${Date.now()}-${suggested}`);
+      let saved = false;
+      try {
+        if (!fs.existsSync(this.downloadsDir)) fs.mkdirSync(this.downloadsDir, { recursive: true });
+        await download.saveAs(target);
+        saved = true;
+      } catch { /* download may have been cancelled */ }
+      this.recordPageEvent('download', branchId, {
+        url: download.url(),
+        suggestedFilename: suggested,
+        savedTo: saved ? target : null
+      });
+      this.pushLiveFeed('download', `${suggested} ${saved ? 'saved' : 'failed'}`);
     });
 
     // Resource Blocking & V5 Exfiltration Firewall
@@ -343,6 +449,56 @@ export class BrowserManager {
     if (/\b(focus)\b/.test(normalized)) return 'focus';
     if (/\b(press|keyboard|key)\b/.test(normalized)) return 'press';
     return 'click';
+  }
+
+  /**
+   * Structured-intent gate: an intent must name a target on the page, not
+   * just a goal state. "click submit on form X" compiles; "finish" does not —
+   * it has no target tokens to rank candidates against, so any pick would be
+   * a guess presented with false confidence.
+   */
+  private assessIntentStructure(intent: string): { structured: boolean; reason?: string } {
+    const normalized = intent.trim().toLowerCase().replace(/[.!?]+$/, '');
+    const vagueGoals = /^(finish|done|continue|proceed|next|go( ahead| on)?|ok(ay)?|yes|do (it|that|this|the thing)|handle (it|this)|make it work|fix (it|this)|complete( (it|this|the (task|flow|process|rest)))?|finish( (it|up|the (task|flow|process)))?|wrap( it)? up|keep going|carry on|try again|retry)$/;
+    if (vagueGoals.test(normalized)) {
+      return { structured: false, reason: `"${intent}" states a goal, not an action on a target.` };
+    }
+    if (this.tokenizeIntent(intent).length === 0) {
+      return { structured: false, reason: `"${intent}" contains no target words to match against page elements.` };
+    }
+    return { structured: true };
+  }
+
+  /** Top visible actionable elements, for suggesting structured intents on a vague goal. */
+  private async collectIntentSuggestions(limit = 6): Promise<string[]> {
+    const page = this.getActivePage();
+    const labels = await page.evaluate((max: number) => {
+      const isVisible = (el: Element) => {
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+      };
+      const describe = (el: HTMLElement) => (
+        el.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || el.getAttribute('title') || ''
+      ).replace(/\s+/g, ' ').trim().slice(0, 60);
+      const results: Array<{ kind: string; label: string }> = [];
+      for (const selector of ['button, [role="button"], input[type="submit"]', 'a[href]', 'input:not([type="hidden"]):not([type="submit"]), textarea, select']) {
+        for (const el of Array.from(document.querySelectorAll<HTMLElement>(selector))) {
+          if (results.length >= max) break;
+          if (!isVisible(el)) continue;
+          const label = describe(el);
+          if (!label) continue;
+          const tag = el.tagName.toLowerCase();
+          const kind = tag === 'select' ? 'select' : tag === 'input' || tag === 'textarea' ? 'type' : 'click';
+          if (!results.some(r => r.label === label)) results.push({ kind, label });
+        }
+        if (results.length >= max) break;
+      }
+      return results;
+    }, limit);
+    return labels.map(({ kind, label }) =>
+      kind === 'type' ? `type <value> into "${label}"` : kind === 'select' ? `select <option> in "${label}"` : `click "${label}"`
+    );
   }
 
   // -------------------------
@@ -429,6 +585,147 @@ export class BrowserManager {
     }
   }
 
+  /**
+   * Semantic waiting primitive. Blocks until the first of the given
+   * conditions is satisfied (any-of), then returns which one matched and how
+   * long it took. Replaces the poll-with-full-tree-reads anti-pattern: one
+   * call instead of N observations.
+   *
+   * Never throws on timeout — returns a result with `timedOut: true` and a
+   * hint, so a single call always yields a usable signal.
+   */
+  async waitFor(
+    conditions: WaitCondition[],
+    options: { timeoutMs?: number; pollIntervalMs?: number } = {}
+  ): Promise<WaitForResult> {
+    if (!Array.isArray(conditions) || conditions.length === 0) {
+      throw new Error('waitFor requires at least one condition.');
+    }
+    for (const c of conditions) {
+      if (c.kind !== 'network_idle' && (!c.value || String(c.value).trim().length === 0)) {
+        throw new Error(`Condition "${c.kind}" requires a value.`);
+      }
+    }
+
+    await this.ensureHealthy();
+    const timeoutMs = Math.min(Math.max(options.timeoutMs ?? 10000, 250), 60000);
+    const pollIntervalMs = Math.min(Math.max(options.pollIntervalMs ?? 250, 100), 2000);
+    const startedAt = Date.now();
+    let pollCount = 0;
+    let consecutiveIdlePolls = 0;
+
+    const domKinds = new Set(['text_present', 'text_gone', 'element_visible', 'element_hidden']);
+    const needsDomCheck = conditions.some(c => domKinds.has(c.kind));
+
+    while (true) {
+      pollCount++;
+      const page = this.getActivePage();
+      const url = page.url();
+      const title = await page.title().catch(() => '');
+
+      // DOM-based conditions resolve in a single in-page pass.
+      let domResults: boolean[] = [];
+      if (needsDomCheck) {
+        domResults = await page.evaluate((conds: Array<{ kind: string; value?: string }>) => {
+          const bodyText = (document.body?.innerText || '').toLowerCase();
+          const isVisible = (el: Element) => {
+            const style = window.getComputedStyle(el);
+            const rect = el.getBoundingClientRect();
+            return style.display !== 'none' &&
+              style.visibility !== 'hidden' &&
+              Number(style.opacity || 1) > 0.05 &&
+              rect.width > 0 && rect.height > 0;
+          };
+          const anyVisibleMatch = (needle: string) => {
+            const lower = needle.toLowerCase();
+            const els = document.querySelectorAll<HTMLElement>('a, button, input, select, textarea, [role], h1, h2, h3, h4, label, [aria-label], summary, li, td, th, p, span, div');
+            for (const el of els) {
+              const label = [
+                el.childElementCount === 0 ? el.innerText : '',
+                el.getAttribute('aria-label'),
+                el.getAttribute('placeholder'),
+                el.getAttribute('name'),
+                el.getAttribute('title')
+              ].filter(Boolean).join(' ').toLowerCase();
+              if (label.includes(lower) && isVisible(el)) return true;
+            }
+            return false;
+          };
+          return conds.map(c => {
+            const value = (c.value || '').toLowerCase();
+            switch (c.kind) {
+              case 'text_present': return bodyText.includes(value);
+              case 'text_gone': return !bodyText.includes(value);
+              case 'element_visible': return anyVisibleMatch(value);
+              case 'element_hidden': return !anyVisibleMatch(value);
+              default: return false;
+            }
+          });
+        }, conditions.map(c => ({ kind: c.kind, value: c.value }))).catch(() => conditions.map(() => false));
+        // A destroyed execution context (mid-navigation) counts as "not yet".
+      }
+
+      const inFlight = this.telemetry.get(this.activeBranch)?.getInFlightCount() ?? 0;
+      consecutiveIdlePolls = inFlight === 0 ? consecutiveIdlePolls + 1 : 0;
+
+      let domIndex = 0;
+      for (let i = 0; i < conditions.length; i++) {
+        const c = conditions[i];
+        let satisfied = false;
+        if (domKinds.has(c.kind)) {
+          satisfied = domResults[domIndex++] === true;
+        } else if (c.kind === 'url_matches') {
+          satisfied = url.toLowerCase().includes(String(c.value).toLowerCase());
+        } else if (c.kind === 'title_matches') {
+          satisfied = title.toLowerCase().includes(String(c.value).toLowerCase());
+        } else if (c.kind === 'network_idle') {
+          // Two consecutive idle polls avoid declaring victory between
+          // request bursts.
+          satisfied = consecutiveIdlePolls >= 2;
+        }
+
+        if (satisfied) {
+          const elapsedMs = Date.now() - startedAt;
+          // Every poll beyond the first replaced a would-be full observation.
+          const estimatedTokensSaved = Math.max(0, pollCount - 1) * 350;
+          this.metrics.tokensSavedEstimate += estimatedTokensSaved;
+          this.pushLiveFeed('wait_for', `${c.kind} satisfied in ${elapsedMs}ms (${pollCount} polls)`);
+          return {
+            satisfied: true,
+            matched: { index: i, kind: c.kind, value: c.value },
+            elapsedMs,
+            timedOut: false,
+            pollCount,
+            finalUrl: url,
+            finalTitle: title,
+            estimatedTokensSaved
+          };
+        }
+      }
+
+      if (Date.now() - startedAt + pollIntervalMs > timeoutMs) {
+        const elapsedMs = Date.now() - startedAt;
+        const estimatedTokensSaved = Math.max(0, pollCount - 1) * 350;
+        this.metrics.tokensSavedEstimate += estimatedTokensSaved;
+        this.pushLiveFeed('wait_for', `Timed out after ${elapsedMs}ms (${pollCount} polls)`);
+        return {
+          satisfied: false,
+          elapsedMs,
+          timedOut: true,
+          pollCount,
+          finalUrl: url,
+          finalTitle: title,
+          estimatedTokensSaved,
+          hint: inFlight > 0
+            ? `${inFlight} network request(s) still in flight when the wait expired — the page may be slow, not stuck. Consider one retry with a longer timeout.`
+            : 'The page settled without meeting any condition. Run diagnose_agent_state to classify what state the page is actually in.'
+        };
+      }
+
+      await new Promise(r => setTimeout(r, pollIntervalMs));
+    }
+  }
+
   // -------------------------
   // NAVIGATION & SPECULATION
   // -------------------------
@@ -475,8 +772,9 @@ export class BrowserManager {
 
     // Sync branch URL into the Canonical Context
     this.coordinator.updateBranchStatus(this.activeBranch, url);
-    
-    this.saveMicroSnapshot('navigate', { url });
+
+    await this.captureActionAnchor('navigate');
+    this.saveMicroSnapshot('navigate', { url, actionId: this.lastActionId });
   }
 
   async speculativeFork(urls: string[]): Promise<SpeculativeBranchSummary[]> {
@@ -625,6 +923,49 @@ export class BrowserManager {
     return this.treeSnapshots.get(this.activeBranch)?.hash ?? null;
   }
 
+  /** Anchor id of the most recent state-changing action, if any. */
+  getLastActionId(): string | null {
+    return this.lastActionId;
+  }
+
+  /**
+   * Capture an unpruned post-action snapshot so later delta calls can anchor
+   * to this exact moment via sinceLastActionId. Unpruned deliberately: the
+   * anchor cannot know what intent a future diff will use, and mixing pruning
+   * settings across a diff fabricates adds/removes. Best-effort — an anchor
+   * that fails to capture never fails the action itself.
+   */
+  private async captureActionAnchor(tool: string): Promise<string | null> {
+    try {
+      const page = this.getActivePage();
+      const telemetry = this.telemetry.get(this.activeBranch);
+      const result = await SemanticExtractor.extract(page, undefined, 'UX', undefined, telemetry?.getLogs() || []);
+      const index = this.flattenTree(result.tree);
+      const hash = createHash('sha256')
+        .update(JSON.stringify(Array.from(index.entries())))
+        .digest('hex')
+        .slice(0, 12);
+      const actionId = `act-${++this.actionCounter}`;
+      this.actionAnchors.set(actionId, {
+        hash,
+        url: page.url(),
+        title: await page.title().catch(() => ''),
+        tool,
+        at: Date.now(),
+        index
+      });
+      while (this.actionAnchors.size > this.MAX_ACTION_ANCHORS) {
+        const oldest = this.actionAnchors.keys().next().value;
+        if (oldest === undefined) break;
+        this.actionAnchors.delete(oldest);
+      }
+      this.lastActionId = actionId;
+      return actionId;
+    } catch {
+      return null;
+    }
+  }
+
   /** Core diff between two flattened snapshots, keyed by stable data-splice-id. */
   private diffIndexes(
     previous: Map<string, { type: string; text?: string; value?: string; tag?: string }>,
@@ -697,11 +1038,26 @@ export class BrowserManager {
    * are suppressed as churn: only added/removed elements and value changes
    * are reported, with textChangesIgnored counting what was filtered.
    */
-  async getSemanticDelta(intent?: string, lens: any = 'UX', lastSnapshotHash?: string, structuralOnly?: boolean): Promise<SemanticDelta | FullTreeFallback> {
-    const previous = this.treeSnapshots.get(this.activeBranch);
-    const tree = await this.getSemanticTree(intent, lens);
+  async getSemanticDelta(intent?: string, lens: any = 'UX', lastSnapshotHash?: string, structuralOnly?: boolean, sinceLastActionId?: string): Promise<SemanticDelta | FullTreeFallback> {
+    // Action-anchored diffs are unpruned on both sides: the anchor was
+    // captured without knowing this call's intent, and mixing pruning
+    // settings across a diff fabricates adds/removes.
+    const anchored = sinceLastActionId !== undefined;
+    const previous = anchored
+      ? this.actionAnchors.get(sinceLastActionId!)
+      : this.treeSnapshots.get(this.activeBranch);
+    const tree = await this.getSemanticTree(anchored ? undefined : intent, lens);
     const current = this.treeSnapshots.get(this.activeBranch)!;
 
+    if (anchored && !previous) {
+      const known = Array.from(this.actionAnchors.keys());
+      return {
+        fullTreeRequired: true,
+        reason: `Unknown actionId "${sinceLastActionId}" — it may have aged out of the anchor window (last ${this.MAX_ACTION_ANCHORS} actions kept). ${known.length > 0 ? `Known anchors: ${known.join(', ')}.` : 'No anchors exist yet; perform an action first.'} The full tree is returned.`,
+        snapshotHash: current.hash,
+        tree,
+      };
+    }
     if (!previous) {
       return {
         fullTreeRequired: true,
@@ -710,7 +1066,7 @@ export class BrowserManager {
         tree,
       };
     }
-    if (lastSnapshotHash && lastSnapshotHash !== previous.hash) {
+    if (!anchored && lastSnapshotHash && lastSnapshotHash !== previous.hash) {
       return {
         fullTreeRequired: true,
         reason: `Your lastSnapshotHash (${lastSnapshotHash}) does not match the server baseline (${previous.hash}) — the page was observed again since your last read. The full tree is returned; the new baseline is ${current.hash}.`,
@@ -721,6 +1077,33 @@ export class BrowserManager {
 
     const { added, removed, changed: allChanged, unchangedCount } = this.diffIndexes(previous.index, current.index);
 
+    // Re-render detection: an element the framework re-created (or moved)
+    // gets a fresh splice-id but keeps its content signature. Pairing those
+    // added/removed entries and reporting them as rewrittenIds keeps identity
+    // churn from masquerading as real page changes.
+    const signature = (n: { type?: string; text?: string; value?: string; tag?: string }) =>
+      `${n.tag || ''}|${n.type || ''}|${(n.text || '').slice(0, 120)}|${(n.value || '').slice(0, 120)}`;
+    const rewrittenIds: NonNullable<SemanticDelta['rewrittenIds']> = [];
+    const removedBySig = new Map<string, Array<(typeof removed)[number]>>();
+    for (const r of removed) {
+      const prevNode = previous.index.get(r.id);
+      const sig = signature({ ...prevNode, tag: r.tag, text: r.text });
+      if (!removedBySig.has(sig)) removedBySig.set(sig, []);
+      removedBySig.get(sig)!.push(r);
+    }
+    const realAdded = added.filter(a => {
+      const sig = signature({ ...current.index.get(a.id), tag: a.tag, text: a.text, type: a.type });
+      const twins = removedBySig.get(sig);
+      if (twins && twins.length > 0) {
+        const twin = twins.shift()!;
+        rewrittenIds.push({ from: twin.id, to: a.id, text: a.text });
+        return false;
+      }
+      return true;
+    });
+    const rewrittenFromIds = new Set(rewrittenIds.map(r => r.from));
+    const realRemoved = removed.filter(r => !rewrittenFromIds.has(r.id));
+
     // structuralOnly: text churn is noise on live pages — keep structure and value changes.
     const changed = structuralOnly ? allChanged.filter(c => c.field !== 'text') : allChanged;
     const textChangesIgnored = structuralOnly ? allChanged.length - changed.length : undefined;
@@ -730,17 +1113,21 @@ export class BrowserManager {
       snapshotHash: current.hash,
       url: { before: previous.url, after: current.url, changed: previous.url !== current.url },
       title: { before: previous.title, after: current.title, changed: previous.title !== current.title },
-      added: added.slice(0, 40),
-      removed: removed.slice(0, 40),
+      added: realAdded.slice(0, 40),
+      removed: realRemoved.slice(0, 40),
       changed: changed.slice(0, 40),
       unchangedCount,
       summary: [
+        anchored ? `since ${sinceLastActionId}` : null,
         previous.url !== current.url ? `navigated ${previous.url} → ${current.url}` : null,
         previous.title !== current.title ? `title "${previous.title}" → "${current.title}"` : null,
-        `${added.length} added, ${removed.length} removed, ${changed.length} changed, ${unchangedCount} unchanged`,
+        `${realAdded.length} added, ${realRemoved.length} removed, ${changed.length} changed, ${unchangedCount} unchanged`,
+        rewrittenIds.length > 0 ? `${rewrittenIds.length} element(s) re-rendered with new ids (content unchanged)` : null,
         textChangesIgnored ? `${textChangesIgnored} text-only change(s) suppressed as churn` : null,
       ].filter(Boolean).join('; '),
     };
+    if (anchored) delta.sinceActionId = sinceLastActionId;
+    if (rewrittenIds.length > 0) delta.rewrittenIds = rewrittenIds.slice(0, 20);
     if (textChangesIgnored !== undefined) delta.textChangesIgnored = textChangesIgnored;
 
     // Credit the savings: the agent received this delta instead of the full tree.
@@ -750,9 +1137,11 @@ export class BrowserManager {
 
     this.saveMicroSnapshot('semantic_delta', {
       summary: delta.summary,
+      sinceActionId: delta.sinceActionId,
       added: delta.added.length,
       removed: delta.removed.length,
       changed: delta.changed.length,
+      rewrittenIds: delta.rewrittenIds?.length ?? 0,
       urlChanged: delta.url.changed,
       addedSample: delta.added.slice(0, 3).map(a => a.text || a.id),
       removedSample: delta.removed.slice(0, 3).map(r => r.text || r.id),
@@ -1064,11 +1453,36 @@ export class BrowserManager {
     };
     execute?: boolean;
     includeVision?: boolean;
+    /** Caller-declared postconditions verified after execution (url_contains, text_present, ...). */
+    expect?: PageExpectation[];
   }): Promise<VerifiedActionPlan> {
-    const { intent, value, constraints = {}, execute = false, includeVision = false } = input;
+    const { intent, value, constraints = {}, execute = false, includeVision, expect } = input;
     if (!intent || intent.trim().length === 0) throw new Error('Intent is required.');
 
     await this.ensureHealthy();
+
+    const structure = this.assessIntentStructure(intent);
+    if (!structure.structured) {
+      const suggestedIntents = await this.collectIntentSuggestions().catch(() => [] as string[]);
+      const plan: VerifiedActionPlan = {
+        intent,
+        confidence: 0,
+        risk: 'high',
+        plan: [],
+        preconditions: ['The intent must name an action and a target visible on the page.'],
+        postconditions: ['No action executed.'],
+        evidence: [structure.reason ?? 'Intent is too vague to compile.'],
+        alternatives: [],
+        needsClarification: true,
+        clarification: {
+          reason: structure.reason ?? 'Intent is too vague to compile.',
+          suggestedIntents,
+          guidance: 'Restate the intent as action + target (e.g. \'click "Place order"\', \'type jane@x.com into "Email"\'). Optionally declare the outcome you expect via expect so success is verified, not assumed.'
+        }
+      };
+      this.saveMicroSnapshot('verified_action_plan', { intent, confidence: 0, risk: 'high', executable: false, needsClarification: true });
+      return plan;
+    }
     await this.getSemanticTree(intent, 'UX', 1200);
     const diagnosis = await this.diagnoseAgentState(intent);
     // Resolve the page only after health checks, which may rebuild the branch.
@@ -1080,7 +1494,7 @@ export class BrowserManager {
       try { return new URL(currentUrl).host; } catch { return ''; }
     })();
 
-    const candidates = await page.evaluate((args: { keywords: string[]; query: string; currentHost: string; noExternal: boolean; requireExactText: boolean }) => {
+    const candidates = await page.evaluate((args: { keywords: string[]; query: string; currentHost: string; noExternal: boolean; requireExactText: boolean; inferredAction: string }) => {
       const selector = [
         'a[href]',
         'button',
@@ -1129,7 +1543,20 @@ export class BrowserManager {
           if (args.requireExactText && args.keywords.length > 0 && !args.keywords.some(keyword => normalized.includes(keyword))) {
             score -= 30;
           }
-          if (tagName === 'button' || el.getAttribute('role') === 'button') score += 3;
+          // Action affinity: the inferred action constrains what kind of
+          // element can possibly satisfy the intent. A typing intent must
+          // resolve to an editable control, never a button — regardless of
+          // how well the button's label happens to match.
+          const editable = tagName === 'input' || tagName === 'textarea' || el.isContentEditable;
+          if (args.inferredAction === 'type') {
+            if (editable) score += 12;
+            else score -= 30;
+          } else if (args.inferredAction === 'select') {
+            if (tagName === 'select') score += 12;
+            else score -= 20;
+          } else if (args.inferredAction === 'click') {
+            if (tagName === 'button' || el.getAttribute('role') === 'button') score += 3;
+          }
           if (tagName === 'a' && /pricing|docs|login|sign|dashboard|settings|account/.test(normalized)) score += 2;
           if ((el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true') score -= 25;
 
@@ -1165,7 +1592,8 @@ export class BrowserManager {
       query: keywords.join(' '),
       currentHost,
       noExternal: constraints.noNavigationOutsideDomain === true,
-      requireExactText: constraints.requireExactText === true
+      requireExactText: constraints.requireExactText === true,
+      inferredAction
     });
 
     const destructiveIntent = /\b(delete|remove|destroy|cancel subscription|purchase|buy|pay|submit payment|transfer|wire)\b/i.test(intent);
@@ -1245,17 +1673,23 @@ export class BrowserManager {
 
     // Hybrid vision: attach a pixel crop of the chosen target so a vision
     // model (or a human) can confirm the DOM pick matches what is on screen.
-    if (includeVision && best.id) {
+    // Attaches by default (budgeted); explicit true bypasses the budget,
+    // explicit false opts out.
+    const attachVision = includeVision === true || (includeVision === undefined && this.consumeVisionBudget());
+    if (attachVision && best.id) {
       try {
         plan.targetPreview = await this.captureNodeScreenshot(best.id);
       } catch (e) {
         plan.evidence.push(`Vision preview unavailable: ${errorMessage(e)}`);
       }
+    } else if (includeVision === undefined && this.visionByDefault) {
+      plan.evidence.push('Auto-vision budget exhausted for this session — pass includeVision: true to force a target preview.');
     }
 
     if (execute && plan.plan.length > 0 && confidence >= 0.45 && !best.disabled && !best.obstructed) {
       const step = plan.plan[0];
-      await this.interact(step.target, step.action, step.value);
+      const actionId = await this.interact(step.target, step.action, step.value);
+      if (actionId) plan.actionId = actionId;
       const afterUrl = page.url();
       const afterTitle = await page.title().catch(() => '');
       const afterDiagnosis = await this.diagnoseAgentState(intent);
@@ -1269,7 +1703,23 @@ export class BrowserManager {
       const domainStillAllowed = !constraints.noNavigationOutsideDomain || (() => {
         try { return new URL(afterUrl).host === currentHost; } catch { return true; }
       })();
-      const passed = domainStillAllowed && (changed || intentVisible || obstructionResolved || validationProgress || afterDiagnosis.state === 'ready');
+      const heuristicsPassed = domainStillAllowed && (changed || intentVisible || obstructionResolved || validationProgress || afterDiagnosis.state === 'ready');
+
+      // Declared postconditions: poll until they hold or the budget expires,
+      // so a slow render doesn't fail an expectation that was about to pass.
+      let expectationResults: PageAssertionResult['results'] | undefined;
+      let expectationsPassed = true;
+      if (expect && expect.length > 0) {
+        const deadline = Date.now() + 5_000;
+        let assertion = await this.assertPageState(expect);
+        while (!assertion.passed && Date.now() < deadline) {
+          await new Promise(resolve => setTimeout(resolve, 250));
+          assertion = await this.assertPageState(expect);
+        }
+        expectationResults = assertion.results;
+        expectationsPassed = assertion.passed;
+      }
+      const passed = heuristicsPassed && expectationsPassed;
 
       // Delta-first: compare against the baseline captured at compile time.
       const delta = await this.getSemanticDelta(intent).catch(() => null);
@@ -1278,7 +1728,13 @@ export class BrowserManager {
       plan.verification = {
         executed: true,
         passed,
+        ...(expectationResults ? { expectations: expectationResults } : {}),
         evidence: [
+          ...(expectationResults
+            ? [expectationsPassed
+                ? `All ${expectationResults.length} declared expectation(s) verified.`
+                : `Declared expectation(s) failed: ${expectationResults.filter(r => !r.passed).map(r => `${r.kind}("${r.value}") — actual: ${r.actual}`).join('; ')}.`]
+            : []),
           changed ? `Page changed from "${beforeTitle || beforeUrl}" to "${afterTitle || afterUrl}".` : 'No URL or title change observed.',
           intentVisible ? 'Post-action page text still contains intent terms.' : 'Intent terms were not found in the post-action body text.',
           obstructionResolved ? 'The previous UI obstruction is no longer present.' : 'No obstruction-resolution signal observed.',
@@ -1302,6 +1758,7 @@ export class BrowserManager {
         passed: false,
         evidence: [
           execute ? 'Execution skipped because confidence/preconditions were insufficient.' : 'Execution was not requested.',
+          ...(expect && expect.length > 0 ? ['Declared expectations were not checked — nothing executed.'] : []),
           `Top candidate: ${best.id} (${best.label || best.tagName}).`
         ]
       };
@@ -1332,6 +1789,97 @@ export class BrowserManager {
       activeBranch: this.activeBranch,
       watchMode: !this.headless,
       branches: Array.from(this.contexts.keys()),
+    };
+  }
+
+  private recordPageEvent(type: PageEventRecord['type'], branchId: string, detail: Record<string, unknown>) {
+    this.pageEvents.push({ type, branchId, timestamp: Date.now(), detail });
+    if (this.pageEvents.length > this.MAX_PAGE_EVENTS) this.pageEvents.shift();
+  }
+
+  /**
+   * Out-of-band page events (dialogs, popups, downloads) since an optional
+   * lookback window. These are events a DOM-only observer never sees.
+   */
+  getPageEvents(options: { sinceMs?: number; type?: PageEventRecord['type']; limit?: number } = {}): {
+    events: PageEventRecord[];
+    total: number;
+    summary: string;
+  } {
+    const { sinceMs, type, limit = 25 } = options;
+    const cutoff = sinceMs !== undefined ? Date.now() - sinceMs : 0;
+    const filtered = this.pageEvents.filter(e =>
+      e.timestamp >= cutoff && (type === undefined || e.type === type)
+    );
+    const events = filtered.slice(-limit);
+    const counts = { dialog: 0, popup: 0, download: 0 } as Record<string, number>;
+    for (const e of filtered) counts[e.type] = (counts[e.type] || 0) + 1;
+    const parts = Object.entries(counts).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k}${n === 1 ? '' : 's'}`);
+    return {
+      events,
+      total: filtered.length,
+      summary: parts.length > 0 ? `Captured ${parts.join(', ')}.` : 'No out-of-band page events captured.'
+    };
+  }
+
+  /**
+   * Network cognition: what has the page's network actually been doing?
+   * Answers "did my submit fire a request, and did it succeed?" without a
+   * screenshot or a tree read.
+   */
+  getNetworkActivity(options: {
+    urlContains?: string;
+    failedOnly?: boolean;
+    sinceMs?: number;
+    limit?: number;
+  } = {}): NetworkActivitySummary {
+    const { urlContains, failedOnly, sinceMs, limit = 50 } = options;
+    const telemetry = this.telemetry.get(this.activeBranch);
+    if (!telemetry) throw new Error('Telemetry not initialized');
+
+    const now = Date.now();
+    const cutoff = sinceMs !== undefined ? now - sinceMs : 0;
+    const all = telemetry.getNetworkRecords();
+    const needle = urlContains?.toLowerCase();
+
+    const matches = all.filter(r => {
+      if (r.startedAt < cutoff) return false;
+      if (needle && !r.url.toLowerCase().includes(needle)) return false;
+      if (failedOnly && !(r.failure || (r.status !== undefined && r.status >= 400))) return false;
+      return true;
+    });
+
+    const byStatusClass: Record<string, number> = {};
+    let completed = 0;
+    let failed = 0;
+    let pending = 0;
+    for (const r of matches) {
+      if (r.failure) { failed++; byStatusClass.failed = (byStatusClass.failed || 0) + 1; continue; }
+      if (r.status === undefined) { pending++; byStatusClass.pending = (byStatusClass.pending || 0) + 1; continue; }
+      completed++;
+      if (r.status >= 400) failed++;
+      const cls = `${Math.floor(r.status / 100)}xx`;
+      byStatusClass[cls] = (byStatusClass[cls] || 0) + 1;
+    }
+
+    const worst = [...matches].reverse().find(r => r.failure || (r.status !== undefined && r.status >= 400));
+    const insight = worst
+      ? `Most recent problem: ${worst.method} ${worst.url.slice(0, 120)} → ${worst.failure || worst.status}.`
+      : pending > 0
+        ? `${pending} request${pending === 1 ? '' : 's'} still in flight; the page may not have settled.`
+        : matches.length > 0
+          ? `All ${matches.length} matching requests completed cleanly.`
+          : 'No matching network activity.';
+
+    return {
+      total: matches.length,
+      completed,
+      failed,
+      pending,
+      byStatusClass,
+      window: { fromMs: cutoff || (matches[0]?.startedAt ?? now), toMs: now },
+      requests: matches.slice(-limit),
+      insight
     };
   }
 
@@ -1387,8 +1935,9 @@ export class BrowserManager {
            console.error(`[Self-Healing] Success! Found fallback element via text: "${originalNode.text}"`);
            // Use the fallback element instead
            await this.performAction(fallbackElement, action, value);
-           this.saveMicroSnapshot('interact', { action, elementId, value, agentId, selfHealed: true });
-           return;
+           const healedActionId = await this.captureActionAnchor('interact');
+           this.saveMicroSnapshot('interact', { action, elementId, value, agentId, selfHealed: true, actionId: healedActionId });
+           return healedActionId;
         }
       }
 
@@ -1397,11 +1946,13 @@ export class BrowserManager {
     }
 
     await this.performAction(element, action, value);
-    this.saveMicroSnapshot('interact', { action, elementId, value, agentId });
 
     // Stability check after interaction
     await this.waitForStability(2000);
     this.lastKnownUrls.set(this.activeBranch, page.url());
+    const actionId = await this.captureActionAnchor('interact');
+    this.saveMicroSnapshot('interact', { action, elementId, value, agentId, actionId });
+    return actionId;
   }
 
   private async performAction(element: any, action: string, value?: string) {
@@ -1420,9 +1971,349 @@ export class BrowserManager {
         if (value === undefined) throw new Error('Key name required for press action');
         await element.press(value);
         break;
+      case 'hover': await element.hover(); break;
+      case 'clear': await element.fill(''); break;
+      case 'check': await element.check(); break;
+      case 'uncheck': await element.uncheck(); break;
+      case 'scroll_into_view': await element.scrollIntoViewIfNeeded(); break;
       default:
         throw new Error(`Unknown action: ${action}`);
     }
+  }
+
+  /**
+   * Batch verified form fill: resolve every field by its human label, fill
+   * them all, verify each by reading the value back, and report validation
+   * state — one call instead of a fill/observe round-trip per field.
+   */
+  async fillForm(input: {
+    fields: Array<{ field: string; value: string }>;
+    submitIntent?: string;
+    agentId?: string;
+  }): Promise<FormFillReport> {
+    const { fields, submitIntent, agentId } = input;
+    if (!Array.isArray(fields) || fields.length === 0) {
+      throw new Error('fillForm requires at least one { field, value } entry.');
+    }
+
+    this.coordinator.verifyOwnership(this.activeBranch, agentId);
+    await this.ensureHealthy();
+    // Stamp data-splice-id attributes so controls are addressable.
+    await this.getSemanticTree(fields.map(f => f.field).join(' '), 'UX', 1200);
+    const page = this.getActivePage();
+
+    // One in-page pass builds a label index of every visible form control.
+    const controls = await page.evaluate(() => {
+      const isVisible = (el: Element) => {
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return style.display !== 'none' &&
+          style.visibility !== 'hidden' &&
+          Number(style.opacity || 1) > 0.05 &&
+          rect.width > 0 && rect.height > 0;
+      };
+
+      const labelFor = (el: HTMLElement): string => {
+        const parts: string[] = [];
+        const id = el.getAttribute('id');
+        if (id) {
+          const label = document.querySelector(`label[for="${CSS.escape(id)}"]`);
+          if (label) parts.push((label as HTMLElement).innerText);
+        }
+        const wrapping = el.closest('label');
+        if (wrapping) parts.push((wrapping as HTMLElement).innerText);
+        // aria-labelledby references other elements by id — the accessible name
+        // source for most custom widgets.
+        const labelledby = el.getAttribute('aria-labelledby');
+        if (labelledby) {
+          for (const ref of labelledby.split(/\s+/)) {
+            const r = document.getElementById(ref);
+            if (r) parts.push(r.innerText || r.textContent || '');
+          }
+        }
+        for (const attr of ['aria-label', 'placeholder', 'name', 'title']) {
+          const v = el.getAttribute(attr);
+          if (v) parts.push(v);
+        }
+        // Fall back to the nearest preceding text (common for div-styled forms).
+        if (parts.length === 0) {
+          const prev = el.previousElementSibling as HTMLElement | null;
+          if (prev && prev.innerText) parts.push(prev.innerText);
+        }
+        return parts.join(' ').replace(/\s+/g, ' ').trim();
+      };
+
+      // Classify a control into how it must be filled. Native elements win by
+      // tag; everything else is an ARIA/custom widget resolved by role or
+      // contenteditable, so custom design-system inputs no longer fall through.
+      const kindOf = (el: HTMLElement): string => {
+        const tag = el.tagName.toLowerCase();
+        if (tag === 'select') return 'select';
+        if (tag === 'textarea') return 'textarea';
+        if (tag === 'input') {
+          const t = (el.getAttribute('type') || 'text').toLowerCase();
+          if (t === 'checkbox') return 'checkbox';
+          if (t === 'radio') return 'radio';
+          return 'text';
+        }
+        if (el.isContentEditable) return 'contenteditable';
+        const role = (el.getAttribute('role') || '').toLowerCase();
+        if (role === 'checkbox' || role === 'switch' || role === 'radio') return 'aria-toggle';
+        if (role === 'textbox' || role === 'searchbox' || role === 'combobox' || role === 'spinbutton') return 'aria-textbox';
+        return 'text';
+      };
+
+      const nativeSelector = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]), select, textarea';
+      const widgetSelector = '[contenteditable=""], [contenteditable="true"], [role="textbox"], [role="searchbox"], [role="combobox"], [role="spinbutton"], [role="checkbox"], [role="switch"], [role="radio"]';
+      const seen = new Set<Element>();
+      const controlEls: HTMLElement[] = [];
+      for (const el of Array.from(document.querySelectorAll<HTMLElement>(`${nativeSelector}, ${widgetSelector}`))) {
+        if (seen.has(el)) continue;
+        seen.add(el);
+        controlEls.push(el);
+      }
+
+      const ariaDisabled = (el: HTMLElement) =>
+        (el as HTMLInputElement).disabled === true || el.getAttribute('aria-disabled') === 'true';
+
+      let stamp = 0;
+      return controlEls
+        .filter(isVisible)
+        .map(el => {
+          // Custom widgets often lack a semantic-tree id (the extractor only
+          // stamps native controls). Assign a stable handle here so they are
+          // addressable by the same locator as everything else.
+          let id = el.getAttribute('data-splice-id');
+          if (!id) {
+            id = `splice-form-${stamp++}`;
+            el.setAttribute('data-splice-id', id);
+          }
+          return {
+            id,
+            tag: el.tagName.toLowerCase(),
+            kind: kindOf(el),
+            type: el.getAttribute('type') || (el.tagName.toLowerCase() === 'select' ? 'select' : 'text'),
+            label: labelFor(el).slice(0, 160),
+            disabled: ariaDisabled(el),
+            required: (el as HTMLInputElement).required === true || el.getAttribute('aria-required') === 'true'
+          };
+        });
+    });
+
+    const results: FormFieldResult[] = [];
+    const claimed = new Set<string>();
+
+    const ambiguousFields: string[] = [];
+    for (const request of fields) {
+      const keywords = this.tokenizeIntent(request.field);
+      // Score controls by label keyword overlap; a field may not claim a
+      // control another field already claimed. Track the runner-up so a
+      // near-tie can be flagged instead of silently guessing wrong.
+      const scored = controls
+        .filter(control => !claimed.has(control.id))
+        .map(control => {
+          const normalized = control.label.toLowerCase();
+          let score = 0;
+          if (normalized === request.field.toLowerCase()) score += 40;
+          for (const keyword of keywords) {
+            if (normalized === keyword) score += 24;
+            else if (normalized.includes(keyword)) score += 10;
+          }
+          // Type affinity: "email" hints at type=email, etc.
+          if (keywords.some(k => control.type.includes(k))) score += 8;
+          return { control, score };
+        })
+        .filter(s => s.score > 0)
+        .sort((a, b) => b.score - a.score);
+
+      const best = scored[0]?.control ?? null;
+      const bestScore = scored[0]?.score ?? 0;
+      const runnerUp = scored[1];
+      // Near-tie on a different control → the label was too generic to trust.
+      const ambiguous = !!runnerUp && bestScore > 0 && runnerUp.score / bestScore >= 0.85;
+
+      if (!best || bestScore <= 0) {
+        results.push({ field: request.field, value: request.value, status: 'not_found' });
+        continue;
+      }
+      if (ambiguous) ambiguousFields.push(request.field);
+      const meta = {
+        control: best.kind,
+        ambiguous: ambiguous || undefined,
+        alternativeLabel: ambiguous ? runnerUp!.control.label : undefined,
+      };
+
+      if (best.disabled) {
+        claimed.add(best.id);
+        results.push({
+          field: request.field, value: request.value, status: 'skipped_disabled',
+          targetId: best.id, matchedLabel: best.label, score: bestScore, ...meta
+        });
+        continue;
+      }
+
+      claimed.add(best.id);
+      const locator = page.locator(`[data-splice-id="${best.id}"]`).first();
+      const truthy = /^(true|yes|on|1|checked)$/i.test(request.value);
+      try {
+        if (best.kind === 'select') {
+          await locator.selectOption({ label: request.value }).catch(async () => {
+            await locator.selectOption(request.value);
+          });
+        } else if (best.kind === 'checkbox' || best.kind === 'radio') {
+          if (truthy) await locator.check(); else await locator.uncheck();
+        } else if (best.kind === 'aria-toggle') {
+          // Custom checkbox/switch/radio: toggle via click only if the desired
+          // state differs from the current aria-checked state.
+          const current = (await locator.getAttribute('aria-checked')) === 'true';
+          if (current !== truthy) await locator.click();
+        } else {
+          // Native text/textarea, contenteditable, and ARIA textboxes. fill()
+          // covers inputs, textareas, and contenteditable; for a stubborn
+          // custom textbox, fall back to click + keyboard entry.
+          try {
+            await locator.fill(request.value);
+          } catch {
+            await locator.click();
+            await page.keyboard.press('Control+A').catch(() => {});
+            await page.keyboard.type(request.value);
+          }
+        }
+
+        // Readback verification + validity in one pass, across every kind.
+        const state = await locator.evaluate((el: any, expected: string) => {
+          const role = (el.getAttribute('role') || '').toLowerCase();
+          const nativeCheck = el.type === 'checkbox' || el.type === 'radio';
+          const ariaToggle = role === 'checkbox' || role === 'switch' || role === 'radio';
+          let actual: string;
+          if (nativeCheck) actual = String(el.checked);
+          else if (ariaToggle) actual = el.getAttribute('aria-checked') === 'true' ? 'true' : 'false';
+          else if (el.isContentEditable) actual = (el.textContent ?? '').trim();
+          else actual = String(el.value ?? el.getAttribute('value') ?? '');
+          const valid = typeof el.checkValidity === 'function'
+            ? el.checkValidity()
+            : el.getAttribute('aria-invalid') !== 'true';
+          return { actual, valid, validationMessage: el.validationMessage || '' };
+        }, request.value);
+
+        let matches: boolean;
+        if (best.kind === 'checkbox' || best.kind === 'radio' || best.kind === 'select') {
+          matches = true; // the underlying call threw on failure
+        } else if (best.kind === 'aria-toggle') {
+          matches = state.actual === String(truthy);
+        } else {
+          matches = state.actual === request.value;
+        }
+
+        results.push({
+          field: request.field,
+          value: request.value,
+          status: matches ? 'filled' : 'readback_mismatch',
+          targetId: best.id,
+          matchedLabel: best.label,
+          score: bestScore,
+          ...meta,
+          validationMessage: state.valid ? undefined : state.validationMessage || 'Field reports invalid state.'
+        });
+      } catch (e) {
+        results.push({
+          field: request.field, value: request.value, status: 'failed',
+          targetId: best.id, matchedLabel: best.label, score: bestScore, ...meta,
+          validationMessage: errorMessage(e).slice(0, 160)
+        });
+      }
+    }
+
+    // Post-fill form readiness: remaining invalid controls (native + ARIA) and
+    // whether a submit control exists and is enabled.
+    const readiness = await page.evaluate(() => {
+      const invalid: string[] = [];
+      const nameOf = (el: Element) =>
+        el.getAttribute('aria-label') || el.getAttribute('name') || el.getAttribute('placeholder') || el.id || el.tagName.toLowerCase();
+      document.querySelectorAll<HTMLInputElement>('input, select, textarea').forEach(el => {
+        if (typeof el.checkValidity === 'function' && !el.checkValidity()) invalid.push(nameOf(el));
+      });
+      document.querySelectorAll('[aria-invalid="true"]').forEach(el => {
+        const n = nameOf(el);
+        if (!invalid.includes(n)) invalid.push(n);
+      });
+      const submitCandidates = Array.from(document.querySelectorAll<HTMLElement>('button[type="submit"], input[type="submit"], button, [role="button"]'))
+        .filter(b => /submit|continue|save|sign|log ?in|register|checkout|next|confirm|send|search|apply|pay|order|place/i.test(b.innerText || (b as HTMLInputElement).value || b.getAttribute('aria-label') || ''));
+      const isDisabled = (b: Element) => (b as HTMLButtonElement).disabled === true || b.getAttribute('aria-disabled') === 'true';
+      const submitFound = submitCandidates.length > 0;
+      const submitEnabled = !submitFound ? null : submitCandidates.some(b => !isDisabled(b));
+      return { invalid, submitFound, submitEnabled };
+    });
+
+    const filledCount = results.filter(r => r.status === 'filled').length;
+    const failedCount = results.length - filledCount;
+    const formReady = readiness.invalid.length === 0 && readiness.submitEnabled !== false;
+    // A submit control exists but is disabled → filled yet not submittable.
+    const submittable = readiness.submitFound ? readiness.submitEnabled === true : undefined;
+    // Each field beyond the first would normally cost an interact + observe.
+    const estimatedTokensSaved = Math.max(0, fields.length - 1) * 500;
+    this.metrics.tokensSavedEstimate += estimatedTokensSaved;
+
+    const report: FormFillReport = {
+      fields: results,
+      filledCount,
+      failedCount,
+      invalidFields: readiness.invalid,
+      formReady,
+      estimatedTokensSaved,
+      summary: `Filled ${filledCount}/${fields.length} fields. ` +
+        (ambiguousFields.length > 0 ? `${ambiguousFields.length} ambiguous match(es): ${ambiguousFields.slice(0, 3).join(', ')} — confirm before trusting. ` : '') +
+        (readiness.invalid.length > 0 ? `${readiness.invalid.length} control(s) still invalid: ${readiness.invalid.slice(0, 4).join(', ')}. ` : 'No invalid controls remain. ') +
+        (readiness.submitEnabled === null ? 'No submit control detected.' : readiness.submitEnabled ? 'Submit control is enabled.' : 'Submit control is present but not submittable (disabled).')
+    };
+    if (submittable !== undefined) report.submittable = submittable;
+    if (ambiguousFields.length > 0) report.ambiguousFields = ambiguousFields;
+
+    if (submitIntent) {
+      if (formReady) {
+        const plan = await this.compileVerifiedAction({ intent: submitIntent, execute: true });
+        const executed = plan.verification?.executed === true;
+        report.submit = {
+          requested: true,
+          executed,
+          passed: plan.verification?.passed,
+          reason: executed ? 'submitted' : 'form_not_ready',
+          evidence: plan.needsClarification && plan.clarification
+            ? [plan.clarification.reason, ...plan.clarification.suggestedIntents.slice(0, 3).map(s => `Try: ${s}`)]
+            : plan.verification?.evidence?.slice(0, 5)
+        };
+      } else {
+        // Honest, specific reason the form was not submitted.
+        const reason: NonNullable<FormFillReport['submit']>['reason'] =
+          readiness.submitEnabled === false ? 'not_submittable'
+          : !readiness.submitFound ? 'no_submit_control'
+          : 'form_not_ready';
+        const evidenceByReason: Record<string, string> = {
+          not_submittable: 'Submit skipped: a submit control exists but is disabled. Some required field is still invalid or a client-side gate is unmet.',
+          no_submit_control: 'Submit skipped: no submit-like control was found on the page.',
+          form_not_ready: `Submit skipped: the form is not ready (${readiness.invalid.length} invalid control(s)).`
+        };
+        report.submit = {
+          requested: true,
+          executed: false,
+          reason,
+          evidence: [evidenceByReason[reason]]
+        };
+      }
+    }
+
+    await this.waitForStability(2000);
+    const actionId = await this.captureActionAnchor('fill_form');
+    if (actionId) report.actionId = actionId;
+    this.saveMicroSnapshot('fill_form', {
+      fields: fields.length,
+      filled: filledCount,
+      formReady,
+      submitted: report.submit?.executed === true,
+      agentId,
+      actionId
+    });
+    return report;
   }
 
   async dismissCommonBanners() {
@@ -1451,6 +2342,321 @@ export class BrowserManager {
     }
   }
 
+  /**
+   * Schema-driven data extraction. The agent names the fields it wants and
+   * Splice finds the best repeating structure on the page — a table, a set of
+   * repeated cards, or label/value pairs — and returns clean rows. No
+   * selectors, no tree walking, no prompt-side scraping.
+   */
+  async extractStructured(input: {
+    fields: ExtractionField[];
+    maxRows?: number;
+  }): Promise<StructuredExtraction> {
+    const { fields, maxRows = 50 } = input;
+    if (!Array.isArray(fields) || fields.length === 0) {
+      throw new Error('extractStructured requires at least one field.');
+    }
+
+    await this.ensureHealthy();
+    const page = this.getActivePage();
+    await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+
+    const specs = fields.map(f => ({
+      name: f.name,
+      keywords: this.tokenizeIntent(`${f.name} ${f.hint || ''}`)
+    }));
+
+    const raw = await page.evaluate((args: { specs: Array<{ name: string; keywords: string[] }>; maxRows: number }) => {
+      const { specs, maxRows } = args;
+      const clean = (s: string) => (s || '').replace(/\s+/g, ' ').trim();
+      const matchScore = (text: string, keywords: string[]): number => {
+        const normalized = text.toLowerCase();
+        let score = 0;
+        for (const keyword of keywords) {
+          if (normalized === keyword) score += 3;
+          else if (normalized.includes(keyword)) score += 1;
+        }
+        return score;
+      };
+      const isVisible = (el: Element) => {
+        const style = window.getComputedStyle(el);
+        return style.display !== 'none' && style.visibility !== 'hidden';
+      };
+
+      type Candidate = { method: 'table' | 'repeated-group' | 'label-pairs'; rows: Array<Record<string, string>>; coverage: number };
+      const candidates: Candidate[] = [];
+
+      // ── Strategy 1: tables with matchable headers ──────────────────────
+      for (const table of Array.from(document.querySelectorAll('table')).filter(isVisible)) {
+        const headerCells = Array.from(table.querySelectorAll('thead th, thead td'));
+        const headRow = headerCells.length > 0
+          ? headerCells
+          : Array.from(table.querySelector('tr')?.querySelectorAll('th, td') || []);
+        if (headRow.length === 0) continue;
+        const headers = headRow.map(c => clean((c as HTMLElement).innerText));
+
+        // Map each requested field to its best header column.
+        const columnFor: Record<string, number> = {};
+        for (const spec of specs) {
+          let bestIdx = -1;
+          let bestScore = 0;
+          headers.forEach((h, idx) => {
+            const score = matchScore(h, spec.keywords);
+            if (score > bestScore) { bestScore = score; bestIdx = idx; }
+          });
+          if (bestIdx >= 0) columnFor[spec.name] = bestIdx;
+        }
+        const mapped = Object.keys(columnFor).length;
+        if (mapped === 0) continue;
+
+        const bodyRows = Array.from(table.querySelectorAll('tbody tr'));
+        const dataRows = bodyRows.length > 0
+          ? bodyRows
+          : Array.from(table.querySelectorAll('tr')).slice(headerCells.length > 0 ? 0 : 1);
+        const rows: Array<Record<string, string>> = [];
+        for (const tr of dataRows.slice(0, maxRows)) {
+          const cells = Array.from(tr.querySelectorAll('td, th')).map(c => clean((c as HTMLElement).innerText));
+          if (cells.every(c => c.length === 0)) continue;
+          const row: Record<string, string> = {};
+          for (const [name, idx] of Object.entries(columnFor)) {
+            if (cells[idx] !== undefined) row[name] = cells[idx];
+          }
+          if (Object.keys(row).length > 0) rows.push(row);
+        }
+        if (rows.length > 0) candidates.push({ method: 'table', rows, coverage: mapped / specs.length });
+      }
+
+      // ── Strategy 2: repeated sibling groups (cards, list items) ────────
+      const parents = new Set<Element>();
+      document.querySelectorAll('ul, ol, div, section, tbody').forEach(p => { if (isVisible(p)) parents.add(p); });
+      for (const parent of parents) {
+        const children = Array.from(parent.children) as HTMLElement[];
+        if (children.length < 3) continue;
+        // Group children by tag+class signature; take the dominant group.
+        const groups = new Map<string, HTMLElement[]>();
+        for (const child of children) {
+          const sig = `${child.tagName}.${child.className}`;
+          if (!groups.has(sig)) groups.set(sig, []);
+          groups.get(sig)!.push(child);
+        }
+        const dominant = [...groups.values()].sort((a, b) => b.length - a.length)[0];
+        if (!dominant || dominant.length < 3) continue;
+
+        const rows: Array<Record<string, string>> = [];
+        const found: Record<string, number> = {};
+        for (const item of dominant.slice(0, maxRows)) {
+          const row: Record<string, string> = {};
+          for (const spec of specs) {
+            // Prefer descendants whose class/attribute names the field, then
+            // "Label: value" patterns inside the item text.
+            let value = '';
+            const descendants = Array.from(item.querySelectorAll<HTMLElement>('*')).slice(0, 60);
+            let bestScore = 0;
+            for (const d of descendants) {
+              const meta = `${d.className} ${d.getAttribute('data-field') || ''} ${d.getAttribute('itemprop') || ''} ${d.getAttribute('aria-label') || ''}`;
+              const score = matchScore(meta, spec.keywords);
+              if (score > bestScore && d.childElementCount === 0 && clean(d.innerText).length > 0) {
+                bestScore = score;
+                value = clean(d.innerText);
+              }
+            }
+            if (!value) {
+              const text = item.innerText || '';
+              for (const keyword of spec.keywords) {
+                const rx = new RegExp(`${keyword}\\s*[:\\-–]\\s*([^\\n]+)`, 'i');
+                const m = text.match(rx);
+                if (m) { value = clean(m[1]); break; }
+              }
+            }
+            if (value) { row[spec.name] = value.slice(0, 200); found[spec.name] = (found[spec.name] || 0) + 1; }
+          }
+          if (Object.keys(row).length > 0) rows.push(row);
+        }
+        if (rows.length >= 3) {
+          const coverage = specs.filter(s => (found[s.name] || 0) >= rows.length * 0.5).length / specs.length;
+          if (coverage > 0) candidates.push({ method: 'repeated-group', rows, coverage });
+        }
+      }
+
+      // ── Strategy 3: single-record label/value pairs ────────────────────
+      {
+        const row: Record<string, string> = {};
+        // dt/dd pairs
+        const pairs: Array<{ label: string; value: string }> = [];
+        document.querySelectorAll('dt').forEach(dt => {
+          const dd = dt.nextElementSibling;
+          if (dd && dd.tagName === 'DD') pairs.push({ label: clean((dt as HTMLElement).innerText), value: clean((dd as HTMLElement).innerText) });
+        });
+        // "Label: value" lines in the visible body
+        const bodyLines = (document.body?.innerText || '').split('\n').slice(0, 400);
+        for (const line of bodyLines) {
+          const m = line.match(/^([^:]{2,40}):\s+(.{1,200})$/);
+          if (m) pairs.push({ label: clean(m[1]), value: clean(m[2]) });
+        }
+        for (const spec of specs) {
+          let bestScore = 0;
+          for (const pair of pairs) {
+            const score = matchScore(pair.label, spec.keywords);
+            if (score > bestScore && pair.value) { bestScore = score; row[spec.name] = pair.value.slice(0, 200); }
+          }
+        }
+        if (Object.keys(row).length > 0) {
+          candidates.push({ method: 'label-pairs', rows: [row], coverage: Object.keys(row).length / specs.length });
+        }
+      }
+
+      // Pick the candidate with the best coverage; break ties toward more rows.
+      candidates.sort((a, b) => b.coverage - a.coverage || b.rows.length - a.rows.length);
+      return candidates[0] || null;
+    }, { specs, maxRows });
+
+    if (!raw) {
+      return {
+        method: 'none',
+        rows: [],
+        rowCount: 0,
+        confidence: 0,
+        fieldCoverage: Object.fromEntries(fields.map(f => [f.name, 0])),
+        summary: 'No table, repeated group, or label/value structure matched the requested fields.'
+      };
+    }
+
+    const fieldCoverage: Record<string, number> = {};
+    for (const f of fields) {
+      const present = raw.rows.filter((r: Record<string, string>) => r[f.name] !== undefined).length;
+      fieldCoverage[f.name] = raw.rows.length > 0 ? Number((present / raw.rows.length).toFixed(2)) : 0;
+    }
+
+    const extraction: StructuredExtraction = {
+      method: raw.method,
+      rows: raw.rows,
+      rowCount: raw.rows.length,
+      confidence: Number(Math.min(1, raw.coverage).toFixed(2)),
+      fieldCoverage,
+      summary: `Extracted ${raw.rows.length} row(s) via ${raw.method} with ${Math.round(raw.coverage * 100)}% field coverage.`
+    };
+
+    this.pushLiveFeed('extract', extraction.summary);
+    this.saveMicroSnapshot('extract_structured', {
+      method: raw.method,
+      rows: raw.rows.length,
+      fields: fields.map(f => f.name)
+    });
+    return extraction;
+  }
+
+  /**
+   * Cheap post-action verification: evaluate a list of expectations against
+   * the live page in one pass. Costs a fraction of a tree read — ideal for
+   * checking postconditions between actions.
+   */
+  async assertPageState(expectations: PageExpectation[]): Promise<PageAssertionResult> {
+    if (!Array.isArray(expectations) || expectations.length === 0) {
+      throw new Error('assertPageState requires at least one expectation.');
+    }
+
+    await this.ensureHealthy();
+    const page = this.getActivePage();
+    const url = page.url();
+    const title = await page.title().catch(() => '');
+
+    const domChecks = await page.evaluate((exps: Array<{ kind: string; value: string }>) => {
+      const bodyText = (document.body?.innerText || '');
+      const lowerBody = bodyText.toLowerCase();
+      const isVisible = (el: Element) => {
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' &&
+          Number(style.opacity || 1) > 0.05 && rect.width > 0 && rect.height > 0;
+      };
+      const findVisible = (needle: string): string | null => {
+        const lower = needle.toLowerCase();
+        const els = document.querySelectorAll<HTMLElement>('a, button, input, select, textarea, [role], h1, h2, h3, h4, label, [aria-label], li, td, th, p, span, div');
+        for (const el of els) {
+          const label = [
+            el.childElementCount === 0 ? el.innerText : '',
+            el.getAttribute('aria-label'),
+            el.getAttribute('placeholder'),
+            el.getAttribute('name')
+          ].filter(Boolean).join(' ').toLowerCase();
+          if (label.includes(lower) && isVisible(el)) {
+            return (el.innerText || el.getAttribute('aria-label') || '').slice(0, 80);
+          }
+        }
+        return null;
+      };
+      return exps.map(exp => {
+        const value = exp.value.toLowerCase();
+        switch (exp.kind) {
+          case 'text_present': {
+            const idx = lowerBody.indexOf(value);
+            return { relevant: true, passed: idx >= 0, actual: idx >= 0 ? bodyText.slice(Math.max(0, idx - 20), idx + value.length + 40).replace(/\s+/g, ' ').trim() : 'Text not found in visible body.' };
+          }
+          case 'text_absent': {
+            const idx = lowerBody.indexOf(value);
+            return { relevant: true, passed: idx < 0, actual: idx < 0 ? 'Text absent as expected.' : bodyText.slice(Math.max(0, idx - 20), idx + value.length + 40).replace(/\s+/g, ' ').trim() };
+          }
+          case 'element_visible': {
+            const found = findVisible(exp.value);
+            return { relevant: true, passed: found !== null, actual: found ?? 'No visible element matched.' };
+          }
+          case 'element_hidden': {
+            const found = findVisible(exp.value);
+            return { relevant: true, passed: found === null, actual: found === null ? 'No visible element matched, as expected.' : `Still visible: ${found}` };
+          }
+          default:
+            return { relevant: false, passed: false, actual: '' };
+        }
+      });
+    }, expectations).catch(() => expectations.map(() => ({ relevant: false, passed: false, actual: 'Page evaluation failed (mid-navigation?).' })));
+
+    const results = expectations.map((exp, i) => {
+      if (exp.kind === 'url_contains') {
+        const passed = url.toLowerCase().includes(exp.value.toLowerCase());
+        return { kind: exp.kind, value: exp.value, passed, actual: url };
+      }
+      if (exp.kind === 'title_contains') {
+        const passed = title.toLowerCase().includes(exp.value.toLowerCase());
+        return { kind: exp.kind, value: exp.value, passed, actual: title };
+      }
+      const check = domChecks[i];
+      return { kind: exp.kind, value: exp.value, passed: check.passed, actual: check.actual };
+    });
+
+    const passed = results.every(r => r.passed);
+    const failedKinds = results.filter(r => !r.passed).map(r => `${r.kind}("${r.value}")`);
+    return {
+      passed,
+      results,
+      url,
+      title,
+      summary: passed
+        ? `All ${results.length} expectation(s) hold.`
+        : `${failedKinds.length}/${results.length} expectation(s) failed: ${failedKinds.join(', ')}.`
+    };
+  }
+
+  /**
+   * Browser history navigation with the same stabilization pipeline as
+   * navigate(): back, forward, or reload.
+   */
+  async historyNavigate(direction: 'back' | 'forward' | 'reload'): Promise<{ url: string; title: string; actionId: string | null }> {
+    await this.ensureHealthy();
+    const page = this.getActivePage();
+    if (direction === 'back') await page.goBack({ waitUntil: 'domcontentloaded' });
+    else if (direction === 'forward') await page.goForward({ waitUntil: 'domcontentloaded' });
+    else await page.reload({ waitUntil: 'domcontentloaded' });
+
+    await this.waitForStability();
+    await this.dismissCommonBanners();
+    const url = page.url();
+    this.lastKnownUrls.set(this.activeBranch, url);
+    this.coordinator.updateBranchStatus(this.activeBranch, url);
+    const actionId = await this.captureActionAnchor('history_navigate');
+    this.saveMicroSnapshot('history_navigate', { direction, url, actionId });
+    return { url, title: await page.title().catch(() => ''), actionId };
+  }
+
   async executeScript(script: string): Promise<any> {
     await this.ensureHealthy();
     const page = this.getActivePage();
@@ -1469,7 +2675,9 @@ export class BrowserManager {
     const page = this.getActivePage();
     const selector = `[data-splice-id="${elementId}"]`;
     const element = page.locator(selector).first();
-    const buffer = await element.screenshot();
+    // Bounded: a detached or perpetually-animating target must not stall the
+    // calling tool for Playwright's default 30s.
+    const buffer = await element.screenshot({ timeout: 3_000, animations: 'disabled' });
     return buffer.toString('base64');
   }
 
@@ -1486,12 +2694,12 @@ export class BrowserManager {
 
         const box = document.createElement('div');
         box.className = 'splice-vision-box';
-        box.style.cssText = `position:absolute;left:${rect.left + window.scrollX}px;top:${rect.top + window.scrollY}px;width:${rect.width}px;height:${rect.height}px;border:2px solid #00ffaa;pointer-events:none;z-index:999998;box-shadow:0 0 10px rgba(0,255,170,0.5);`;
+        box.style.cssText = `position:absolute;left:${rect.left + window.scrollX}px;top:${rect.top + window.scrollY}px;width:${rect.width}px;height:${rect.height}px;border:1.5px solid #10b981;background:rgba(16,185,129,0.07);border-radius:4px;box-sizing:border-box;pointer-events:none;z-index:999998;`;
 
         const label = document.createElement('div');
         label.className = 'splice-vision-box';
-        label.innerText = `[${id}]`;
-        label.style.cssText = `position:absolute;left:${rect.left + window.scrollX}px;top:${rect.top + window.scrollY - 20}px;background:#00ffaa;color:#000;font-size:12px;font-weight:bold;padding:2px 4px;border-radius:4px 4px 0 0;pointer-events:none;z-index:999999;`;
+        label.innerText = id;
+        label.style.cssText = `position:absolute;left:${rect.left + window.scrollX}px;top:${Math.max(0, rect.top + window.scrollY - 18)}px;background:#059669;color:#fff;font:600 10px/16px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:0 6px;border-radius:999px;box-shadow:0 1px 4px rgba(0,0,0,0.35);white-space:nowrap;pointer-events:none;z-index:999999;`;
 
         document.body.appendChild(box);
         document.body.appendChild(label);
@@ -1506,6 +2714,199 @@ export class BrowserManager {
 
     this.pushLiveFeed('annotated_screenshot', 'Captured full-page annotated screenshot');
     return buffer.toString('base64');
+  }
+
+  /**
+   * Multi-modal "what's visible?": a viewport screenshot with numbered
+   * highlights over interactive elements, plus a structured map of the
+   * complex widgets a DOM-only observer under-reports — video, canvas,
+   * sliders, drag targets, carousels, dense grids, running animations.
+   * Bridges the sight gap on UIs where the semantic tree alone misleads.
+   */
+  async inspectViewport(options: { maxHighlights?: number; includeScreenshot?: boolean } = {}): Promise<ViewportInspection> {
+    const { maxHighlights = 40, includeScreenshot = true } = options;
+    await this.ensureHealthy();
+    // Ensure elements carry data-splice-id handles before we draw and map them.
+    await this.getSemanticTree('visible interactive elements', 'UX', 300).catch(() => null);
+    const page = this.getActivePage();
+
+    const adviceByKind: Record<ViewportWidget['kind'], string> = {
+      video: 'Native video: focus it, then interact press Space/k to toggle playback; state shows live playing/position.',
+      audio: 'Native audio: focus it, then interact press Space to toggle playback.',
+      canvas: 'Canvas renders pixels the DOM cannot describe — rely on the screenshot; coordinate clicks need execute_script.',
+      iframe: 'Embedded document: its internals do not appear in this page\'s semantic tree.',
+      slider: 'Slider: focus it, then interact press ArrowRight/ArrowLeft to step the value.',
+      draggable: 'Drag-and-drop element: pointer dragging is not a click — prefer a keyboard alternative or execute_script.',
+      dropzone: 'File/drag drop area: look for an associated file input or button alternative.',
+      carousel: 'Carousel: content rotates — use its next/prev controls; a screenshot captures only the current slide.',
+      dense_grid: 'Dense grid: prefer extract_structured over reading cells from the tree one by one.',
+    };
+
+    const data = await page.evaluate(async (max: number) => {
+      // Let fonts and pending layout settle so highlights align with pixels.
+      try { await (document as any).fonts?.ready; } catch { /* non-fatal */ }
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const inViewport = (rect: DOMRect) =>
+        rect.width > 3 && rect.height > 3 && rect.bottom > 0 && rect.right > 0 && rect.top < vh && rect.left < vw;
+      const isVisible = (el: Element) => {
+        const style = window.getComputedStyle(el);
+        return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || 1) > 0.05;
+      };
+      const describe = (el: HTMLElement) => (
+        el.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || el.getAttribute('title') || el.getAttribute('src') || ''
+      ).replace(/\s+/g, ' ').trim().slice(0, 80);
+      const toRect = (rect: DOMRect) => ({ x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) });
+
+      // Single overlay root: one node to clean up, no page-layout impact.
+      const overlay = document.createElement('div');
+      overlay.id = 'splice-viewport-overlay';
+      overlay.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483645;font:600 10px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;';
+      document.body.appendChild(overlay);
+
+      // Labels dodge each other: place above the box when there is room,
+      // inside it otherwise, and nudge below any label already occupying
+      // that spot so dense clusters stay readable.
+      const placedLabels: Array<{ x: number; y: number; w: number; h: number }> = [];
+      const LABEL_H = 16;
+      const drawBox = (rect: DOMRect, text: string, theme: 'interactive' | 'widget') => {
+        const border = theme === 'interactive' ? '#10b981' : '#f59e0b';
+        const fill = theme === 'interactive' ? 'rgba(16,185,129,0.07)' : 'rgba(245,158,11,0.07)';
+        const labelBg = theme === 'interactive' ? '#059669' : '#d97706';
+        const box = document.createElement('div');
+        box.style.cssText = `position:fixed;left:${rect.left}px;top:${rect.top}px;width:${rect.width}px;height:${rect.height}px;border:1.5px ${theme === 'widget' ? 'dashed' : 'solid'} ${border};background:${fill};border-radius:4px;box-sizing:border-box;`;
+        overlay.appendChild(box);
+
+        const estWidth = 14 + text.length * 6.2;
+        const lx = Math.min(Math.max(2, rect.left), vw - estWidth - 4);
+        let ly = rect.top >= LABEL_H + 2 ? rect.top - LABEL_H - 2 : rect.top + 2;
+        for (let guard = 0; guard < 8; guard++) {
+          const hit = placedLabels.find(p => lx < p.x + p.w && lx + estWidth > p.x && ly < p.y + p.h && ly + LABEL_H > p.y);
+          if (!hit) break;
+          ly = hit.y + hit.h + 2;
+        }
+        placedLabels.push({ x: lx, y: ly, w: estWidth, h: LABEL_H });
+
+        const label = document.createElement('div');
+        label.textContent = text;
+        label.style.cssText = `position:fixed;left:${lx}px;top:${ly}px;height:${LABEL_H}px;display:flex;align-items:center;padding:0 6px;background:${labelBg};color:#fff;border-radius:999px;box-shadow:0 1px 4px rgba(0,0,0,0.35);white-space:nowrap;`;
+        overlay.appendChild(label);
+      };
+
+      // Complex widgets first: they claim their elements so the numbered
+      // pass will not double-box a slider or video as "interactive" too.
+      const widgets: Array<{ kind: string; spliceId?: string; label: string; rect: ReturnType<typeof toRect>; state?: Record<string, unknown> }> = [];
+      const widgetEls = new Set<Element>();
+      const pushWidget = (el: HTMLElement, kind: string, state?: Record<string, unknown>) => {
+        if (widgetEls.has(el) || !isVisible(el)) return;
+        const rect = el.getBoundingClientRect();
+        if (!inViewport(rect)) return;
+        // Skip nested duplicates: a carousel inside a carousel is one carousel.
+        const contained = widgets.some(w => w.kind === kind &&
+          rect.left >= w.rect.x - 2 && rect.top >= w.rect.y - 2 &&
+          rect.right <= w.rect.x + w.rect.width + 2 && rect.bottom <= w.rect.y + w.rect.height + 2);
+        if (contained) return;
+        widgetEls.add(el);
+        widgets.push({ kind, spliceId: el.getAttribute('data-splice-id') || undefined, label: describe(el) || kind, rect: toRect(rect), state });
+        const badge = kind === 'video' ? (state && (state as any).playing ? 'video ▶' : 'video ⏸') : kind.replace('_', ' ');
+        drawBox(rect, badge, 'widget');
+      };
+
+      document.querySelectorAll<HTMLVideoElement>('video').forEach(v => pushWidget(v, 'video', {
+        playing: !v.paused && !v.ended, currentTime: Math.round(v.currentTime), duration: Number.isFinite(v.duration) ? Math.round(v.duration) : null, muted: v.muted, hasControls: v.controls,
+      }));
+      document.querySelectorAll<HTMLAudioElement>('audio').forEach(a => pushWidget(a, 'audio', { playing: !a.paused && !a.ended, muted: a.muted }));
+      document.querySelectorAll<HTMLElement>('canvas').forEach(c => pushWidget(c, 'canvas'));
+      document.querySelectorAll<HTMLIFrameElement>('iframe').forEach(f => pushWidget(f, 'iframe', { src: (f.src || '').slice(0, 120) }));
+      document.querySelectorAll<HTMLInputElement>('input[type="range"], [role="slider"]').forEach(s => pushWidget(s, 'slider', {
+        value: s.value ?? s.getAttribute('aria-valuenow'), min: s.min || s.getAttribute('aria-valuemin'), max: s.max || s.getAttribute('aria-valuemax'),
+      }));
+      document.querySelectorAll<HTMLElement>('[draggable="true"]').forEach(d => pushWidget(d, 'draggable'));
+      document.querySelectorAll<HTMLElement>('[class*="dropzone" i], [class*="drop-zone" i], [class*="droparea" i], [aria-dropeffect]').forEach(d => pushWidget(d, 'dropzone'));
+      document.querySelectorAll<HTMLElement>('[class*="carousel" i], [class*="swiper" i], [class*="slick" i], [data-carousel]').forEach(c => pushWidget(c, 'carousel'));
+      document.querySelectorAll<HTMLElement>('[role="grid"], table').forEach(g => {
+        const cells = g.querySelectorAll('td, th, [role="gridcell"]').length;
+        if (cells >= 40) pushWidget(g, 'dense_grid', { cellCount: cells });
+      });
+
+      // Measured before freezing animations for the capture.
+      const animatedElementCount = typeof document.getAnimations === 'function'
+        ? new Set(document.getAnimations().filter(a => a.playState === 'running').map(a => (a.effect as KeyframeEffect | null)?.target).filter(Boolean)).size
+        : 0;
+
+      // Numbered highlights in reading order (top→bottom, left→right) so the
+      // numbers follow the visual flow of the page.
+      const interactiveSelector = 'a[href], button, input:not([type="hidden"]), select, textarea, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [onclick]';
+      const candidates = Array.from(document.querySelectorAll<HTMLElement>(interactiveSelector))
+        .filter(el => el.getAttribute('data-splice-id') && !widgetEls.has(el) && isVisible(el))
+        .map(el => ({ el, rect: el.getBoundingClientRect() }))
+        .filter(({ rect }) => inViewport(rect))
+        .sort((a, b) => (Math.round(a.rect.top / 24) - Math.round(b.rect.top / 24)) || (a.rect.left - b.rect.left))
+        .slice(0, max);
+      const interactive = candidates.map(({ el, rect }, index) => {
+        drawBox(rect, String(index + 1), 'interactive');
+        return {
+          n: index + 1,
+          spliceId: el.getAttribute('data-splice-id') as string,
+          label: describe(el),
+          role: el.getAttribute('role') || el.tagName.toLowerCase(),
+          rect: toRect(rect),
+        };
+      });
+
+      const legend = document.createElement('div');
+      legend.textContent = `Splice · ${interactive.length} interactive · ${widgets.length} widget${widgets.length === 1 ? '' : 's'}`;
+      legend.style.cssText = 'position:fixed;right:8px;bottom:8px;padding:3px 9px;background:rgba(17,24,39,0.85);color:#e5e7eb;border-radius:999px;box-shadow:0 1px 6px rgba(0,0,0,0.4);';
+      overlay.appendChild(legend);
+
+      // Freeze animations/transitions so the capture is crisp — a spinner
+      // caught mid-blur or a mid-transition panel misleads a vision model.
+      const freeze = document.createElement('style');
+      freeze.id = 'splice-viewport-freeze';
+      freeze.textContent = '*,*::before,*::after{animation-play-state:paused!important;transition:none!important;caret-color:transparent!important}';
+      document.head.appendChild(freeze);
+
+      return { interactive, widgets, animatedElementCount };
+    }, maxHighlights);
+
+    let screenshot = '';
+    try {
+      if (includeScreenshot) {
+        const buffer = await page.screenshot({ timeout: 10_000 }); // viewport only — dense UIs stay legible
+        screenshot = buffer.toString('base64');
+      }
+    } finally {
+      // Overlay and freeze style must never outlive the capture.
+      await page.evaluate(() => {
+        document.getElementById('splice-viewport-overlay')?.remove();
+        document.getElementById('splice-viewport-freeze')?.remove();
+      }).catch(() => {});
+    }
+
+    const widgets: ViewportWidget[] = data.widgets.map(w => ({
+      ...w,
+      kind: w.kind as ViewportWidget['kind'],
+      advice: adviceByKind[w.kind as ViewportWidget['kind']],
+    }));
+    const widgetCounts = widgets.reduce<Record<string, number>>((acc, w) => { acc[w.kind] = (acc[w.kind] || 0) + 1; return acc; }, {});
+    const widgetPart = Object.entries(widgetCounts).map(([kind, count]) => `${count} ${kind}`).join(', ');
+    const summary =
+      `${data.interactive.length} interactive element(s) highlighted in the viewport` +
+      (widgetPart ? `; complex widgets: ${widgetPart}` : '; no complex widgets detected') +
+      (data.animatedElementCount > 0 ? `; ${data.animatedElementCount} element(s) animating — expect DOM-diff churn` : '') + '.';
+
+    this.pushLiveFeed('inspect_viewport', summary.slice(0, 80));
+    return {
+      url: page.url(),
+      title: await page.title().catch(() => ''),
+      screenshot,
+      interactive: data.interactive,
+      widgets,
+      animatedElementCount: data.animatedElementCount,
+      summary,
+    };
   }
 
   // -------------------------
@@ -2232,11 +3633,17 @@ export function compactVerifiedPlan(plan: VerifiedActionPlan): Record<string, un
   };
   if (plan.expectedOutcome) slim.expectedOutcome = plan.expectedOutcome;
   if (plan.targetPreview) slim.targetPreview = plan.targetPreview;
+  if (plan.actionId) slim.actionId = plan.actionId;
+  if (plan.needsClarification) {
+    slim.needsClarification = true;
+    slim.clarification = plan.clarification;
+  }
   if (plan.verification) {
     slim.verification = {
       executed: plan.verification.executed,
       passed: plan.verification.passed,
       evidence: plan.verification.evidence.slice(0, 3),
+      ...(plan.verification.expectations ? { expectations: plan.verification.expectations } : {}),
     };
   }
   if (plan.delta) slim.deltaSummary = plan.delta.summary;

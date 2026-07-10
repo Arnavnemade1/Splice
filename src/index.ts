@@ -36,9 +36,17 @@ Splice is a cognition and safety layer for browser work — it does not replace 
 4. **interact** — low-level fallback when you already know the exact data-splice-id from the semantic tree.
 5. On failure, read the typed error envelope: it carries a stable code (TARGET_NOT_FOUND, BROWSER_CRASHED, TIMEOUT, CAPTCHA_REQUIRED, ...), a recoverable flag, and the suggestedNextTool to call.
 
+One-call primitives — reach for these before composing loops yourself:
+- **wait_for** when the page needs time: block on text_present / element_visible / url_matches / network_idle instead of polling with reads. Timeouts return timedOut: true with a hint, never an error.
+- **fill_form** for any form with 2+ fields: pass human labels and values, get per-field readback verification, validation state, and submit readiness (optionally submitIntent to submit too).
+- **extract_structured** to pull rows of data (tables, repeated cards, label/value pairs) by naming fields — never scrape a full tree into your context.
+- **assert_page_state** to check postconditions (url_contains, text_present, element_visible, ...) at a fraction of a tree read.
+- When an action "did nothing": **get_page_events** (auto-handled dialogs, popups, downloads) and **get_network_activity** (failing requests with an insight sentence) explain what actually happened.
+- **inspect_viewport** when the UI is visually complex (media players, canvas, drag-and-drop, dense grids, animations): returns the viewport as an image with numbered highlights over interactive elements plus a structured widget map with live state (e.g. video playing/position) and per-widget interaction advice. Verified actions also attach a pixel crop of the chosen target by default while the session vision budget lasts (visionByDefault / visionBudget in splice.config.json).
+
 Guardrails that are always on: prompt-injection redaction in semantic trees, a secret egress firewall on non-GET requests, encrypted snapshots, and a crash-self-healing browser (get_runtime_health shows recovery state).
 
-Efficiency: pass intent + maxTokens to get_semantic_tree_optimized to prune the DOM; after the first read, pass deltaOnly: true (with the same intent) to receive only what changed since your last observation instead of the whole tree; pass agentId on calls to get per-agent tracking and in-action optimization directives; use fork_state to test risky actions on a shadow branch before committing.`;
+Efficiency: pass intent + maxTokens to get_semantic_tree_optimized to prune the DOM; after the first read, pass deltaOnly: true (with the same intent) to receive only what changed since your last observation instead of the whole tree; actions return an actionId (act-N) — pass it as sinceLastActionId to diff against the moment right after that action, with framework re-renders reported as rewrittenIds instead of add/remove noise; pass agentId on calls to get per-agent tracking and in-action optimization directives; use fork_state to test risky actions on a shadow branch before committing.`;
 
 const server = new Server(
   {
@@ -175,10 +183,136 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            url: { type: "string", description: "The full URL to navigate to" },
+            url: { type: "string", description: "The full URL to navigate to, or one of the literals 'back', 'forward', 'reload' for history navigation." },
             agentId: { type: "string", description: "Optional agent identifier for per-agent tracking and in-action optimization." },
           },
           required: ["url"],
+        },
+      },
+      {
+        name: "wait_for",
+        description: "Semantic waiting primitive — blocks until the FIRST of your conditions is satisfied (any-of), then reports which one matched and how long it took. Conditions: text_present, text_gone, element_visible, element_hidden (label/text match), url_matches, title_matches (substring), network_idle. Never errors on timeout: returns timedOut: true with a hint about why (requests still in flight vs. page settled without the change). Use this instead of polling with repeated tree reads — one call replaces N observations. Example: { conditions: [{ kind: 'text_present', value: 'order confirmed' }, { kind: 'url_matches', value: '/success' }], timeoutMs: 8000 }.",
+        annotations: { title: "Wait For", readOnlyHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {
+            conditions: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  kind: { type: "string", enum: ["text_present", "text_gone", "element_visible", "element_hidden", "url_matches", "title_matches", "network_idle"] },
+                  value: { type: "string", description: "Text/label/url fragment to match, case-insensitive. Omit for network_idle." }
+                },
+                required: ["kind"]
+              },
+              description: "Conditions checked every poll; the first to hold wins."
+            },
+            timeoutMs: { type: "number", description: "Total wait budget in ms (default 10000, max 60000)." },
+            pollIntervalMs: { type: "number", description: "Poll cadence in ms (default 250)." },
+            agentId: { type: "string", description: "Optional agent identifier for per-agent tracking." }
+          },
+          required: ["conditions"],
+        },
+      },
+      {
+        name: "fill_form",
+        description: "Batch verified form fill — one call fills an entire form. Pass fields as human labels ({ field: 'work email', value: 'a@b.com' }); Splice resolves each to a control by label / aria-label / aria-labelledby / placeholder / name matching, fills it (text, textarea, select, checkbox, radio, plus custom ARIA widgets: contenteditable, role=textbox/combobox/switch), verifies by reading the value back, and reports per-field status with the control kind and browser-native validation state. Honest reporting: not_found for unmatched fields, readback_mismatch when the value didn't stick, skipped_disabled for disabled controls, and an ambiguous flag (with the runner-up label) when a field's match was a near-tie. Optionally pass submitIntent ('submit checkout') to submit with full verification once the form is ready — if it can't, submit.reason says why (not_submittable, form_not_ready, no_submit_control). Replaces N interact+observe round-trips with one call.",
+        annotations: { title: "Fill Form", destructiveHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {
+            fields: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  field: { type: "string", description: "Human label of the control, e.g. 'work email', 'country', 'agree to terms'." },
+                  value: { type: "string", description: "Value to enter. For checkboxes/radios use true/false/yes/no." }
+                },
+                required: ["field", "value"]
+              }
+            },
+            submitIntent: { type: "string", description: "Optional: submit the form via compile_verified_action once every field is filled and valid, e.g. 'submit checkout'." },
+            agentId: { type: "string", description: "Optional agent identifier to track conflicts." }
+          },
+          required: ["fields"],
+        },
+      },
+      {
+        name: "extract_structured",
+        description: "Schema-driven data extraction — name the fields you want ({ name: 'price', hint: 'cost amount' }) and Splice finds the best matching structure on the page: a table (headers matched to your fields), repeated cards/list items, or label/value pairs. Returns clean rows with per-field coverage and confidence. No selectors, no manual tree walking, no token-heavy scraping in your context window.",
+        annotations: { title: "Extract Structured Data", readOnlyHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {
+            fields: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string", description: "Field name to appear in each returned row." },
+                  hint: { type: "string", description: "Optional extra words matched against headers, labels, and class names." }
+                },
+                required: ["name"]
+              }
+            },
+            maxRows: { type: "number", description: "Maximum rows to return (default 50)." },
+            agentId: { type: "string", description: "Optional agent identifier for per-agent tracking." }
+          },
+          required: ["fields"],
+        },
+      },
+      {
+        name: "assert_page_state",
+        description: "Cheap verification primitive — evaluate a list of expectations against the live page in one pass: url_contains, title_contains, text_present, text_absent, element_visible, element_hidden. Returns per-expectation pass/fail with the actual value observed (including a text snippet around matches). Costs a fraction of a tree read; ideal for checking postconditions between actions or confirming a workflow completed.",
+        annotations: { title: "Assert Page State", readOnlyHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {
+            expectations: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  kind: { type: "string", enum: ["url_contains", "title_contains", "text_present", "text_absent", "element_visible", "element_hidden"] },
+                  value: { type: "string", description: "Fragment/label to check, case-insensitive." }
+                },
+                required: ["kind", "value"]
+              }
+            },
+            agentId: { type: "string", description: "Optional agent identifier for per-agent tracking." }
+          },
+          required: ["expectations"],
+        },
+      },
+      {
+        name: "get_network_activity",
+        description: "Network cognition — what has the page's network actually been doing? Lifecycle-tracked requests (method, url, status, duration, failure reason) with aggregates and an insight sentence, e.g. 'Most recent problem: POST /api/checkout → 500'. Filters: urlContains, failedOnly, sinceMs (lookback window), limit. Answers 'did my submit fire a request and did it succeed?' without a screenshot or tree read.",
+        annotations: { title: "Network Activity", readOnlyHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {
+            urlContains: { type: "string", description: "Only requests whose URL contains this fragment." },
+            failedOnly: { type: "boolean", description: "Only requests that failed at the network level or returned status >= 400." },
+            sinceMs: { type: "number", description: "Lookback window in milliseconds (e.g. 30000 = last 30s)." },
+            limit: { type: "number", description: "Maximum request records to return (default 50)." },
+            agentId: { type: "string", description: "Optional agent identifier for per-agent tracking." }
+          },
+        },
+      },
+      {
+        name: "get_page_events",
+        description: "Out-of-band page events a DOM-only observer never sees: native dialogs (auto-handled — alerts accepted, confirm/prompt dismissed non-destructively, always recorded with their message), popups (recorded with their URL, left open), and downloads (saved to .splice/downloads with the path recorded). Check this when a click 'did nothing' — the page may have opened a dialog, popup, or download instead.",
+        annotations: { title: "Page Events", readOnlyHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {
+            sinceMs: { type: "number", description: "Lookback window in milliseconds." },
+            type: { type: "string", enum: ["dialog", "popup", "download"], description: "Only events of this type." },
+            limit: { type: "number", description: "Maximum events to return (default 25)." },
+            agentId: { type: "string", description: "Optional agent identifier for per-agent tracking." }
+          },
         },
       },
       {
@@ -194,6 +328,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             deltaOnly: { type: "boolean", description: "If true, return only the changes since the previous observation on this branch (added/removed/changed elements, URL/title transitions) instead of the full tree. Falls back to the full tree when no baseline exists." },
             lastSnapshotHash: { type: "string", description: "Optional with deltaOnly: the snapshotHash from your last observation. If it no longer matches the server baseline, the full tree is returned so you never act on a stale diff." },
             structuralOnly: { type: "boolean", description: "Optional with deltaOnly: suppress text-only mutations (tickers, timestamps, counters) and report only added/removed elements and value changes. textChangesIgnored counts what was filtered." },
+            sinceLastActionId: { type: "string", description: "Optional with deltaOnly: diff against the snapshot captured right after a specific action instead of your last observation. Action ids (act-N) are returned by navigate, interact, fill_form, and executed compile_verified_action calls; the last 12 are kept. Anchored diffs are unpruned on both sides (intent is ignored) so they never fabricate changes. Re-rendered elements whose content is unchanged are reported separately as rewrittenIds, not as added/removed." },
             agentId: { type: "string", description: "Optional agent identifier for per-agent tracking and in-action optimization." }
           },
           required: ["intent"],
@@ -207,7 +342,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             elementId: { type: "string", description: "The data-splice-id of the element (e.g., 'button-1')" },
-            action: { type: "string", enum: ["click", "type", "focus", "select", "press"], description: "The action to perform" },
+            action: { type: "string", enum: ["click", "type", "focus", "select", "press", "hover", "clear", "check", "uncheck", "scroll_into_view"], description: "The action to perform" },
             value: { type: "string", description: "Optional value for 'type', 'select', or 'press' actions" },
             agentId: { type: "string", description: "Optional agent identifier to track conflicts." }
           },
@@ -233,15 +368,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "compile_verified_action",
-        description: "Verified Intent Actions — the recommended way to act. Compiles a natural-language intent ('click the pricing link', 'type work email') into a ranked target with preconditions, postconditions, risk, expectedOutcome, and alternatives. With execute: true it acts only when confidence and preconditions hold, then verifies the result against the page (URL/title/text change, obstruction resolution, validation progress). With includeVision: true it returns a pixel crop of the chosen target for vision-model confirmation.",
+        description: "Verified Intent Actions — the recommended way to act. Compiles a STRUCTURED natural-language intent (action + target: 'click the pricing link', 'type work email' — never a bare goal like 'finish' or 'do it') into a ranked target with preconditions, postconditions, risk, expectedOutcome, and alternatives. Vague goals are not guessed at: the call returns needsClarification: true with structured intents suggested from the page's visible controls — restate and retry. With execute: true it acts only when confidence and preconditions hold, then verifies the result against the page (URL/title/text change, obstruction resolution, validation progress). Declare the outcome you expect via expect (url_contains, text_present, ...) and it is checked after execution with per-expectation evidence — verification.passed is then true only if your declared postconditions hold. With includeVision: true it returns a pixel crop of the chosen target for vision-model confirmation.",
         annotations: { title: "Verified Intent Action", destructiveHint: true },
         inputSchema: {
           type: "object",
           properties: {
-            intent: { type: "string", description: "The browser intent, e.g. 'click the pricing link' or 'fill email field'." },
+            intent: { type: "string", description: "A structured browser intent: action + target, e.g. 'click the pricing link' or 'type work email'. Bare goals ('finish', 'continue') are rejected with needsClarification and suggested restatements." },
             value: { type: "string", description: "Optional value for type/select/press actions." },
             execute: { type: "boolean", description: "If true, execute only when confidence and preconditions are sufficient." },
-            includeVision: { type: "boolean", description: "If true, include targetPreview: a base64 PNG crop of the chosen target element for hybrid vision+DOM confirmation." },
+            expect: {
+              type: "array",
+              description: "Optional declared postconditions verified after execution (polled up to 5s). Example: [{ kind: 'url_contains', value: '/thanks' }, { kind: 'text_present', value: 'order confirmed' }]. Results appear in verification.expectations and gate verification.passed.",
+              items: {
+                type: "object",
+                properties: {
+                  kind: { type: "string", enum: ["url_contains", "title_contains", "text_present", "text_absent", "element_visible", "element_hidden"] },
+                  value: { type: "string" }
+                },
+                required: ["kind", "value"]
+              }
+            },
+            includeVision: { type: "boolean", description: "Include targetPreview: a base64 PNG crop of the chosen target element for hybrid vision+DOM confirmation. Defaults to ON while the session vision budget lasts (visionByDefault/visionBudget in splice.config.json); pass true to force beyond the budget or false to opt out." },
             compact: { type: "boolean", description: "If true, trim the response to essentials — plan, confidence, risk, expectedOutcome, and the verification verdict with a delta summary. Drops alternatives and compile-time evidence to save tokens on long sessions." },
             constraints: {
               type: "object",
@@ -356,6 +503,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         name: "capture_annotated_screenshot",
         description: "Vibe Coding: Capture a base64 screenshot where every interactive element has a bright bounding box and ID label.",
         inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "inspect_viewport",
+        description: "Multi-modal 'what's visible?': returns the current viewport as an image with numbered highlights over interactive elements (each number maps to a data-splice-id in the JSON), plus a structured map of complex widgets the semantic tree under-reports — video (with live playing/position state), canvas, iframes, sliders, drag-and-drop targets, dropzones, carousels, dense grids — each with interaction advice, and a count of currently animating elements. Use on visually complex UIs (dense grids, media players, animations) where DOM-only observation misleads, or whenever you need to see what a user would see.",
+        annotations: { title: "What's Visible?", readOnlyHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {
+            maxHighlights: { type: "number", description: "Max interactive elements to number on the overlay (default 40)." },
+            includeScreenshot: { type: "boolean", description: "Set false to skip the image and return only the structured widget map (cheaper)." }
+          },
+        },
       },
       {
         name: "execute_script",
@@ -693,14 +852,55 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
   {
     if (request.params.name === "navigate") {
       const { url } = request.params.arguments as { url: string };
+      if (url === "back" || url === "forward" || url === "reload") {
+        const result = await browser.historyNavigate(url);
+        return { content: [{ type: "text", text: `History ${url} → ${result.url} ("${result.title}").${result.actionId ? ` actionId: ${result.actionId}` : ""}` }] };
+      }
       await browser.navigate(url);
-      return { content: [{ type: "text", text: `Navigated to ${url}.` }] };
+      const navActionId = browser.getLastActionId();
+      return { content: [{ type: "text", text: `Navigated to ${url}.${navActionId ? ` actionId: ${navActionId} (usable as sinceLastActionId in delta reads)` : ""}` }] };
+    }
+
+    if (request.params.name === "wait_for") {
+      const { conditions, timeoutMs, pollIntervalMs } = request.params.arguments as any;
+      const result = await browser.waitFor(conditions, { timeoutMs, pollIntervalMs });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+
+    if (request.params.name === "fill_form") {
+      const { fields, submitIntent, agentId } = request.params.arguments as any;
+      const report = await browser.fillForm({ fields, submitIntent, agentId });
+      return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
+    }
+
+    if (request.params.name === "extract_structured") {
+      const { fields, maxRows } = request.params.arguments as any;
+      const extraction = await browser.extractStructured({ fields, maxRows });
+      return { content: [{ type: "text", text: JSON.stringify(extraction, null, 2) }] };
+    }
+
+    if (request.params.name === "assert_page_state") {
+      const { expectations } = request.params.arguments as any;
+      const assertion = await browser.assertPageState(expectations);
+      return { content: [{ type: "text", text: JSON.stringify(assertion, null, 2) }] };
+    }
+
+    if (request.params.name === "get_network_activity") {
+      const { urlContains, failedOnly, sinceMs, limit } = (request.params.arguments as any) || {};
+      const activity = browser.getNetworkActivity({ urlContains, failedOnly: failedOnly === true, sinceMs, limit });
+      return { content: [{ type: "text", text: JSON.stringify(activity, null, 2) }] };
+    }
+
+    if (request.params.name === "get_page_events") {
+      const { sinceMs, type, limit } = (request.params.arguments as any) || {};
+      const events = browser.getPageEvents({ sinceMs, type, limit });
+      return { content: [{ type: "text", text: JSON.stringify(events, null, 2) }] };
     }
 
     if (request.params.name === "get_semantic_tree_optimized") {
-      const { intent, lens, maxTokens, deltaOnly, lastSnapshotHash, structuralOnly } = request.params.arguments as any;
-      if (deltaOnly === true) {
-        const delta = await browser.getSemanticDelta(intent, lens || "UX", lastSnapshotHash, structuralOnly === true);
+      const { intent, lens, maxTokens, deltaOnly, lastSnapshotHash, structuralOnly, sinceLastActionId } = request.params.arguments as any;
+      if (deltaOnly === true || typeof sinceLastActionId === "string") {
+        const delta = await browser.getSemanticDelta(intent, lens || "UX", lastSnapshotHash, structuralOnly === true, sinceLastActionId);
         return { content: [{ type: "text", text: JSON.stringify(delta, null, 2) }] };
       }
       const tree = await browser.getSemanticTree(intent, lens || "UX", maxTokens);
@@ -717,9 +917,9 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
 
     if (request.params.name === "interact") {
       const { elementId, action, value, agentId } = request.params.arguments as any;
-      await browser.interact(elementId, action, value, agentId);
+      const actionId = await browser.interact(elementId, action, value, agentId);
       await new Promise(r => setTimeout(r, 1000)); // wait for network idle/renders
-      return { content: [{ type: "text", text: `Successfully performed '${action}' on element '${elementId}'.` }] };
+      return { content: [{ type: "text", text: `Successfully performed '${action}' on element '${elementId}'.${actionId ? ` actionId: ${actionId} (usable as sinceLastActionId in delta reads)` : ""}` }] };
     }
 
     if (request.params.name === "diagnose_agent_state") {
@@ -729,8 +929,8 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
     }
 
     if (request.params.name === "compile_verified_action") {
-      const { intent, value, constraints, execute, includeVision, compact } = request.params.arguments as any;
-      const plan = await browser.compileVerifiedAction({ intent, value, constraints, execute: execute === true, includeVision: includeVision === true });
+      const { intent, value, constraints, execute, includeVision, compact, expect } = request.params.arguments as any;
+      const plan = await browser.compileVerifiedAction({ intent, value, constraints, execute: execute === true, includeVision: typeof includeVision === 'boolean' ? includeVision : undefined, expect: Array.isArray(expect) ? expect : undefined });
       const payload = compact === true ? compactVerifiedPlan(plan) : plan;
       return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
     }
@@ -796,6 +996,19 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
     if (request.params.name === "capture_annotated_screenshot") {
       const base64Str = await browser.captureAnnotatedScreenshot();
       return { content: [{ type: "text", text: base64Str }] };
+    }
+
+    if (request.params.name === "inspect_viewport") {
+      const { maxHighlights, includeScreenshot } = (request.params.arguments as any) || {};
+      const inspection = await browser.inspectViewport({
+        maxHighlights: typeof maxHighlights === 'number' ? maxHighlights : undefined,
+        includeScreenshot: includeScreenshot !== false,
+      });
+      const { screenshot, ...structured } = inspection;
+      const content: any[] = [];
+      if (screenshot) content.push({ type: "image", data: screenshot, mimeType: "image/png" });
+      content.push({ type: "text", text: JSON.stringify(structured, null, 2) });
+      return { content };
     }
 
     if (request.params.name === "execute_script") {

@@ -67,16 +67,35 @@ async function dispatch(action: string, args: Record<string, any>): Promise<unkn
       return { ok: true, activeBranch: browser.activeBranch };
     case 'navigate':
       await browser.navigate(args.url);
-      return { ok: true, url: args.url };
+      return { ok: true, url: args.url, actionId: browser.getLastActionId() };
     case 'getSemanticTree':
       return browser.getSemanticTree(args.intent, args.lens || 'UX', args.maxTokens);
     case 'getSemanticDelta':
-      return browser.getSemanticDelta(args.intent, args.lens || 'UX', args.lastSnapshotHash, args.structuralOnly === true);
+      return browser.getSemanticDelta(args.intent, args.lens || 'UX', args.lastSnapshotHash, args.structuralOnly === true, args.sinceLastActionId);
+    case 'waitFor':
+      return browser.waitFor(args.conditions, { timeoutMs: args.timeoutMs, pollIntervalMs: args.pollIntervalMs });
+    case 'fillForm':
+      return browser.fillForm({ fields: args.fields, submitIntent: args.submitIntent, agentId: args.agentId });
+    case 'extractStructured':
+      return browser.extractStructured({ fields: args.fields, maxRows: args.maxRows });
+    case 'assertPageState':
+      return browser.assertPageState(args.expectations);
+    case 'getNetworkActivity':
+      return browser.getNetworkActivity({
+        urlContains: args.urlContains,
+        failedOnly: args.failedOnly === true,
+        sinceMs: args.sinceMs,
+        limit: args.limit,
+      });
+    case 'getPageEvents':
+      return browser.getPageEvents({ sinceMs: args.sinceMs, type: args.type, limit: args.limit });
+    case 'historyNavigate':
+      return browser.historyNavigate(args.direction);
     case 'interact': {
       // Python wrapper sends "interaction"; Node tools send "action".
       const interaction = args.interaction || args.action;
-      await browser.interact(args.elementId, interaction, args.value, args.agentId);
-      return { ok: true, elementId: args.elementId, action: interaction };
+      const actionId = await browser.interact(args.elementId, interaction, args.value, args.agentId);
+      return { ok: true, elementId: args.elementId, action: interaction, actionId };
     }
     case 'diagnoseAgentState':
       return browser.diagnoseAgentState(args.goal, Array.isArray(args.lastActions) ? args.lastActions : []);
@@ -86,6 +105,13 @@ async function dispatch(action: string, args: Record<string, any>): Promise<unkn
         value: args.value,
         constraints: args.constraints,
         execute: args.execute === true,
+        includeVision: typeof args.includeVision === 'boolean' ? args.includeVision : undefined,
+        expect: Array.isArray(args.expect) ? args.expect : undefined,
+      });
+    case 'inspectViewport':
+      return browser.inspectViewport({
+        maxHighlights: typeof args.maxHighlights === 'number' ? args.maxHighlights : undefined,
+        includeScreenshot: args.includeScreenshot !== false,
       });
     case 'runSecurityAudit':
       return browser.runSecurityAudit(args.targetUrl, args);

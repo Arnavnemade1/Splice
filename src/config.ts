@@ -38,6 +38,10 @@ export interface SpliceConfigValues {
   discordWebhookUrl?: string;
   /** Opt-in endpoint for anonymized recovery-pattern telemetry. */
   telemetryUrl?: string;
+  /** Attach vision previews (pixel crops of chosen targets) to key tools by default. */
+  visionByDefault: boolean;
+  /** Max automatic vision captures per session; explicit includeVision: true is never blocked. */
+  visionBudget: number;
 }
 
 export type ConfigSource = 'default' | 'file' | 'env';
@@ -63,6 +67,8 @@ export const CONFIG_KEYS: Record<keyof SpliceConfigValues, KeySpec> = {
   watchMode: { env: 'SPLICE_WATCH_MODE', kind: 'boolean', default: false },
   discordWebhookUrl: { env: 'DISCORD_WEBHOOK_URL', kind: 'string', default: undefined },
   telemetryUrl: { env: 'SPLICE_TELEMETRY_URL', kind: 'string', default: undefined },
+  visionByDefault: { env: 'SPLICE_VISION_BY_DEFAULT', kind: 'boolean', default: true },
+  visionBudget: { env: 'SPLICE_VISION_BUDGET', kind: 'number', default: 20 },
 };
 
 /** Locate the active config file, if any. */

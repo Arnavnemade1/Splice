@@ -40,6 +40,10 @@ Execution-focused browser tools answer "how do I click that?". Splice answers th
 | Crash self-healing + reproducible run journal | — | ✅ runtime reliability engine |
 | Live per-agent performance tracking with in-run corrective directives | — | ✅ agent optimizer |
 | Observe only what changed instead of re-reading the whole page | — | ✅ delta observations |
+| Wait on a semantic condition instead of polling with reads | — | ✅ `wait_for` |
+| Fill an entire form with per-field verification in one call | — | ✅ `fill_form` |
+| Extract structured rows without selectors or scraping | — | ✅ `extract_structured` |
+| See auto-handled dialogs, popups, downloads, and failing requests | — | ✅ page & network cognition |
 | Detect wasted tokens mid-run and steer the agent to cheaper reads | — | ✅ token efficiency engine |
 | Remember which fixes worked on a domain and recommend them next time | — | ✅ recovery memory |
 | Local observability dashboard with exportable audit evidence | — | ✅ Command Center |
@@ -230,7 +234,27 @@ Optionally pass `lastSnapshotHash` (the `snapshotHash` from your last observatio
 
 On live pages full of tickers, timestamps, and counters, add `structuralOnly: true` to suppress text-only mutations: only added/removed elements and value changes are reported, with `textChangesIgnored` counting what was filtered. Every delta also carries `estimatedTokensSaved` — what it would have cost to receive the full tree instead.
 
+**Action-anchored deltas.** Every state-changing call (`navigate`, `interact`, `fill_form`, executed `compile_verified_action`) returns an `actionId` and captures an unpruned post-action snapshot (the last 12 are kept). Pass it back as `sinceLastActionId` to ask *"what changed since action act-N?"* across any number of intervening calls — not just since your last read. Anchored diffs are unpruned on both sides, so intent-based pruning can never fabricate changes; an aged-out or unknown anchor falls back to the full tree with the known anchors listed.
+
+**Re-render detection.** When a framework re-creates a node (new splice-id, identical content), naive diffs report a phantom remove+add pair. Splice pairs those by content signature and reports them separately as `rewrittenIds` (`{ from, to, text }`) — identity churn never masquerades as a real page change, and the agent learns the replacement id for free.
+
 Executed verified actions attach the same structure as `plan.delta`, so post-action verification tells you exactly what the action changed on the page. Deltas are computed per branch, so forked shadow branches keep independent baselines — and `speculative_fork` snapshots each pre-loaded branch and reports how it differs from the active one (elements unique to the pre-loaded page, active-branch elements it lacks), so an agent can pick the right branch without visiting each one.
+
+### Act & Observe Primitives
+
+Four purpose-built primitives replace the most token-expensive agent patterns:
+
+- **`wait_for`** — semantic waiting. Block until the first of your conditions holds (`text_present`, `text_gone`, `element_visible`, `element_hidden`, `url_matches`, `title_matches`, `network_idle`) instead of polling with repeated tree reads. Never errors on timeout: you get `timedOut: true` plus a hint distinguishing "still loading" from "settled without the change".
+- **`fill_form`** — batch verified form fill. Pass fields as human labels (`{ field: "work email", value: "a@b.com" }`); Splice resolves each to a control by label / `aria-label` / `aria-labelledby` / placeholder / name, fills it (text, textarea, select, checkbox, radio, **and custom ARIA widgets** — `contenteditable`, `role="textbox"`, `role="combobox"`, `role="switch"`), verifies by readback, and reports per-field status with the control kind and browser-native validation state. Honest about failure: `not_found`, `readback_mismatch`, `skipped_disabled`, and an `ambiguous` flag (with the runner-up label) when the match was a near-tie so a mislabeled field never silently lands in the wrong control. Optionally pass `submitIntent` to submit with full verification once the form is ready — and when it can't, `submit.reason` says exactly why (`not_submittable`, `form_not_ready`, `no_submit_control`). One call instead of N interact+observe round-trips.
+- **`extract_structured`** — schema-driven extraction. Name the fields you want and Splice pulls clean rows from the best matching structure — a table (headers matched to your fields), repeated cards, or label/value pairs — with per-field coverage and confidence. No selectors, no scraping in your context window.
+- **`assert_page_state`** — cheap verification. Evaluate expectations (`url_contains`, `title_contains`, `text_present`, `text_absent`, `element_visible`, `element_hidden`) in one pass with per-expectation evidence. A fraction of the cost of a tree read; ideal for postconditions between actions.
+
+### Network & Event Cognition
+
+- **`get_network_activity`** — lifecycle-tracked requests (method, URL, status, duration, failure reason) with aggregates and an insight sentence: *"Most recent problem: POST /api/checkout → 500."* Filter by URL fragment, failures only, or a lookback window. Answers "did my submit actually fire, and did it succeed?" without a screenshot.
+- **`get_page_events`** — the events a DOM-only observer never sees. Native dialogs are auto-handled non-destructively (alerts accepted, confirm/prompt dismissed) and recorded with their message; popups are recorded with their URL; downloads are saved to `.splice/downloads` with the path recorded. When a click "did nothing", check here first.
+
+Intent resolution is action-aware: a typing intent structurally prefers editable controls and can never resolve to a button, no matter how well the button's label matches. `interact` also supports `hover`, `clear`, `check`, `uncheck`, and `scroll_into_view`, and `navigate` accepts `back` / `forward` / `reload` for history navigation with the same stabilization pipeline.
 
 ### Token Efficiency Engine
 
@@ -520,11 +544,17 @@ Every variable (except secrets and `SPLICE_CONFIG` itself) has a `splice.config.
 
 Core browser tools:
 
-- `navigate`
+- `navigate` — URLs, plus `back` / `forward` / `reload` history navigation
 - `get_semantic_tree_optimized` — full tree, or only what changed via `deltaOnly` / `lastSnapshotHash` / `structuralOnly`
-- `interact`
+- `interact` — click/type/focus/select/press plus hover, clear, check, uncheck, scroll_into_view
 - `diagnose_agent_state`
 - `compile_verified_action` — pass `compact: true` for a token-trimmed response
+- `wait_for` — block until a semantic condition holds; one call replaces N polling observations
+- `fill_form` — batch verified form fill with per-field readback and validation reporting
+- `extract_structured` — schema-driven rows from tables, repeated cards, or label/value pairs
+- `assert_page_state` — cheap postcondition checks with per-expectation evidence
+- `get_network_activity` — lifecycle-tracked requests with failure insight
+- `get_page_events` — auto-handled dialogs, popups, and downloads
 - `fork_state`
 - `speculative_fork` — pre-loaded branches report how they differ from the active page
 - `commit_branch`
