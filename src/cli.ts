@@ -53,6 +53,63 @@ const RESET = '\x1b[0m';
 const tty = process.stdout.isTTY === true;
 const paint = (code: string, text: string) => (tty ? `${code}${text}${RESET}` : text);
 
+// ─── animated banner ─────────────────────────────────────────────────────────
+
+/** Brand gradient: teal → blue → violet, matching the SVG logo and reports. */
+const BRAND_STOPS: Array<[number, number, number]> = [[52, 245, 197], [56, 189, 248], [167, 139, 250]];
+
+function brandColor(t: number): [number, number, number] {
+  const clamped = Math.max(0, Math.min(1, t));
+  const span = clamped * (BRAND_STOPS.length - 1);
+  const i = Math.min(BRAND_STOPS.length - 2, Math.floor(span));
+  const f = span - i;
+  const [a, b] = [BRAND_STOPS[i], BRAND_STOPS[i + 1]];
+  return [0, 1, 2].map((c) => Math.round(a[c] + (b[c] - a[c]) * f)) as [number, number, number];
+}
+
+function gradientLine(text: string, phase: number): string {
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === ' ') { out += ' '; continue; }
+    // A sine sweep moves a highlight across the gradient each frame.
+    const t = i / Math.max(1, text.length - 1);
+    const lift = Math.max(0, Math.sin((t - phase) * Math.PI * 2)) * 0.35;
+    const [r, g, b] = brandColor(t + lift * 0.2);
+    const boost = 1 + lift;
+    out += `\x1b[38;2;${Math.min(255, Math.round(r * boost))};${Math.min(255, Math.round(g * boost))};${Math.min(255, Math.round(b * boost))}m${text[i]}`;
+  }
+  return out + RESET;
+}
+
+/**
+ * The animated Splice mark: two strands weaving into one, then the wordmark
+ * shimmers. TTY-only and brief (~0.7s); non-interactive output gets a plain
+ * static line. Never used on `splice start` — stdout there is MCP protocol.
+ */
+async function printBanner(): Promise<void> {
+  const wordmark = ' S P L I C E ';
+  const tagline = ' browser cognition for autonomous agents';
+  if (!tty) {
+    console.log(`Splice —${tagline}`);
+    return;
+  }
+  const strandFrames = ['─╮ ╭─', ' ╲╳╱ ', '─╯ ╰─'];
+  process.stdout.write('\x1b[?25l'); // hide cursor during animation
+  try {
+    const frames = 14;
+    for (let f = 0; f <= frames; f++) {
+      const phase = f / frames;
+      const mark = strandFrames.map((line) => gradientLine(line, phase)).join('\n');
+      const block = `${mark}\n${gradientLine(wordmark, phase)}${paint(DIM, tagline)}\n`;
+      process.stdout.write(f === 0 ? block : `\x1b[4A\r${block}`);
+      await new Promise((r) => setTimeout(r, 48));
+    }
+  } finally {
+    process.stdout.write('\x1b[?25h');
+  }
+  console.log('');
+}
+
 function printHelp(): void {
   console.log(`${paint(BOLD, 'Splice')} — browser cognition infrastructure for autonomous agents (v${packageVersion()})
 
@@ -165,6 +222,7 @@ async function portFree(port: number): Promise<boolean> {
 }
 
 async function commandDoctor(args: string[]): Promise<void> {
+  if (!hasFlag(args, '--json')) await printBanner();
   const checks: DoctorCheck[] = [];
   const resolved = activeConfig;
 
@@ -363,6 +421,7 @@ function commandSession(args: string[]): void {
 // ─── splice report ───────────────────────────────────────────────────────────
 
 async function commandReport(args: string[]): Promise<void> {
+  if (!hasFlag(args, '--json')) await printBanner();
   const { buildJournalDigest } = await import('./BehaviorReport.js');
   const explicit = args.find((a) => !a.startsWith('--'));
 
@@ -451,6 +510,7 @@ async function main(): Promise<void> {
       console.log(packageVersion());
       return;
     case '--help': case '-h': case 'help':
+      await printBanner();
       printHelp();
       return;
     default:

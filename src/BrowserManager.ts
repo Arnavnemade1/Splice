@@ -29,6 +29,8 @@ import { SessionStore, sessionBranchId, isSessionBranch, sessionNameFromBranch, 
 import type { AuditOptions } from './SecurityAuditor.js';
 import { SpliceError, withRetry, isTransientError, errorMessage } from './Resilience.js';
 import { buildBehaviorReport, renderBehaviorMarkdown, type BehaviorEvent, type BehaviorReportDigest } from './BehaviorReport.js';
+import { optimizePrompt, type PageLabel, type PromptOptimization } from './PromptOptimizer.js';
+import { A11Y_RULES, sortFindings, summarizeAudit, type A11yAuditReport } from './AccessibilityAuditor.js';
 import type { AgentStateDiagnosis, LedgerEntry, SemanticNode, SessionMetrics, VerifiedActionPlan, SummonRequest } from './types.js';
 import type {
   NetworkActivitySummary,
@@ -82,6 +84,15 @@ export class BrowserManager {
   // until the per-session budget runs out. Explicit includeVision: true is
   // never blocked and never counted. Defaults mirror config.ts.
   private readonly visionByDefault = !['0', 'false'].includes((process.env.SPLICE_VISION_BY_DEFAULT ?? '').trim().toLowerCase());
+
+  /**
+   * Standing permission to optimize intents inside compile_verified_action
+   * (promptOptimization in splice.config.json / SPLICE_PROMPT_OPTIMIZATION).
+   * Off by default: without it, prompts are only rewritten when the caller
+   * passes optimizeIntent: true on the individual call. Applied rewrites are
+   * always reported back via plan.intentOptimization — never silent.
+   */
+  public promptOptimizationAuto = ['1', 'true', 'auto'].includes((process.env.SPLICE_PROMPT_OPTIMIZATION ?? '').trim().toLowerCase());
   private readonly visionBudget = (() => {
     const raw = Number(process.env.SPLICE_VISION_BUDGET);
     return process.env.SPLICE_VISION_BUDGET !== undefined && Number.isFinite(raw) && raw >= 0 ? raw : 20;
@@ -559,9 +570,11 @@ export class BrowserManager {
   }
 
   /** Top visible actionable elements, for suggesting structured intents on a vague goal. */
-  private async collectIntentSuggestions(limit = 6): Promise<string[]> {
+  /** Visible actionable labels on the active page — grounding material for
+   *  intent suggestions and prompt optimization. */
+  private async collectActionableLabels(limit = 6): Promise<PageLabel[]> {
     const page = this.getActivePage();
-    const labels = await page.evaluate((max: number) => {
+    return await page.evaluate((max: number) => {
       const isVisible = (el: Element) => {
         const style = window.getComputedStyle(el);
         const rect = el.getBoundingClientRect();
@@ -570,7 +583,7 @@ export class BrowserManager {
       const describe = (el: HTMLElement) => (
         el.innerText || el.getAttribute('aria-label') || el.getAttribute('placeholder') || el.getAttribute('name') || el.getAttribute('title') || ''
       ).replace(/\s+/g, ' ').trim().slice(0, 60);
-      const results: Array<{ kind: string; label: string }> = [];
+      const results: Array<{ kind: 'click' | 'type' | 'select'; label: string }> = [];
       for (const selector of ['button, [role="button"], input[type="submit"]', 'a[href]', 'input:not([type="hidden"]):not([type="submit"]), textarea, select']) {
         for (const el of Array.from(document.querySelectorAll<HTMLElement>(selector))) {
           if (results.length >= max) break;
@@ -578,16 +591,46 @@ export class BrowserManager {
           const label = describe(el);
           if (!label) continue;
           const tag = el.tagName.toLowerCase();
-          const kind = tag === 'select' ? 'select' : tag === 'input' || tag === 'textarea' ? 'type' : 'click';
+          const kind = tag === 'select' ? 'select' as const : tag === 'input' || tag === 'textarea' ? 'type' as const : 'click' as const;
           if (!results.some(r => r.label === label)) results.push({ kind, label });
         }
         if (results.length >= max) break;
       }
       return results;
     }, limit);
+  }
+
+  private async collectIntentSuggestions(limit = 6): Promise<string[]> {
+    const labels = await this.collectActionableLabels(limit);
     return labels.map(({ kind, label }) =>
       kind === 'type' ? `type <value> into "${label}"` : kind === 'select' ? `select <option> in "${label}"` : `click "${label}"`
     );
+  }
+
+  /**
+   * Optimize a prompt for Splice's cognition APIs — suggestion only, nothing
+   * is executed or rewritten in place. Strips conversational filler,
+   * normalizes verbs, separates input values from intents, grounds the target
+   * against the page's actual visible labels, and routes prompts that a
+   * one-call primitive (fill_form, wait_for, extract_structured,
+   * assert_page_state) serves better. To apply automatically inside
+   * compile_verified_action, pass optimizeIntent: true per call or enable
+   * promptOptimization in splice.config.json.
+   */
+  async optimizeIntent(prompt: string): Promise<PromptOptimization> {
+    if (!prompt || prompt.trim().length === 0) throw new Error('A prompt is required.');
+    const labels = await this.collectActionableLabels(24).catch(() => [] as PageLabel[]);
+    const optimization = optimizePrompt(prompt, labels);
+    if (optimization.changed) {
+      this.saveMicroSnapshot('prompt_optimized', {
+        original: optimization.original.slice(0, 120),
+        optimized: optimization.optimized.slice(0, 120),
+        groundedTo: optimization.groundedTo,
+        routedTo: optimization.toolSuggestion?.tool,
+        estimatedTokensSaved: optimization.estimatedTokensSaved,
+      });
+    }
+    return optimization;
   }
 
   // -------------------------
@@ -1555,15 +1598,50 @@ export class BrowserManager {
     includeVision?: boolean;
     /** Caller-declared postconditions verified after execution (url_contains, text_present, ...). */
     expect?: PageExpectation[];
+    /** Per-call permission to optimize the intent (strip filler, ground the
+     *  target against visible labels, separate the value) before compiling.
+     *  Also granted globally via promptOptimization in splice.config.json.
+     *  Applied rewrites are reported in plan.intentOptimization. */
+    optimizeIntent?: boolean;
   }): Promise<VerifiedActionPlan> {
-    const { intent, value, constraints = {}, execute = false, includeVision, expect } = input;
+    const { constraints = {}, execute = false, includeVision, expect } = input;
+    let { intent, value } = input;
     if (!intent || intent.trim().length === 0) throw new Error('Intent is required.');
 
     await this.ensureHealthy();
 
+    // Prompt optimization is opt-in: per call via optimizeIntent, or standing
+    // via config. Never applied silently — the rewrite travels in the plan.
+    let intentOptimization: VerifiedActionPlan['intentOptimization'];
+    const optimizationPermitted = input.optimizeIntent === true || (input.optimizeIntent !== false && this.promptOptimizationAuto);
+    if (optimizationPermitted) {
+      const optimization = await this.optimizeIntent(intent).catch(() => null);
+      // Routing suggestions and multi-step chains are advice for the caller,
+      // not something a single compile call may act on — only single-intent
+      // textual rewrites are applied here.
+      if (optimization?.changed && !optimization.toolSuggestion && !optimization.steps) {
+        intentOptimization = {
+          original: intent,
+          optimized: optimization.optimized,
+          transformations: optimization.transformations,
+          estimatedTokensSaved: optimization.estimatedTokensSaved,
+        };
+        intent = optimization.optimized;
+        if (value === undefined && optimization.value !== undefined) value = optimization.value;
+      }
+    }
+
     const structure = this.assessIntentStructure(intent);
     if (!structure.structured) {
       const suggestedIntents = await this.collectIntentSuggestions().catch(() => [] as string[]);
+      // Suggestion-only rescue: even without optimization permission, show
+      // what the optimizer would have made of this prompt. Advice, not action.
+      if (!optimizationPermitted) {
+        const hint = await this.optimizeIntent(intent).catch(() => null);
+        if (hint?.changed && hint.optimized !== intent && this.assessIntentStructure(hint.optimized).structured) {
+          suggestedIntents.unshift(hint.optimized);
+        }
+      }
       const plan: VerifiedActionPlan = {
         intent,
         confidence: 0,
@@ -1580,6 +1658,7 @@ export class BrowserManager {
           guidance: 'Restate the intent as action + target (e.g. \'click "Place order"\', \'type jane@x.com into "Email"\'). Optionally declare the outcome you expect via expect so success is verified, not assumed.'
         }
       };
+      if (intentOptimization) plan.intentOptimization = intentOptimization;
       this.saveMicroSnapshot('verified_action_plan', { intent, confidence: 0, risk: 'high', executable: false, needsClarification: true });
       return plan;
     }
@@ -1719,6 +1798,7 @@ export class BrowserManager {
           reason: candidate.disabled ? 'Candidate is disabled.' : candidate.obstructed ? 'Candidate appears visually obstructed.' : 'Low semantic match.'
         }))
       };
+      if (intentOptimization) plan.intentOptimization = intentOptimization;
       this.saveMicroSnapshot('verified_action_plan', { intent, confidence: plan.confidence, risk: plan.risk, executable: false });
       return plan;
     }
@@ -1864,6 +1944,10 @@ export class BrowserManager {
       };
     }
 
+    if (intentOptimization) {
+      plan.intentOptimization = intentOptimization;
+      plan.evidence.push(`Intent optimized before compilation: "${intentOptimization.original}" → "${intentOptimization.optimized}" (${intentOptimization.transformations.join('; ')}).`);
+    }
     this.saveMicroSnapshot('verified_action_plan', {
       intent,
       target: best.id,
@@ -3853,6 +3937,223 @@ export class BrowserManager {
 
     this.pushLiveFeed('maintenance_cleanup', `Removed ${removed} files older than ${olderThanDays}d`);
     return { removed, olderThanDays };
+  }
+
+  /**
+   * Deterministic WCAG audit of the active page. Findings are worst-first
+   * with per-rule fix guidance; the report also explains how each failure
+   * class degrades agent operation (unlabeled controls break label-based
+   * targeting, nameless buttons vanish from intent ranking).
+   */
+  async runAccessibilityAudit(): Promise<A11yAuditReport> {
+    await this.ensureHealthy();
+    const page = this.getActivePage();
+
+    const raw = await page.evaluate(() => {
+      const findings: Array<{ rule: string; element: string; detail: string; fix: string }> = [];
+      const describe = (el: Element): string => {
+        const tag = el.tagName.toLowerCase();
+        const id = el.id ? `#${el.id}` : '';
+        const name = el.getAttribute('name');
+        const text = (el as HTMLElement).innerText?.trim().slice(0, 40);
+        return `<${tag}${id}${name ? ` name="${name}"` : ''}>${text ? ` "${text}"` : ''}`;
+      };
+      const isVisible = (el: Element) => {
+        const style = window.getComputedStyle(el);
+        const rect = el.getBoundingClientRect();
+        return style.display !== 'none' && style.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+      };
+
+      // image-alt: informative images must describe themselves (alt="" opts out).
+      for (const img of Array.from(document.querySelectorAll('img'))) {
+        if (!img.hasAttribute('alt') && isVisible(img)) {
+          findings.push({
+            rule: 'image-alt',
+            element: describe(img) + (img.src ? ` src="${img.src.slice(0, 60)}"` : ''),
+            detail: 'Image has no alt attribute.',
+            fix: 'Add alt text describing the image, or alt="" if purely decorative.',
+          });
+        }
+      }
+
+      // control-label: every visible form control needs a programmatic label.
+      for (const control of Array.from(document.querySelectorAll<HTMLElement>('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), select, textarea'))) {
+        if (!isVisible(control)) continue;
+        const labelled =
+          (control.id && document.querySelector(`label[for="${CSS.escape(control.id)}"]`)) ||
+          control.closest('label') ||
+          control.getAttribute('aria-label') ||
+          control.getAttribute('aria-labelledby') ||
+          control.getAttribute('title');
+        if (!labelled) {
+          findings.push({
+            rule: 'control-label',
+            element: describe(control),
+            detail: 'Form control has no programmatic label (label[for], wrapping label, aria-label, aria-labelledby, or title).',
+            fix: 'Associate a <label for> with the control, or add aria-label.',
+          });
+        }
+      }
+
+      // accessible-name: buttons and links must expose a name.
+      for (const el of Array.from(document.querySelectorAll<HTMLElement>('button, a[href], [role="button"], [role="link"]'))) {
+        if (!isVisible(el)) continue;
+        const name =
+          el.innerText?.trim() ||
+          el.getAttribute('aria-label') ||
+          el.getAttribute('aria-labelledby') ||
+          el.getAttribute('title') ||
+          el.querySelector('img[alt]')?.getAttribute('alt')?.trim() ||
+          (el as HTMLInputElement).value;
+        if (!name) {
+          findings.push({
+            rule: 'accessible-name',
+            element: describe(el),
+            detail: 'Interactive element has no accessible name.',
+            fix: 'Add visible text, aria-label, or alt text on the contained image.',
+          });
+        }
+      }
+
+      // document-language / document-title.
+      if (!document.documentElement.getAttribute('lang')) {
+        findings.push({
+          rule: 'document-language',
+          element: '<html>',
+          detail: 'The document has no lang attribute.',
+          fix: 'Set <html lang="…"> to the page language.',
+        });
+      }
+      if (!document.title || document.title.trim().length === 0) {
+        findings.push({
+          rule: 'document-title',
+          element: '<title>',
+          detail: 'The document has no title.',
+          fix: 'Give the page a descriptive <title>.',
+        });
+      }
+
+      // heading-order: start at h1, never skip down more than one level.
+      const headings = Array.from(document.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6')).filter(isVisible);
+      let previousLevel = 0;
+      for (const heading of headings) {
+        const level = Number(heading.tagName[1]);
+        if ((previousLevel === 0 && level !== 1) || (previousLevel > 0 && level > previousLevel + 1)) {
+          findings.push({
+            rule: 'heading-order',
+            element: describe(heading),
+            detail: previousLevel === 0
+              ? `First heading is <h${level}>; documents should begin at <h1>.`
+              : `Heading level jumps from <h${previousLevel}> to <h${level}>.`,
+            fix: 'Keep heading levels sequential so the document outline is navigable.',
+          });
+        }
+        previousLevel = level;
+      }
+
+      // color-contrast: WCAG AA ratio on visible text with resolvable backgrounds.
+      const luminance = (rgb: string): number | null => {
+        const m = rgb.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+        if (!m) return null;
+        if (m[4] !== undefined && Number(m[4]) < 1) return null; // translucent — skip, cannot resolve
+        const [r, g, b] = [m[1], m[2], m[3]].map((v) => {
+          const c = Number(v) / 255;
+          return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+        });
+        return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      };
+      const effectiveBackground = (el: Element): number | null => {
+        let node: Element | null = el;
+        while (node) {
+          const bg = window.getComputedStyle(node).backgroundColor;
+          if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') return luminance(bg);
+          node = node.parentElement;
+        }
+        return luminance('rgb(255, 255, 255)'); // browser default canvas
+      };
+      const textElements = Array.from(document.querySelectorAll<HTMLElement>('p, span, a, button, label, li, td, th, h1, h2, h3, h4, h5, h6, div'))
+        .filter((el) => isVisible(el) && el.childElementCount === 0 && (el.innerText?.trim().length ?? 0) > 0)
+        .slice(0, 200);
+      for (const el of textElements) {
+        const style = window.getComputedStyle(el);
+        const fg = luminance(style.color);
+        const bg = effectiveBackground(el);
+        if (fg === null || bg === null) continue;
+        const ratio = (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
+        const fontSize = parseFloat(style.fontSize);
+        const bold = Number(style.fontWeight) >= 700;
+        const isLarge = fontSize >= 24 || (fontSize >= 18.66 && bold);
+        const required = isLarge ? 3 : 4.5;
+        if (ratio < required) {
+          findings.push({
+            rule: 'color-contrast',
+            element: describe(el),
+            detail: `Contrast ratio ${ratio.toFixed(2)}:1 is below the ${required}:1 minimum for this text size.`,
+            fix: 'Darken the text or lighten the background until the ratio meets WCAG AA.',
+          });
+        }
+      }
+
+      // positive-tabindex: authors must not fight the natural focus order.
+      for (const el of Array.from(document.querySelectorAll<HTMLElement>('[tabindex]'))) {
+        const tabindex = Number(el.getAttribute('tabindex'));
+        if (Number.isFinite(tabindex) && tabindex > 0) {
+          findings.push({
+            rule: 'positive-tabindex',
+            element: describe(el),
+            detail: `tabindex="${tabindex}" overrides the natural focus order.`,
+            fix: 'Use tabindex="0" and let DOM order define focus sequence.',
+          });
+        }
+      }
+
+      // duplicate-id: repeated ids break label[for] and ARIA references.
+      const seen = new Map<string, number>();
+      for (const el of Array.from(document.querySelectorAll('[id]'))) {
+        seen.set(el.id, (seen.get(el.id) ?? 0) + 1);
+      }
+      for (const [id, count] of seen) {
+        if (count > 1) {
+          findings.push({
+            rule: 'duplicate-id',
+            element: `#${id}`,
+            detail: `id "${id}" appears ${count} times.`,
+            fix: 'Make ids unique — duplicates break label associations and ARIA references.',
+          });
+        }
+      }
+
+      // aria-hidden-focus: hidden-from-AT subtrees must not contain focusables.
+      for (const hidden of Array.from(document.querySelectorAll('[aria-hidden="true"]'))) {
+        const focusable = hidden.querySelector('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+        if (focusable && isVisible(focusable)) {
+          findings.push({
+            rule: 'aria-hidden-focus',
+            element: describe(focusable),
+            detail: 'Focusable element inside an aria-hidden="true" subtree.',
+            fix: 'Remove aria-hidden, or make descendants unfocusable (tabindex="-1", disabled).',
+          });
+        }
+      }
+
+      return { findings, url: window.location.href, title: document.title };
+    });
+
+    const findings = sortFindings(
+      raw.findings.map((f) => ({
+        ...f,
+        wcag: A11Y_RULES[f.rule]?.wcag ?? 'WCAG',
+        severity: A11Y_RULES[f.rule]?.severity ?? 'moderate',
+      }))
+    );
+    const report = summarizeAudit(raw.url, raw.title, findings);
+    this.saveMicroSnapshot('accessibility_audit', {
+      url: report.url,
+      score: report.score,
+      findings: report.findings.length,
+      bySeverity: report.bySeverity,
+    });
+    return report;
   }
 
   async runSecurityAudit(targetUrl: string, options: AuditOptions = {}) {

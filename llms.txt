@@ -1,0 +1,22 @@
+# Splice
+
+> Browser cognition infrastructure for autonomous agents: an MCP server that gives coding
+> agents a self-healing Chromium with verified actions, delta observations, failure
+> forensics, recovery memory, prompt optimization, accessibility audits, and behavior
+> reports for recursive self-improvement.
+
+## Install (for agents)
+
+- [Agent Install Guide](AGENT_INSTALL.md): deterministic install + verification steps. Summary: `npm install splice`, `npx splice init`, register with your MCP client (`claude mcp add splice -- npx -y splice start`), then verify with `npx splice doctor --json` until `"healthy": true`.
+
+## Docs
+
+- [README](README.md): full feature and tool reference.
+- MCP resource `splice://guide/agent-playbook` (after install): the recommended cognition loop — diagnose → compile verified action → verify → recover.
+
+## Key facts
+
+- MCP server command: `splice start` (stdio). Requires Node >= 20 and Playwright Chromium.
+- Recommended loop: navigate → diagnose_agent_state → compile_verified_action (with declared `expect` postconditions) → verify via deltas.
+- Long runs: call generate_behavior_report periodically and apply its selfImprovement section.
+- Prompts: run optimize_prompt on conversational intents; enable promptOptimization in splice.config.json for automatic rewrites (always reported, never silent).

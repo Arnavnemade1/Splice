@@ -1,53 +1,45 @@
 // ============================================================================
-// SCROLL ANIMATIONS
+// SCROLL REVEAL
 // ============================================================================
 
-const observerOptions = {
-  threshold: 0.1,
-  rootMargin: '0px 0px -50px 0px'
-};
+const revealElements = document.querySelectorAll('.reveal');
 
-const observer = new IntersectionObserver((entries) => {
-  entries.forEach(entry => {
+const revealObserver = new IntersectionObserver((entries) => {
+  entries.forEach((entry) => {
     if (entry.isIntersecting) {
-      entry.target.style.opacity = '1';
-      entry.target.style.transform = 'translateY(0)';
+      entry.target.classList.add('is-visible');
     }
   });
-}, observerOptions);
-
-// Observe all section headers and cards on scroll
-document.querySelectorAll('.capability-card, .workflow-step, .integration-option, .feature, .start-step').forEach(el => {
-  el.style.opacity = '0';
-  el.style.transform = 'translateY(20px)';
-  el.style.transition = 'opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1), transform 0.6s cubic-bezier(0.4, 0, 0.2, 1)';
-  observer.observe(el);
+}, {
+  threshold: 0.08,
+  rootMargin: '0px 0px -40px 0px'
 });
 
-// ============================================================================
-// NAVBAR SCROLL EFFECT
-// ============================================================================
+revealElements.forEach((el) => revealObserver.observe(el));
 
-const navbar = document.querySelector('.navbar');
-let lastScrollY = 0;
-
-window.addEventListener('scroll', () => {
-  lastScrollY = window.scrollY;
-
-  if (lastScrollY > 10) {
-    navbar.style.borderBottomColor = 'rgba(42, 42, 42, 0.5)';
-    navbar.style.background = 'rgba(10, 10, 10, 0.95)';
-  } else {
-    navbar.style.borderBottomColor = 'rgb(42, 42, 42)';
-    navbar.style.background = 'rgba(10, 10, 10, 0.8)';
-  }
-});
 
 // ============================================================================
-// SMOOTH SCROLL LINKS
+// NAVBAR SCROLL
 // ============================================================================
 
-document.querySelectorAll('a[href^="#"]').forEach(link => {
+const nav = document.getElementById('nav');
+const hero = document.querySelector('.hero');
+
+function updateNav() {
+  if (!nav) return;
+  const scrolled = window.scrollY > 40;
+  nav.classList.toggle('is-scrolled', scrolled);
+}
+
+window.addEventListener('scroll', updateNav, { passive: true });
+updateNav();
+
+
+// ============================================================================
+// SMOOTH SCROLL ANCHORS
+// ============================================================================
+
+document.querySelectorAll('a[href^="#"]').forEach((link) => {
   link.addEventListener('click', (e) => {
     const href = link.getAttribute('href');
     if (href === '#') return;
@@ -55,160 +47,105 @@ document.querySelectorAll('a[href^="#"]').forEach(link => {
     e.preventDefault();
     const target = document.querySelector(href);
     if (target) {
-      const offsetTop = target.offsetTop - 80;
       window.scrollTo({
-        top: offsetTop,
+        top: target.offsetTop - 72,
         behavior: 'smooth'
       });
     }
   });
 });
 
-// ============================================================================
-// INTERACTIVE HOVER EFFECTS
-// ============================================================================
-
-// Add hover scale effect to buttons
-document.querySelectorAll('.btn').forEach(btn => {
-  btn.addEventListener('mouseenter', (e) => {
-    btn.style.transform = 'translateY(-2px)';
-  });
-
-  btn.addEventListener('mouseleave', (e) => {
-    btn.style.transform = 'translateY(0)';
-  });
-});
 
 // ============================================================================
-// CODE SNIPPET COPY FUNCTIONALITY
-// ============================================================================
-
-document.querySelectorAll('.code-snippet, .code-inline').forEach(codeBlock => {
-  const wrapper = document.createElement('div');
-  wrapper.style.position = 'relative';
-  wrapper.style.display = 'inline-block';
-  wrapper.style.width = '100%';
-  codeBlock.parentNode.insertBefore(wrapper, codeBlock);
-  wrapper.appendChild(codeBlock);
-
-  const copyBtn = document.createElement('button');
-  copyBtn.textContent = 'Copy';
-  copyBtn.style.cssText = `
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    background: rgba(52, 245, 197, 0.1);
-    border: 1px solid rgba(52, 245, 197, 0.3);
-    color: rgb(52, 245, 197);
-    padding: 6px 12px;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    cursor: pointer;
-    transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
-    font-weight: 500;
-  `;
-
-  copyBtn.addEventListener('mouseenter', () => {
-    copyBtn.style.background = 'rgba(52, 245, 197, 0.2)';
-    copyBtn.style.borderColor = 'rgba(52, 245, 197, 0.5)';
-  });
-
-  copyBtn.addEventListener('mouseleave', () => {
-    copyBtn.style.background = 'rgba(52, 245, 197, 0.1)';
-    copyBtn.style.borderColor = 'rgba(52, 245, 197, 0.3)';
-  });
-
-  copyBtn.addEventListener('click', () => {
-    const text = codeBlock.textContent;
-    navigator.clipboard.writeText(text).then(() => {
-      copyBtn.textContent = 'Copied!';
-      copyBtn.style.color = 'rgb(52, 245, 197)';
-      setTimeout(() => {
-        copyBtn.textContent = 'Copy';
-      }, 2000);
-    });
-  });
-
-  wrapper.style.marginBottom = '12px';
-  wrapper.appendChild(copyBtn);
-});
-
-// ============================================================================
-// PARALLAX SCROLL EFFECT
+// HERO PARALLAX
 // ============================================================================
 
 const heroContent = document.querySelector('.hero-content');
-if (heroContent) {
+const heroVideo = document.querySelector('.hero-video');
+
+if (heroContent && hero) {
   window.addEventListener('scroll', () => {
-    const scrollY = window.scrollY;
-    const heroSection = document.querySelector('.hero');
-    const distanceFromTop = heroSection.offsetTop + heroSection.offsetHeight;
+    const y = window.scrollY;
+    const h = hero.offsetHeight;
 
-    if (scrollY < distanceFromTop) {
-      const parallaxValue = scrollY * 0.5;
-      heroContent.style.transform = `translateY(${parallaxValue}px)`;
+    if (y < h) {
+      const progress = y / h;
+      heroContent.style.opacity = String(Math.max(0, 1 - progress * 1.5));
+      heroContent.style.transform = `translateY(${y * 0.15}px)`;
     }
+  }, { passive: true });
+}
+
+
+// ============================================================================
+// VIDEO AUTOPLAY FALLBACK
+// ============================================================================
+
+if (heroVideo) {
+  heroVideo.play().catch(() => {
+    // Autoplay blocked — poster image provides the fallback
   });
 }
 
-// ============================================================================
-// STAGGERED ANIMATION ON LOAD
-// ============================================================================
-
-const staggerElements = document.querySelectorAll(
-  '.nav-link, .hero-title, .hero-subtitle, .hero-cta, .hero-visual'
-);
-
-let delay = 0;
-staggerElements.forEach((el, index) => {
-  const style = window.getComputedStyle(el);
-  const animation = style.animation || style.WebkitAnimation || '';
-
-  if (animation.includes('fadeIn')) {
-    delay = (index + 1) * 0.1;
-  }
-});
 
 // ============================================================================
-// ENHANCED RESPONSIVE BEHAVIOR
+// CODE COPY BUTTONS
 // ============================================================================
 
-// Handle resize events for responsive adjustments
-let resizeTimeout;
-window.addEventListener('resize', () => {
-  clearTimeout(resizeTimeout);
-  resizeTimeout = setTimeout(() => {
-    // Adjust hero layout if needed
-    const heroContent = document.querySelector('.hero-content');
-    if (window.innerWidth < 1024 && heroContent) {
-      heroContent.style.gridTemplateColumns = '1fr';
-    } else if (heroContent) {
-      heroContent.style.gridTemplateColumns = '1fr 1fr';
-    }
-  }, 250);
-});
+document.querySelectorAll('.code-body code, .card-code').forEach((block) => {
+  const wrapper = document.createElement('div');
+  wrapper.style.position = 'relative';
+  block.parentNode.insertBefore(wrapper, block);
+  wrapper.appendChild(block);
 
-// ============================================================================
-// PERFORMANCE MONITORING
-// ============================================================================
-
-// Log page performance metrics
-if (window.performance && window.performance.timing) {
-  window.addEventListener('load', () => {
-    const perfData = window.performance.timing;
-    const pageLoadTime = perfData.loadEventEnd - perfData.navigationStart;
-
-    if (pageLoadTime > 0) {
-      console.log(`%c⚡ Splice loaded in ${pageLoadTime}ms`, 'color: #34f5c5; font-weight: bold;');
-    }
+  const btn = document.createElement('button');
+  btn.textContent = 'Copy';
+  btn.setAttribute('aria-label', 'Copy code to clipboard');
+  Object.assign(btn.style, {
+    position: 'absolute',
+    top: '8px',
+    right: '8px',
+    background: 'rgba(255, 255, 255, 0.06)',
+    border: '1px solid rgba(255, 255, 255, 0.1)',
+    color: 'rgba(255, 255, 255, 0.5)',
+    padding: '4px 10px',
+    borderRadius: '4px',
+    fontSize: '0.72rem',
+    fontWeight: '500',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease',
+    fontFamily: 'inherit'
   });
-}
+
+  btn.addEventListener('mouseenter', () => {
+    btn.style.background = 'rgba(255, 255, 255, 0.1)';
+    btn.style.color = 'rgba(255, 255, 255, 0.8)';
+  });
+
+  btn.addEventListener('mouseleave', () => {
+    btn.style.background = 'rgba(255, 255, 255, 0.06)';
+    btn.style.color = 'rgba(255, 255, 255, 0.5)';
+  });
+
+  btn.addEventListener('click', () => {
+    navigator.clipboard.writeText(block.textContent).then(() => {
+      btn.textContent = 'Copied';
+      btn.style.color = '#4ade80';
+      setTimeout(() => {
+        btn.textContent = 'Copy';
+        btn.style.color = 'rgba(255, 255, 255, 0.5)';
+      }, 1500);
+    });
+  });
+
+  wrapper.appendChild(btn);
+});
+
 
 // ============================================================================
-// ACCESSIBILITY ENHANCEMENTS
+// KEYBOARD NAVIGATION
 // ============================================================================
 
-// Add focus visible styles dynamically
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Tab') {
     document.body.classList.add('keyboard-nav');
@@ -219,14 +156,39 @@ document.addEventListener('mousedown', () => {
   document.body.classList.remove('keyboard-nav');
 });
 
-// Enhance contrast on focus for keyboard navigation
-const style = document.createElement('style');
-style.textContent = `
+const focusStyle = document.createElement('style');
+focusStyle.textContent = `
   body.keyboard-nav a:focus,
   body.keyboard-nav button:focus {
-    outline: 2px solid #34f5c5;
+    outline: 2px solid #4ade80;
     outline-offset: 2px;
     border-radius: 4px;
   }
 `;
-document.head.appendChild(style);
+document.head.appendChild(focusStyle);
+
+
+// ============================================================================
+// RESIZE HANDLER
+// ============================================================================
+
+let resizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(updateNav, 200);
+});
+
+
+// ============================================================================
+// PERFORMANCE LOG
+// ============================================================================
+
+if (window.performance && window.performance.timing) {
+  window.addEventListener('load', () => {
+    const t = window.performance.timing;
+    const loadTime = t.loadEventEnd - t.navigationStart;
+    if (loadTime > 0) {
+      console.log(`%c⚡ Splice loaded in ${loadTime}ms`, 'color: #4ade80; font-weight: bold;');
+    }
+  });
+}

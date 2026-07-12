@@ -152,6 +152,27 @@
       pointer-events: none;
     }
 
+    /* Animated strands: the mark weaves itself together on a slow loop. */
+    .mark svg { width: 30px; height: 30px; display: block; }
+    .mark .strand {
+      fill: none;
+      stroke: #04060a;
+      stroke-width: 12;
+      stroke-linecap: round;
+      stroke-dasharray: 210;
+      animation: markWeave 3.6s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+    }
+    .mark .strand.reverse { animation-direction: reverse; }
+    @keyframes markWeave {
+      0%   { stroke-dashoffset: 210; opacity: 0.3; }
+      45%  { stroke-dashoffset: 0;   opacity: 1; }
+      80%  { stroke-dashoffset: 0;   opacity: 1; }
+      100% { stroke-dashoffset: -210; opacity: 0.3; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .mark .strand { animation: none; stroke-dashoffset: 0; }
+    }
+
     h1 {
       margin: 0;
       font-size: 17px;
@@ -862,7 +883,12 @@
   <div class="shell">
     <header>
       <div class="brand">
-        <div class="mark">S</div>
+        <div class="mark" aria-hidden="true">
+          <svg viewBox="0 0 120 120">
+            <path class="strand" d="M 22 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 98 90"/>
+            <path class="strand reverse" d="M 98 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 22 90"/>
+          </svg>
+        </div>
         <div>
           <h1><span class="wordmark">Splice</span> Command Center</h1>
           <div class="subtitle">Agent browser forensics, verified actions, telemetry, and security intelligence.</div>

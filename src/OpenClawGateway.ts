@@ -37,7 +37,7 @@ export class OpenClawGateway {
           ws.send(JSON.stringify({
             event: 'handshake',
             status: 'connected',
-            version: '2.2.0',
+            version: '2.3.0',
             engine: 'Splice Enterprise Browser Core',
             capabilities: [
               'navigate',
@@ -57,7 +57,9 @@ export class OpenClawGateway {
               'session_status',
               'get_runtime_health',
               'get_agent_analytics',
-              'generate_behavior_report'
+              'generate_behavior_report',
+              'optimize_prompt',
+              'run_accessibility_audit'
             ],
             timestamp: Date.now()
           }));
@@ -171,14 +173,15 @@ export class OpenClawGateway {
         }
 
         case 'compile_verified_action': {
-          const { intent, value, constraints, execute, includeVision } = args || {};
+          const { intent, value, constraints, execute, includeVision, optimizeIntent } = args || {};
           if (!intent) throw new Error('Missing "intent" parameter for compile_verified_action');
           result = await this.browser.compileVerifiedAction({
             intent,
             value,
             constraints,
             execute: execute === true,
-            includeVision: includeVision === true
+            includeVision: includeVision === true,
+            optimizeIntent: typeof optimizeIntent === 'boolean' ? optimizeIntent : undefined
           });
           break;
         }
@@ -198,6 +201,18 @@ export class OpenClawGateway {
 
         case 'generate_behavior_report': {
           result = this.browser.generateBehaviorReport();
+          break;
+        }
+
+        case 'optimize_prompt': {
+          const { prompt } = args || {};
+          if (!prompt) throw new Error('Missing "prompt" parameter for optimize_prompt');
+          result = await this.browser.optimizeIntent(prompt);
+          break;
+        }
+
+        case 'run_accessibility_audit': {
+          result = await this.browser.runAccessibilityAudit();
           break;
         }
 

@@ -1,6 +1,6 @@
 {
   "name": "splice",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Secure browser infrastructure and observability for autonomous web agents.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -16,6 +16,7 @@
   "files": [
     "dist",
     "dashboard",
+    "assets",
     "README.md",
     "LICENSE"
   ],

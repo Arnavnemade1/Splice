@@ -42,6 +42,14 @@ export interface SpliceConfigValues {
   visionByDefault: boolean;
   /** Max automatic vision captures per session; explicit includeVision: true is never blocked. */
   visionBudget: number;
+  /**
+   * Standing permission to optimize intents inside compile_verified_action
+   * (strip filler, ground targets against visible labels, separate values).
+   * Off by default: rewrites then happen only when a call passes
+   * optimizeIntent: true. Applied rewrites always travel back in
+   * plan.intentOptimization with the original preserved.
+   */
+  promptOptimization: boolean;
 }
 
 export type ConfigSource = 'default' | 'file' | 'env';
@@ -69,6 +77,7 @@ export const CONFIG_KEYS: Record<keyof SpliceConfigValues, KeySpec> = {
   telemetryUrl: { env: 'SPLICE_TELEMETRY_URL', kind: 'string', default: undefined },
   visionByDefault: { env: 'SPLICE_VISION_BY_DEFAULT', kind: 'boolean', default: true },
   visionBudget: { env: 'SPLICE_VISION_BUDGET', kind: 'number', default: 20 },
+  promptOptimization: { env: 'SPLICE_PROMPT_OPTIMIZATION', kind: 'boolean', default: false },
 };
 
 /** Locate the active config file, if any. */

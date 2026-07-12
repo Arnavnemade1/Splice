@@ -48,6 +48,8 @@ Guardrails that are always on: prompt-injection redaction in semantic trees, a s
 
 Efficiency: pass intent + maxTokens to get_semantic_tree_optimized to prune the DOM; after the first read, pass deltaOnly: true (with the same intent) to receive only what changed since your last observation instead of the whole tree; actions return an actionId (act-N) — pass it as sinceLastActionId to diff against the moment right after that action, with framework re-renders reported as rewrittenIds instead of add/remove noise; pass agentId on calls to get per-agent tracking and in-action optimization directives; use fork_state to test risky actions on a shadow branch before committing.
 
+Prompt hygiene: intents compile best as terse action + exact quoted target. If your prompt is conversational or came verbatim from a user, run **optimize_prompt** first — it strips filler, grounds the target against the page's real labels, separates typed values, and tells you when fill_form / wait_for / extract_structured / assert_page_state fits the job better (with ready-to-use args). It only suggests; to have compile_verified_action apply it automatically, pass optimizeIntent: true (per-call permission) or set promptOptimization: true in splice.config.json (standing permission) — applied rewrites always come back in plan.intentOptimization with the original preserved.
+
 Self-improvement loop for long runs: call **generate_behavior_report** at the end of every run — and every ~50 actions on long traversals. It reconstructs your chain of thought (observations → diagnoses → plans → actions → outcomes, grouped into navigation episodes), scores your verification rate and observation economy, and returns prioritized selfImprovement recommendations. Apply them immediately: they are computed from your own behavior this session, not generic advice. The report is also persisted to .splice/behavior/ so your next session can start by reading the previous one. Offline, \`splice report\` analyzes any persisted run journal the same way.`;
 
 const server = new Server(
@@ -97,6 +99,12 @@ server.setRequestHandler(ListResourcesRequestSchema, async () => {
         name: "Splice Agent Playbook",
         mimeType: "text/markdown",
         description: "The recommended cognition loop for any agent using Splice: diagnose → compile verified action → verify → recover. Read this first.",
+      },
+      {
+        uri: "splice://brand/logo",
+        name: "Splice Logo (Animated)",
+        mimeType: "image/svg+xml",
+        description: "The animated Splice mark — two strands spliced into one. Self-contained SVG (CSS + SMIL animation, honors prefers-reduced-motion); render it wherever your client shows resources.",
       }
     ],
   };
@@ -169,6 +177,20 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     return {
       contents: [{ uri: request.params.uri, mimeType: "text/markdown", text: SPLICE_PLAYBOOK }],
     };
+  }
+
+  if (request.params.uri === "splice://brand/logo") {
+    // dist/index.js → ../assets/logo.svg; dist_test/src/index.js → ../../assets/logo.svg.
+    const moduleDir = path.dirname(new URL(import.meta.url).pathname);
+    for (const up of ['..', '../..']) {
+      const candidate = path.join(moduleDir, up, 'assets', 'logo.svg');
+      if (fs.existsSync(candidate)) {
+        return {
+          contents: [{ uri: request.params.uri, mimeType: "image/svg+xml", text: fs.readFileSync(candidate, 'utf8') }],
+        };
+      }
+    }
+    throw new Error('Logo asset not found — is the package intact?');
   }
 
   throw new Error(`Resource not found: ${request.params.uri}`);
@@ -400,9 +422,28 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
                 requireExactText: { type: "boolean", description: "Require candidate labels to include intent terms." }
               }
             },
-            agentId: { type: "string", description: "Optional agent identifier for per-agent tracking and in-action optimization." }
+            agentId: { type: "string", description: "Optional agent identifier for per-agent tracking and in-action optimization." },
+            optimizeIntent: { type: "boolean", description: "Per-call permission to optimize the intent before compiling: strip conversational filler, ground the target against the page's visible labels, and separate typed values into `value`. The rewrite is reported in plan.intentOptimization with the original preserved. Standing permission: promptOptimization: true in splice.config.json." }
           },
           required: ["intent"],
+        },
+      },
+      {
+        name: "run_accessibility_audit",
+        description: "Deterministic WCAG accessibility audit of the active page: image alt text, form control labels, accessible names on buttons/links, document language and title, heading order, AA color contrast, positive tabindex, duplicate ids, and focusables inside aria-hidden trees. Returns a 0–100 score, findings worst-first with WCAG criteria and concrete fixes, the rules that passed, and agentImpact — how each failure class degrades agent operation on this page (unlabeled controls break label-based targeting; nameless buttons vanish from intent ranking). Run it on pages you operate to hand back a fix list, or when a page resists automation to learn why.",
+        annotations: { title: "Accessibility Audit", readOnlyHint: true },
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "optimize_prompt",
+        description: "Prompt optimizer (suggestion only — changes nothing by itself). Rewrites a verbose or conversational prompt into the structured intent Splice ranks best: strips courtesy filler and hedges, normalizes verbs, separates input values from the intent, grounds the target against the page's actual visible labels (quoting the exact on-page text), and detects when a one-call primitive (fill_form, wait_for, extract_structured, assert_page_state) fits the job better than a compiled action — returning ready-to-use args for it. Deterministic and offline: no model calls, no data leaves the machine. Use the result yourself, or grant permission to apply it automatically via optimizeIntent: true on compile_verified_action (per call) or promptOptimization: true in splice.config.json (standing).",
+        annotations: { title: "Optimize Prompt", readOnlyHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {
+            prompt: { type: "string", description: "The raw prompt or intent to optimize, e.g. 'Could you please click on the Create Account button for me?'" },
+          },
+          required: ["prompt"],
         },
       },
       {
@@ -1001,10 +1042,21 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
     }
 
     if (request.params.name === "compile_verified_action") {
-      const { intent, value, constraints, execute, includeVision, compact, expect } = request.params.arguments as any;
-      const plan = await browser.compileVerifiedAction({ intent, value, constraints, execute: execute === true, includeVision: typeof includeVision === 'boolean' ? includeVision : undefined, expect: Array.isArray(expect) ? expect : undefined });
+      const { intent, value, constraints, execute, includeVision, compact, expect, optimizeIntent } = request.params.arguments as any;
+      const plan = await browser.compileVerifiedAction({ intent, value, constraints, execute: execute === true, includeVision: typeof includeVision === 'boolean' ? includeVision : undefined, expect: Array.isArray(expect) ? expect : undefined, optimizeIntent: typeof optimizeIntent === 'boolean' ? optimizeIntent : undefined });
       const payload = compact === true ? compactVerifiedPlan(plan) : plan;
       return { content: [{ type: "text", text: JSON.stringify(payload, null, 2) }] };
+    }
+
+    if (request.params.name === "run_accessibility_audit") {
+      const report = await browser.runAccessibilityAudit();
+      return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
+    }
+
+    if (request.params.name === "optimize_prompt") {
+      const { prompt } = request.params.arguments as { prompt: string };
+      const optimization = await browser.optimizeIntent(prompt);
+      return { content: [{ type: "text", text: JSON.stringify(optimization, null, 2) }] };
     }
 
     if (request.params.name === "fork_state") {

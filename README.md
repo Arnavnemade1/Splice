@@ -1,6 +1,6 @@
 <div align="center">
 
-# Splice
+<img src="assets/logo.svg" alt="Splice — two strands spliced into one" width="440">
 
 ### Browser cognition infrastructure for autonomous coding agents
 
@@ -279,6 +279,10 @@ Patterns decay over time: a pattern's rank halves every 14 days without a fresh 
 - Encrypted session snapshots with AES-256-GCM
 - Extended security audit: scans for unsecured OpenClaw ports, DOM-level WebSocket script injections, and unverified high-privilege workspace skills
 
+### Accessibility Audits
+
+`run_accessibility_audit` runs deterministic WCAG checks against the live page — image alt text, control labels, accessible names, document language/title, heading order, AA color contrast, focus order, duplicate ids, focusables inside `aria-hidden` — and returns a 0–100 score with findings worst-first, each carrying its WCAG criterion and the concrete fix. The report's `agentImpact` section explains the part product teams usually miss: **inaccessible pages are hard for agents too**. Unlabeled controls break label-based form filling; nameless buttons vanish from intent ranking. Fixing the audit's findings makes a page better for assistive tech and for every agent that operates it. The regression suite pins both directions — a seeded page must trip every rule, and a clean page must produce zero false positives.
+
 ### Session Isolation & Parallel Identities
 
 Drive many accounts at once without cross-contamination. A **session** is a named, parallel, isolated browser identity — one per account — and each one gets:
@@ -404,6 +408,19 @@ node dist/cli.js start    # run the MCP server (stdio)
 ```
 
 `splice init` prints ready-to-paste configuration for Claude Code, Claude Desktop, and Cursor, so wiring Splice into a client is copy/paste rather than hand-written JSON. `splice doctor` catches the common setup failures (missing Chromium, unbuilt dist, occupied gateway port) before your agent hits them. (When installed as a dependency, the same commands are available as the `splice` binary.)
+
+### Agents: Install It Yourself
+
+Splice is designed to be **installed by the agent that will use it**. Point any coding agent at [AGENT_INSTALL.md](AGENT_INSTALL.md) — every step is a deterministic command with a machine-checkable success criterion, ending with `splice doctor --json` reporting `"healthy": true` (an agent must never report success without it). The short version an agent can execute unassisted:
+
+```bash
+npm install splice
+npx splice init                                  # scaffold config + print client snippets
+claude mcp add splice -- npx -y splice start     # Claude Code registration, one line
+npx splice doctor --json                         # verify: "healthy": true
+```
+
+A repo-root [llms.txt](llms.txt) gives crawling agents the same path, and once connected, the `splice://guide/agent-playbook` MCP resource teaches the cognition loop from inside the session.
 
 ### The Splice CLI
 
@@ -552,6 +569,7 @@ Alongside the main validation run, Splice ships a synthetic fixture pack ([fixtu
 - **Late content** — skeleton screens that resolve after a delay, incremental load-more, and a stalled variant that never resolves
 - **Re-render churn** — a list re-mounted with identical content on a timer, plus a text ticker mutating constantly
 - **Overlay stack** — a modal stacked above a cookie banner, both blocking the primary action
+- **Accessibility lab** — one seeded violation per WCAG audit rule, plus a fully clean variant that acts as a false-positive tripwire
 
 The regression suite ([regression.ts](regression.ts)) drives the cognition APIs (`diagnose_agent_state`, `wait_for`, `fill_form`, `compile_verified_action`, semantic deltas, `assert_page_state`) against these pages so behavior changes surface as deterministic failures instead of production incidents. It writes a JSON report to `.splice/`.
 
@@ -561,6 +579,17 @@ It also proves the long-horizon story end to end: a multi-cycle endurance traver
 npm run test:regression   # regression suite only
 npm run test:all          # main validation + regression suite
 ```
+
+### Prompt Optimization (with permission)
+
+Verbose, conversational prompts waste tokens on every call and rank worse in candidate scoring than terse, grounded intents. The prompt optimizer rewrites them — deterministically, offline, no model calls:
+
+- **Compression** — courtesy filler, hedges, and redundant context are stripped: `"Could you please click on the Create Account button for me? Thanks!"` → `click "Create account"`
+- **Grounding** — the target is matched against the page's *actual* visible labels and replaced with the exact on-page text, quoted — precisely what candidate ranking scores highest
+- **Value separation** — `"type agent@example.com into the work email field"` becomes intent `type into "Work email"` plus a separate `value`, the form compilation ranks best
+- **Tool routing** — prompts that describe a job for a one-call primitive are detected and redirected with ready-to-use args: `"wait until the receipt appears"` → `wait_for`, `"verify that the order total is $49"` → `assert_page_state`, `"extract the plan names and prices"` → `extract_structured`, multi-field prompts → `fill_form`. Control actions (`"check the terms checkbox"`) and keyboard actions (`"press Enter"`) are correctly left alone.
+
+Permission is explicit at every level. `optimize_prompt` only *suggests* — it changes nothing. To apply automatically inside `compile_verified_action`, grant permission per call (`optimizeIntent: true`) or as standing config (`promptOptimization: true` in `splice.config.json` / `SPLICE_PROMPT_OPTIMIZATION=1`). Applied rewrites are never silent: the plan carries `intentOptimization` with the original prompt, every transformation applied, and the tokens saved — and each rewrite lands in the behavior log, so behavior reports show exactly how prompts were adjusted.
 
 ### Behavior Reports & Recursive Self-Improvement
 
@@ -596,6 +625,7 @@ Every variable (except secrets and `SPLICE_CONFIG` itself) has a `splice.config.
 | `SPLICE_WATCH_MODE` | `watchMode` | `0` | Set to `1` to launch a visible Chromium window instead of headless. |
 | `DISCORD_WEBHOOK_URL` | `discordWebhookUrl` | _(unset)_ | Full Discord webhook URL for automated event notifications. _(on hold)_ |
 | `SPLICE_TELEMETRY_URL` | `telemetryUrl` | _(unset)_ | Opt-in endpoint for anonymized recovery-pattern telemetry (hashed domain, state, action kind — never URLs, selectors, or page content). Unset means nothing is sent. |
+| `SPLICE_PROMPT_OPTIMIZATION` | `promptOptimization` | `0` | Standing permission to optimize intents inside `compile_verified_action` (strip filler, ground targets, separate values). Off by default; rewrites are always reported back with the original preserved. |
 | `SPLICE_ENCRYPTION_KEY` | _(env-only by design)_ | _(auto-generated)_ | Hex key for the snapshot vault. Never read from the config file. |
 
 ---
@@ -608,7 +638,8 @@ Core browser tools:
 - `get_semantic_tree_optimized` — full tree, or only what changed via `deltaOnly` / `lastSnapshotHash` / `structuralOnly`
 - `interact` — click/type/focus/select/press plus hover, clear, check, uncheck, scroll_into_view
 - `diagnose_agent_state`
-- `compile_verified_action` — pass `compact: true` for a token-trimmed response
+- `compile_verified_action` — pass `compact: true` for a token-trimmed response, `optimizeIntent: true` to permit prompt optimization for that call
+- `optimize_prompt` — suggestion-only prompt rewrite: compression, on-page grounding, value separation, and one-call-primitive routing (see [Prompt Optimization](#prompt-optimization-with-permission))
 - `wait_for` — block until a semantic condition holds; one call replaces N polling observations
 - `fill_form` — batch verified form fill with per-field readback and validation reporting
 - `extract_structured` — schema-driven rows from tables, repeated cards, or label/value pairs
@@ -633,6 +664,7 @@ Session isolation tools:
 Safety and observability tools:
 
 - `run_security_audit`
+- `run_accessibility_audit` — deterministic WCAG audit: scored findings worst-first with fix guidance, plus how each failure degrades agent operation
 - `scan_local_secrets`
 - `debug_failure`
 - `generate_observability_report`

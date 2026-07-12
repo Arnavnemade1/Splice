@@ -259,6 +259,59 @@ function obstructionStackPage(): string {
   </script>`);
 }
 
+/**
+ * Accessibility lab. Seeded variant plants one violation per audit rule;
+ * clean variant follows every rule — a false-positive tripwire for the audit.
+ */
+function accessibilityPage(clean: boolean): string {
+  if (clean) {
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Fixture: Accessible Page</title>
+  <style>${baseStyles} body { color: #101820; background: #ffffff; }</style>
+</head>
+<body>
+  <main>
+    <h1>Accessible dashboard</h1>
+    <h2>Account</h2>
+    <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="Company wordmark" width="16" height="16">
+    <form>
+      <label for="clean-email">Email address</label>
+      <input id="clean-email" type="email" name="email">
+      <button type="submit">Save changes</button>
+    </form>
+    <a href="/a11y">Back to the lab</a>
+  </main>
+</body>
+</html>`;
+  }
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Fixture: Inaccessible Page</title>
+  <style>${baseStyles} .dim-text { color: #999999; background: #ffffff; }</style>
+</head>
+<body>
+  <main>
+    <h3>Broken outline starts at h3</h3>
+    <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="16" height="16">
+    <form>
+      <input id="orphan" type="text" name="orphan">
+      <button type="button"></button>
+    </form>
+    <p class="dim-text">Low contrast body copy that fails WCAG AA.</p>
+    <span tabindex="5">Focus-order hijacker</span>
+    <div id="dupe">first</div>
+    <div id="dupe">second</div>
+    <div aria-hidden="true"><button type="button">Hidden but focusable</button></div>
+  </main>
+</body>
+</html>`;
+}
+
 function indexPage(): string {
   return pageShell('Splice Synthetic Fixtures', `
   <main>
@@ -269,6 +322,7 @@ function indexPage(): string {
       <li><a href="/late">Late content</a> (<a href="/late?stall=1">stalled</a>)</li>
       <li><a href="/rerender">Re-render churn</a></li>
       <li><a href="/obstruct">Overlay stack</a></li>
+      <li><a href="/a11y">Accessibility lab</a> (<a href="/a11y?clean=1">clean</a>)</li>
     </ul>
   </main>`);
 }
@@ -289,6 +343,7 @@ export function startSyntheticFixtureServer(): Promise<SyntheticFixtureServer> {
     else if (route.startsWith('/late')) html = lateContentPage(requestUrl.searchParams.get('stall') === '1');
     else if (route.startsWith('/rerender')) html = rerenderChurnPage();
     else if (route.startsWith('/obstruct')) html = obstructionStackPage();
+    else if (route.startsWith('/a11y')) html = accessibilityPage(requestUrl.searchParams.get('clean') === '1');
     else html = indexPage();
     res.writeHead(200, {
       'content-type': 'text/html; charset=utf-8',

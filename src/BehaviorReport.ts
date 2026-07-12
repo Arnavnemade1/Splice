@@ -138,6 +138,8 @@ export function summarizeEvent(event: BehaviorEvent): string {
       return `asserted ${d.expectations} postcondition(s) → ${d.passed ? 'all hold' : `FAILED: ${str(d.summary, 100)}`}`;
     case 'execute_script':
       return `ran script: ${str(d.script, 70)}`;
+    case 'prompt_optimized':
+      return `optimized prompt "${str(d.original, 60)}" → "${str(d.optimized, 60)}"${d.routedTo ? ` [routed to ${str(d.routedTo)}]` : ''}${d.groundedTo ? ` [grounded to "${str(d.groundedTo, 40)}"]` : ''}`;
     case 'speculative_delta':
       return `speculative branch ${str(d.branchId)}: ${str(d.summary, 100)}`;
     default:

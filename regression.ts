@@ -241,6 +241,125 @@ async function main() {
       return 'modal closed, banner dismissed, primary action verified';
     });
 
+    // ── Prompt optimization: compression, grounding, routing, permission ──
+
+    await step('Prompt optimizer: grounds verbose prompts against real page labels', async () => {
+      await browser.navigate(`${fixture.url}/form`);
+      const clicky = await browser.optimizeIntent('Could you please click on the create account button for me? Thanks!');
+      if (clicky.optimized !== 'click "Create account"') throw new Error(`Bad rewrite: ${JSON.stringify(clicky)}`);
+      if (clicky.groundedTo !== 'Create account') throw new Error(`Target not grounded: ${JSON.stringify(clicky)}`);
+      if (clicky.estimatedTokensSaved < 5) throw new Error(`Compression under-credited: ${clicky.estimatedTokensSaved}.`);
+      const typed = await browser.optimizeIntent('please type agent@example.com into the work email field');
+      if (typed.value !== 'agent@example.com') throw new Error(`Value not separated: ${JSON.stringify(typed)}`);
+      if (!typed.optimized.startsWith('type into "')) throw new Error(`Type intent malformed: ${typed.optimized}`);
+      return `"${clicky.original.slice(0, 40)}…" → ${clicky.optimized} (~${clicky.estimatedTokensSaved} tokens saved)`;
+    });
+
+    await step('Prompt optimizer: routes prompts to the right one-call primitive', async () => {
+      const wait = await browser.optimizeIntent('wait until the receipt appears');
+      if (wait.toolSuggestion?.tool !== 'wait_for') throw new Error(`Wait prompt not routed: ${JSON.stringify(wait.toolSuggestion)}`);
+      const assert = await browser.optimizeIntent('verify that the order total is $49');
+      if (assert.toolSuggestion?.tool !== 'assert_page_state') throw new Error(`Assertion prompt not routed: ${JSON.stringify(assert.toolSuggestion)}`);
+      const action = await browser.optimizeIntent('check the agree to terms checkbox');
+      if (action.toolSuggestion) throw new Error(`Control action misrouted as assertion: ${JSON.stringify(action.toolSuggestion)}`);
+      const extract = await browser.optimizeIntent('extract the plan names and prices');
+      if (extract.toolSuggestion?.tool !== 'extract_structured') throw new Error(`Extraction prompt not routed: ${JSON.stringify(extract.toolSuggestion)}`);
+      const form = await browser.optimizeIntent('fill in the form with email as a@b.com and name as Ada');
+      const fields = form.toolSuggestion?.args?.fields as Array<{ field: string; value: string }> | undefined;
+      if (form.toolSuggestion?.tool !== 'fill_form' || fields?.length !== 2 || fields[1].field !== 'name') {
+        throw new Error(`Form prompt not routed cleanly: ${JSON.stringify(form.toolSuggestion)}`);
+      }
+      const key = await browser.optimizeIntent('press Enter');
+      if (key.optimized !== 'press Enter') throw new Error(`Keyboard action mangled: ${key.optimized}`);
+      return 'wait_for, assert_page_state, extract_structured, fill_form routed; control actions and key presses untouched';
+    });
+
+    await step('Prompt optimizer: permission gates who rewrites what', async () => {
+      await browser.navigate(`${fixture.url}/obstruct`);
+      await browser.executeScript(`document.getElementById('newsletter')?.remove(); document.getElementById('cookie-banner')?.remove()`);
+      // Without permission: the verbose prompt reaches compilation verbatim.
+      const untouched = await browser.compileVerifiedAction({ intent: 'please click on the "Continue to dashboard" button' });
+      if (untouched.intentOptimization) throw new Error('Intent was rewritten without permission.');
+      // Per-call permission: rewrite applied, executed, and reported with the original.
+      const optimized = await browser.compileVerifiedAction({
+        intent: 'Could you please click on the continue to dashboard button for me?',
+        execute: true,
+        optimizeIntent: true,
+        expect: [{ kind: 'url_contains', value: '/obstruct/dashboard' }],
+      });
+      if (!optimized.intentOptimization) throw new Error('Per-call permission did not apply the optimization.');
+      if (optimized.intentOptimization.original !== 'Could you please click on the continue to dashboard button for me?') {
+        throw new Error('Original prompt was not preserved in the plan.');
+      }
+      if (!optimized.verification?.executed || !optimized.verification.passed) {
+        throw new Error(`Optimized intent did not verify: ${JSON.stringify(optimized.verification)}`);
+      }
+      if (!optimized.evidence.some((e) => e.includes('Intent optimized'))) throw new Error('Rewrite missing from plan evidence.');
+      // Standing permission (config): same path, no per-call flag.
+      await browser.navigate(`${fixture.url}/form`);
+      browser.promptOptimizationAuto = true;
+      try {
+        const standing = await browser.compileVerifiedAction({ intent: 'please type agent@example.com into the work email field', execute: true });
+        if (!standing.intentOptimization) throw new Error('Standing permission did not apply the optimization.');
+        if (!standing.verification?.executed) throw new Error('Standing-permission action was not executed.');
+        const emailValue = await browser.executeScript(`document.getElementById('email').value`);
+        if (emailValue !== 'agent@example.com') throw new Error(`Separated value not typed: "${emailValue}".`);
+      } finally {
+        browser.promptOptimizationAuto = false;
+      }
+      return `verbatim without permission; rewritten + verified with per-call and standing permission`;
+    });
+
+    await step('Prompt optimizer: splits sequential chains and routes navigation/login', async () => {
+      const chain = await browser.optimizeIntent('type agent@example.com into the work email field, then click the create account button');
+      if (!chain.steps || chain.steps.length !== 2) throw new Error(`Chain not split: ${JSON.stringify(chain.steps)}`);
+      if (chain.steps[0].value !== 'agent@example.com') throw new Error(`Step 1 lost its value: ${JSON.stringify(chain.steps[0])}`);
+      if (!chain.steps[1].intent.startsWith('click')) throw new Error(`Step 2 malformed: ${chain.steps[1].intent}`);
+      const nav = await browser.optimizeIntent('go to example.com/pricing');
+      if (nav.toolSuggestion?.tool !== 'navigate' || (nav.toolSuggestion.args as any)?.url !== 'https://example.com/pricing') {
+        throw new Error(`Navigation prompt not routed: ${JSON.stringify(nav.toolSuggestion)}`);
+      }
+      const login = await browser.optimizeIntent('log in with alice@example.com and password hunter2');
+      const loginArgs = login.toolSuggestion?.args as any;
+      if (login.toolSuggestion?.tool !== 'fill_form' || loginArgs?.fields?.[1]?.field !== 'password') {
+        throw new Error(`Login prompt not routed: ${JSON.stringify(login.toolSuggestion)}`);
+      }
+      // A multi-step rewrite must never be auto-applied by a single compile call.
+      const applied = await browser.compileVerifiedAction({
+        intent: 'click "Products", then click "Quarterly reports"',
+        optimizeIntent: true,
+      });
+      if (applied.intentOptimization) throw new Error('Multi-step chain was auto-applied to a single compile call.');
+      return 'chains split with per-step values; navigate + login routed; multi-step auto-apply refused';
+    });
+
+    // ── Accessibility: seeded violations detected, clean page stays clean ──
+
+    await step('Accessibility audit: every seeded violation class is detected', async () => {
+      await browser.navigate(`${fixture.url}/a11y`);
+      const report = await browser.runAccessibilityAudit();
+      const rules = new Set(report.findings.map((f) => f.rule));
+      const expected = ['image-alt', 'control-label', 'accessible-name', 'document-language', 'heading-order', 'color-contrast', 'positive-tabindex', 'duplicate-id', 'aria-hidden-focus'];
+      const missed = expected.filter((r) => !rules.has(r));
+      if (missed.length > 0) throw new Error(`Rules missed their seeded violations: ${missed.join(', ')} (found: ${[...rules].join(', ')})`);
+      if (report.score >= 60) throw new Error(`Seeded page scored too well: ${report.score}.`);
+      if (report.findings[0].severity !== 'critical') throw new Error('Findings are not ordered worst-first.');
+      if (!report.findings.every((f) => f.wcag && f.fix)) throw new Error('Findings missing WCAG mapping or fix guidance.');
+      if (!report.agentImpact.includes('fill_form') && !report.agentImpact.includes('intent ranking')) {
+        throw new Error(`Agent impact analysis missing: ${report.agentImpact}`);
+      }
+      return `${report.findings.length} finding(s) across ${rules.size} rules, score ${report.score}/100`;
+    });
+
+    await step('Accessibility audit: a clean page produces zero false positives', async () => {
+      await browser.navigate(`${fixture.url}/a11y?clean=1`);
+      const report = await browser.runAccessibilityAudit();
+      if (report.findings.length !== 0) throw new Error(`False positives on the clean page: ${JSON.stringify(report.findings.map((f) => `${f.rule}: ${f.element}`))}`);
+      if (report.score !== 100) throw new Error(`Clean page should score 100, got ${report.score}.`);
+      if (report.passedRules.length < 9) throw new Error(`Expected all rules reported as passed, got ${report.passedRules.length}.`);
+      return `score 100/100, ${report.passedRules.length} rules verified clean`;
+    });
+
     // ── Long-horizon endurance: repeated traversal must stay healthy ──
 
     const ENDURANCE_CYCLES = 3;

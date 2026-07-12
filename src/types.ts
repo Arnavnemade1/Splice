@@ -388,6 +388,17 @@ export interface VerifiedActionPlan {
   delta?: SemanticDelta;
   /** Anchor id of the executed action — usable as sinceLastActionId in later delta calls. */
   actionId?: string;
+  /**
+   * Present when the intent was optimized before compilation (per-call
+   * optimizeIntent: true, or promptOptimization in config). The original is
+   * preserved so the rewrite is never silent.
+   */
+  intentOptimization?: {
+    original: string;
+    optimized: string;
+    transformations: string[];
+    estimatedTokensSaved: number;
+  };
 }
 
 // ─── Multi-Agent Collaboration Types ───────────────────────────────────────
