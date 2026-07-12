@@ -46,7 +46,9 @@ One-call primitives — reach for these before composing loops yourself:
 
 Guardrails that are always on: prompt-injection redaction in semantic trees, a secret egress firewall on non-GET requests, encrypted snapshots, and a crash-self-healing browser (get_runtime_health shows recovery state).
 
-Efficiency: pass intent + maxTokens to get_semantic_tree_optimized to prune the DOM; after the first read, pass deltaOnly: true (with the same intent) to receive only what changed since your last observation instead of the whole tree; actions return an actionId (act-N) — pass it as sinceLastActionId to diff against the moment right after that action, with framework re-renders reported as rewrittenIds instead of add/remove noise; pass agentId on calls to get per-agent tracking and in-action optimization directives; use fork_state to test risky actions on a shadow branch before committing.`;
+Efficiency: pass intent + maxTokens to get_semantic_tree_optimized to prune the DOM; after the first read, pass deltaOnly: true (with the same intent) to receive only what changed since your last observation instead of the whole tree; actions return an actionId (act-N) — pass it as sinceLastActionId to diff against the moment right after that action, with framework re-renders reported as rewrittenIds instead of add/remove noise; pass agentId on calls to get per-agent tracking and in-action optimization directives; use fork_state to test risky actions on a shadow branch before committing.
+
+Self-improvement loop for long runs: call **generate_behavior_report** at the end of every run — and every ~50 actions on long traversals. It reconstructs your chain of thought (observations → diagnoses → plans → actions → outcomes, grouped into navigation episodes), scores your verification rate and observation economy, and returns prioritized selfImprovement recommendations. Apply them immediately: they are computed from your own behavior this session, not generic advice. The report is also persisted to .splice/behavior/ so your next session can start by reading the previous one. Offline, \`splice report\` analyzes any persisted run journal the same way.`;
 
 const server = new Server(
   {
@@ -440,6 +442,65 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "create_session",
+        description: "Session Isolation: spawn (or attach to) a named, parallel, isolated browser identity — one per account. Each session gets its OWN cookies and storage (never shared with other sessions) and its OWN deterministic fingerprint (distinct, stable UA/platform/WebGL/timezone). Any saved login for the account is restored automatically. Idempotent by name. Becomes the active branch; subsequent navigate/interact/read calls run inside it until you switch. Use this to drive multiple accounts in parallel without cross-contamination.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Account identity name, e.g. 'acme-admin'. Doubles as the stable identity handle." },
+            label: { type: "string", description: "Optional human-readable label." },
+            seed: { type: "string", description: "Optional fingerprint seed. Same seed → same identity; defaults to the name. Override to decouple fingerprint from name." },
+            url: { type: "string", description: "Optional URL to navigate the new session to immediately." },
+            persistent: { type: "boolean", description: "Whether the login may be saved to disk (default true). Set false for ephemeral identities." },
+            agentId: { type: "string", description: "Optional agent that will own the session branch." },
+          },
+          required: ["name"],
+        },
+      },
+      {
+        name: "switch_session",
+        description: "Session Isolation: make an existing session the active branch. Respawns the identity (same fingerprint + saved login) if it went dormant after a restart. All following browser calls run inside that account.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "The session/account name to switch to." },
+          },
+          required: ["name"],
+        },
+      },
+      {
+        name: "list_sessions",
+        description: "Session Isolation: list every account identity — live and dormant — with its fingerprint summary, saved-login status, current URL, and which one is active.",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "save_session",
+        description: "Session Isolation: persist a session's cookies + storage (its login) to an encrypted file so it survives a restart. Defaults to the active session.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Session to save. Omit to save the active session." },
+          },
+        },
+      },
+      {
+        name: "destroy_session",
+        description: "Session Isolation: tear down a session — close its isolated context and remove it from the registry. Set purge to also delete its saved login from disk.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "The session/account name to destroy." },
+            purge: { type: "boolean", description: "Also delete the saved login file from disk (default false)." },
+          },
+          required: ["name"],
+        },
+      },
+      {
+        name: "get_stealth_profile",
+        description: "Return the active branch's coherent fingerprint plus the Web Bot Auth directory (an Ed25519 JWK Set). Publish the directory at your Signature-Agent URL so cooperative origins can verify Splice's signed requests and grant access without a CAPTCHA.",
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
         name: "save_snapshot",
         description: "Serialize the active session (cookies, auth) to the local machine so it can be resumed instantly.",
         inputSchema: {
@@ -498,6 +559,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         name: "generate_observability_report",
         description: "Generate a high-aesthetic HTML dashboard with auto-refresh every 5s showing micro-snapshots and metrics.",
         inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "generate_behavior_report",
+        description: "Self-improvement digest: reconstructs this session's chain of thought (every observation, diagnosis, plan, action, wait, and assertion, grouped into navigation episodes), scores action quality (verification rate, clarifications, self-heals), failure patterns (stuck signals, unresolved end states), and observation economy (delta adoption, redundant reads, wait timeouts), then returns prioritized recommendations for what to do differently. Call it at the end of a run — or periodically during long traversals — and apply the selfImprovement section to your own strategy. Also written to .splice/behavior/ as JSON + markdown for the next session to read.",
+        annotations: { title: "Behavior Report (Self-Improvement)", readOnlyHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {
+            includeNarrative: { type: "boolean", description: "Include the full chain-of-thought narrative lines in the response (default true). Set false on very long runs to receive only the scores, analyses, and recommendations." },
+          },
+        },
       },
       {
         name: "capture_annotated_screenshot",
@@ -958,6 +1030,38 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
       return { content: [{ type: "text", text: `Active branch is now ${branchId}.` }] };
     }
 
+    if (request.params.name === "create_session") {
+      const { name, label, seed, url, persistent, agentId } = request.params.arguments as any;
+      const summary = await browser.createSession(name, { label, seed, url, persistent, agentId });
+      return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
+    }
+
+    if (request.params.name === "switch_session") {
+      const { name } = request.params.arguments as { name: string };
+      const summary = await browser.switchSession(name);
+      return { content: [{ type: "text", text: JSON.stringify(summary, null, 2) }] };
+    }
+
+    if (request.params.name === "list_sessions") {
+      return { content: [{ type: "text", text: JSON.stringify(browser.listSessions(), null, 2) }] };
+    }
+
+    if (request.params.name === "save_session") {
+      const { name } = (request.params.arguments as any) || {};
+      const summary = await browser.saveSession(name);
+      return { content: [{ type: "text", text: `Saved login for session "${summary.name}".\n${JSON.stringify(summary, null, 2)}` }] };
+    }
+
+    if (request.params.name === "destroy_session") {
+      const { name, purge } = request.params.arguments as { name: string; purge?: boolean };
+      const result = await browser.destroySession(name, { purge: purge === true });
+      return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
+    }
+
+    if (request.params.name === "get_stealth_profile") {
+      return { content: [{ type: "text", text: JSON.stringify(browser.getStealthProfile(), null, 2) }] };
+    }
+
     if (request.params.name === "save_snapshot") {
       const { name } = request.params.arguments as { name: string };
       const path = await browser.saveSnapshot(name);
@@ -991,6 +1095,20 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
     if (request.params.name === "generate_observability_report") {
       const reportPath = await browser.generateObservabilityReport();
       return { content: [{ type: "text", text: `Observability Dashboard generated at: ${reportPath}. Open this file in your browser to visualize the agent's processes.` }] };
+    }
+
+    if (request.params.name === "generate_behavior_report") {
+      const { includeNarrative } = (request.params.arguments as { includeNarrative?: boolean }) || {};
+      const { digest, jsonPath, markdownPath } = browser.generateBehaviorReport();
+      const payload = includeNarrative === false ? { ...digest, narrative: undefined, episodes: undefined } : digest;
+      return {
+        content: [{
+          type: "text",
+          text: `Behavior report written to ${jsonPath} (JSON) and ${markdownPath} (markdown).\n` +
+            `Apply the selfImprovement section to your strategy for the rest of this run and the next one.\n\n` +
+            JSON.stringify(payload, null, 2),
+        }],
+      };
     }
 
     if (request.params.name === "capture_annotated_screenshot") {

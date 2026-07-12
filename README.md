@@ -279,6 +279,25 @@ Patterns decay over time: a pattern's rank halves every 14 days without a fresh 
 - Encrypted session snapshots with AES-256-GCM
 - Extended security audit: scans for unsecured OpenClaw ports, DOM-level WebSocket script injections, and unverified high-privilege workspace skills
 
+### Session Isolation & Parallel Identities
+
+Drive many accounts at once without cross-contamination. A **session** is a named, parallel, isolated browser identity — one per account — and each one gets:
+
+- **Isolated cookies and storage.** Every session runs in its own browser context; cookies, `localStorage`, and `sessionStorage` are never shared between accounts.
+- **A distinct, deterministic fingerprint.** Each identity resolves to its own coherent UA, platform, viewport, timezone, locale, hardware, and WebGL strings — stable across restarts (so an account keeps one identity) and different from every other account. Applied at the CDP layer so it survives page reloads and crash-recovery rebuilds.
+- **Persistent logins.** Save a session's cookies + storage to an encrypted file and it survives a process restart; respawn the identity and the login is restored.
+
+Spawn and manage identities from the CLI (no browser needed — it just registers the identity, which spawns on the next run):
+
+```bash
+splice session add acme-admin --label "ACME admin"   # register an identity
+splice session add acme-user  --seed customer-42      # decouple fingerprint from name
+splice session ls                                     # list identities + fingerprints
+splice session rm acme-user --purge                   # remove + delete saved login
+```
+
+Or drive them at runtime with the MCP tools `create_session`, `switch_session`, `list_sessions`, `save_session`, and `destroy_session`. `get_stealth_profile` returns the active identity's fingerprint plus the Web Bot Auth directory (an Ed25519 JWK Set) that cooperative origins can use to verify Splice's signed requests without a CAPTCHA.
+
 ### Command Center
 
 The local dashboard turns a browser run into an inspectable operations console:
@@ -394,6 +413,8 @@ node dist/cli.js start    # run the MCP server (stdio)
 | `splice init [--force] [--openclaw] [--dashboard]` | Scaffold `splice.config.json` and print MCP client snippets. Refuses to overwrite without `--force`. |
 | `splice doctor [--json]` | Health-check the environment: Node version, build, Chromium install, workspace writability, dashboard template, config validity, gateway port. Exits non-zero on failure. |
 | `splice config [--json]` | Print the effective configuration and whether each value came from an env var, the config file, or a default. |
+| `splice session ls \| add <name> \| rm <name>` | Manage isolated per-account browser identities. `add` registers an identity (spawns on the next run); `--seed`, `--label`, `--ephemeral` tune it; `rm --purge` deletes the saved login. |
+| `splice report [journal] [--json]` | Analyze agent behavior from a persisted run journal: per-tool call/error rates, error timelines with the calls that preceded each failure, and self-improvement recommendations. Defaults to the newest journal in `./.splice/journal/`. |
 
 ### Configuration
 
@@ -522,6 +543,45 @@ The validation covers:
 
 The command prints the exact report paths when it finishes.
 
+### Synthetic Regression Suite
+
+Alongside the main validation run, Splice ships a synthetic fixture pack ([fixtures/pages.ts](fixtures/pages.ts)) — five local pages that each reproduce a known real-world failure pattern:
+
+- **Dynamic menus** — submenu items enter the DOM only after the trigger is clicked, with an async render delay
+- **Form validation** — an async server-side email availability check, sync password rules, and a submit gated on all of them
+- **Late content** — skeleton screens that resolve after a delay, incremental load-more, and a stalled variant that never resolves
+- **Re-render churn** — a list re-mounted with identical content on a timer, plus a text ticker mutating constantly
+- **Overlay stack** — a modal stacked above a cookie banner, both blocking the primary action
+
+The regression suite ([regression.ts](regression.ts)) drives the cognition APIs (`diagnose_agent_state`, `wait_for`, `fill_form`, `compile_verified_action`, semantic deltas, `assert_page_state`) against these pages so behavior changes surface as deterministic failures instead of production incidents. It writes a JSON report to `.splice/`.
+
+It also proves the long-horizon story end to end: a multi-cycle endurance traversal repeats every fixture journey and asserts zero crashes and undegraded verification, then `generate_behavior_report` must reconstruct the entire chain of thought — every episode, intent, diagnosis, and outcome — with a 100% verification score and well-formed recommendations.
+
+```bash
+npm run test:regression   # regression suite only
+npm run test:all          # main validation + regression suite
+```
+
+### Behavior Reports & Recursive Self-Improvement
+
+Splice records every cognition event — observations, deltas, diagnoses, compiled plans, actions, waits, assertions — into a bounded in-session behavior log. `generate_behavior_report` (MCP tool, OpenClaw command, or `browser.generateBehaviorReport()`) turns that log into a self-improvement digest:
+
+- **Chain of thought** — the session reconstructed as navigation-bounded episodes: what the agent saw, decided, did, and whether it verified, in order with timing offsets
+- **Action quality** — plans compiled vs executed vs verified, clarification bounces, self-healed stale targets
+- **Failure analysis** — how often each failure class was diagnosed, stuck signals, whether learned recoveries were surfaced, and any unresolved end state
+- **Observation economy** — full-tree vs delta reads, redundant tokens re-sent, wait timeouts vs successes
+- **`selfImprovement`** — prioritized recommendations computed from this session's own behavior (not generic advice), each with the observation, the change to make, and the evidence
+
+The digest is returned to the caller **and** persisted to `.splice/behavior/` as JSON + markdown, so the loop closes recursively: an agent calls it at the end of a run (or every ~50 actions on long traversals), applies the recommendations immediately, and the next session starts by reading the previous digest. Combined with recovery memory (learned fixes resurface in diagnoses) and the run journal (exact replay of what happened), each run makes the next one better.
+
+For offline analysis — CI, post-mortems, sessions that already ended — `splice report` digests any persisted run journal: per-tool call/error rates and durations, error timelines with the exact calls that preceded each failure, and the same style of recommendations.
+
+```bash
+splice report                 # newest journal in ./.splice/journal/
+splice report path/to.jsonl   # a specific run
+splice report --json          # machine-readable, for feeding back to an agent
+```
+
 ### Environment Variables
 
 Every variable (except secrets and `SPLICE_CONFIG` itself) has a `splice.config.json` equivalent; env vars always win when both are set.
@@ -561,12 +621,22 @@ Core browser tools:
 - `save_snapshot`
 - `load_snapshot`
 
+Session isolation tools:
+
+- `create_session` — spawn or attach to a named, isolated per-account identity (own cookies, storage, and fingerprint); restores any saved login
+- `switch_session` — make an existing identity active, respawning it if dormant
+- `list_sessions` — every identity, live and dormant, with fingerprint summary and saved-login status
+- `save_session` — persist a session's login to an encrypted file so it survives a restart
+- `destroy_session` — tear down a session; `purge` also deletes its saved login
+- `get_stealth_profile` — active fingerprint plus the Web Bot Auth JWK Set for verified-bot access
+
 Safety and observability tools:
 
 - `run_security_audit`
 - `scan_local_secrets`
 - `debug_failure`
 - `generate_observability_report`
+- `generate_behavior_report` — chain-of-thought reconstruction with scores and prioritized self-improvement recommendations (see [Behavior Reports](#behavior-reports--recursive-self-improvement))
 - `capture_annotated_screenshot`
 - `toggle_resource_blocking`
 - `toggle_watch_mode`

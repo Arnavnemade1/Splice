@@ -18,6 +18,8 @@ import { fileURLToPath } from 'node:url';
 // activeConfig is the resolution captured BEFORE the config file was projected
 // onto process.env — re-resolving here would misattribute file values to env.
 import { activeConfig, CONFIG_KEYS, type SpliceConfigValues } from './config.js';
+import { SessionStore, sanitizeSessionName } from './SessionStore.js';
+import { resolveFingerprint } from './StealthProfile.js';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 
@@ -34,6 +36,11 @@ function packageVersion(): string {
 
 function hasFlag(args: string[], flag: string): boolean {
   return args.includes(flag);
+}
+
+function flagValue(args: string[], flag: string): string | undefined {
+  const i = args.indexOf(flag);
+  return i >= 0 && i + 1 < args.length ? args[i + 1] : undefined;
 }
 
 const BOLD = '\x1b[1m';
@@ -64,6 +71,21 @@ Commands:
               --json        machine-readable report
   config    Show the effective configuration and each value's source.
               --json        machine-readable output
+  session   Manage isolated per-account browser identities.
+              ls                   list registered identities + fingerprints
+              add <name>           register an identity (spawns on next run)
+                --seed <s>         fingerprint seed (defaults to the name)
+                --label <l>        human-readable label
+                --ephemeral        do not persist the login to disk
+              rm <name> [--purge]  remove an identity (--purge deletes login)
+  report    Analyze agent behavior from a persisted run journal: per-tool
+            call/error rates, error timelines with the calls that preceded
+            each failure, and self-improvement recommendations.
+              [journal]     path to a .jsonl journal (default: newest run
+                            in ./.splice/journal/)
+              --json        machine-readable digest
+            Live sessions get richer chain-of-thought reports via the
+            generate_behavior_report MCP tool (written to .splice/behavior/).
 
 Configuration is layered: environment variables override splice.config.json,
 which overrides defaults. Discovery order: $SPLICE_CONFIG, ./splice.config.json,
@@ -271,6 +293,149 @@ function commandConfig(args: string[]): void {
   }
 }
 
+// ─── splice session ────────────────────────────────────────────────────────
+
+function commandSession(args: string[]): void {
+  const [sub = 'ls', ...rest] = args;
+  const store = new SessionStore(path.join(process.cwd(), '.splice'));
+
+  const previewIdentity = (seed: string) => {
+    const fp = resolveFingerprint(seed);
+    return `${fp.platform} · ${fp.viewport.width}×${fp.viewport.height} · ${fp.timezoneId}`;
+  };
+
+  switch (sub) {
+    case 'add':
+    case 'spawn': {
+      const name = rest.find((a) => !a.startsWith('--'));
+      if (!name) {
+        console.error(`${paint(RED, 'usage:')} splice session add <name> [--seed s] [--label l] [--ephemeral]`);
+        process.exitCode = 1;
+        return;
+      }
+      const record = store.upsert({
+        name,
+        seed: flagValue(rest, '--seed'),
+        label: flagValue(rest, '--label'),
+        persistent: !hasFlag(rest, '--ephemeral'),
+      });
+      console.log(`${paint(GREEN, 'registered')} session ${paint(BOLD, record.name)}`);
+      console.log(`  ${paint(DIM, 'identity')}  ${previewIdentity(record.seed)}`);
+      console.log(`  ${paint(DIM, 'seed')}      ${record.seed}`);
+      console.log(`\nIt spawns as an isolated browser identity the next time an agent calls ${paint(CYAN, 'create_session')} with this name (or on ${paint(CYAN, 'splice start')}).`);
+      return;
+    }
+    case 'rm':
+    case 'remove': {
+      const name = rest.find((a) => !a.startsWith('--'));
+      if (!name) {
+        console.error(`${paint(RED, 'usage:')} splice session rm <name> [--purge]`);
+        process.exitCode = 1;
+        return;
+      }
+      const existed = store.remove(name, { purge: hasFlag(rest, '--purge') });
+      console.log(existed
+        ? `${paint(GREEN, 'removed')} session ${paint(BOLD, sanitizeSessionName(name))}${hasFlag(rest, '--purge') ? ' (saved login purged)' : ''}`
+        : `${paint(YELLOW, 'no such session:')} ${sanitizeSessionName(name)}`);
+      return;
+    }
+    case 'ls':
+    case 'list': {
+      const rows = store.list();
+      if (rows.length === 0) {
+        console.log(`${paint(DIM, 'No sessions registered.')} Create one: ${paint(CYAN, 'splice session add <name>')}`);
+        return;
+      }
+      console.log(`${paint(BOLD, 'Registered browser identities')}\n`);
+      for (const r of rows) {
+        const saved = store.hasState(r.name) ? paint(GREEN, 'saved-login') : paint(DIM, 'no-login');
+        console.log(`  ${paint(BOLD, r.name.padEnd(20))} ${previewIdentity(r.seed).padEnd(46)} ${saved}`);
+      }
+      return;
+    }
+    default:
+      console.error(`${paint(RED, `Unknown session subcommand: ${sub}`)}`);
+      console.error(`Try: splice session ${paint(BOLD, 'ls')} | ${paint(BOLD, 'add')} <name> | ${paint(BOLD, 'rm')} <name>`);
+      process.exitCode = 1;
+  }
+}
+
+// ─── splice report ───────────────────────────────────────────────────────────
+
+async function commandReport(args: string[]): Promise<void> {
+  const { buildJournalDigest } = await import('./BehaviorReport.js');
+  const explicit = args.find((a) => !a.startsWith('--'));
+
+  let journalPath = explicit;
+  if (!journalPath) {
+    const journalDir = path.join(process.cwd(), '.splice', 'journal');
+    const candidates = fs.existsSync(journalDir)
+      ? fs.readdirSync(journalDir).filter((f) => f.endsWith('.jsonl')).sort()
+      : [];
+    if (candidates.length === 0) {
+      console.error(`${paint(RED, 'No run journals found.')} Looked in ${journalDir}.`);
+      console.error(`Run a session first (${paint(CYAN, 'splice start')}), or pass a journal path: ${paint(CYAN, 'splice report <file.jsonl>')}`);
+      process.exitCode = 1;
+      return;
+    }
+    journalPath = path.join(journalDir, candidates[candidates.length - 1]);
+  }
+
+  let entries;
+  try {
+    entries = fs.readFileSync(journalPath, 'utf8')
+      .trimEnd()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+  } catch (error: any) {
+    console.error(`${paint(RED, 'Could not read journal:')} ${journalPath} — ${error?.message ?? error}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  const digest = buildJournalDigest(entries);
+
+  if (hasFlag(args, '--json')) {
+    console.log(JSON.stringify({ journalPath, ...digest }, null, 2));
+    return;
+  }
+
+  console.log(`${paint(BOLD, 'Splice Behavior Report')} ${paint(DIM, `(journal: ${journalPath})`)}\n`);
+  console.log(`  session   ${digest.sessionId}`);
+  console.log(`  activity  ${digest.toolCalls} tool call(s) over ${(digest.durationMs / 1000).toFixed(1)}s`);
+  console.log(`  health    ${digest.errors} error(s), ${digest.crashes} crash(es), ${digest.recoveries} recovery(ies)\n`);
+
+  if (digest.tools.length > 0) {
+    console.log(paint(BOLD, '  Tool usage'));
+    for (const t of digest.tools.slice(0, 12)) {
+      const err = t.errors > 0 ? paint(RED, ` ${t.errors} err`) : '';
+      const dur = t.avgDurationMs !== null ? paint(DIM, ` ~${t.avgDurationMs}ms`) : '';
+      console.log(`    ${t.tool.padEnd(28)} ${String(t.calls).padStart(4)} call(s)${err}${dur}`);
+    }
+    console.log('');
+  }
+
+  if (digest.errorTimeline.length > 0) {
+    console.log(paint(BOLD, '  Errors (with the calls that preceded them)'));
+    for (const e of digest.errorTimeline.slice(0, 8)) {
+      console.log(`    ${paint(RED, `#${e.seq}`)} ${e.tool ?? 'unknown'} → ${e.errorCode ?? e.detail ?? 'unknown'}`);
+      if (e.precededBy.length > 0) console.log(`        ${paint(DIM, `after: ${e.precededBy.join(' → ')}`)}`);
+    }
+    console.log('');
+  }
+
+  console.log(paint(BOLD, '  Recommendations'));
+  for (const r of digest.recommendations) {
+    const badge = r.priority === 'high' ? paint(RED, `[${r.priority.toUpperCase()}]`)
+      : r.priority === 'medium' ? paint(YELLOW, `[${r.priority.toUpperCase()}]`)
+      : paint(DIM, `[${r.priority.toUpperCase()}]`);
+    console.log(`    ${badge} ${r.observation}`);
+    console.log(`      ${paint(DIM, `→ ${r.recommendation}`)}`);
+    console.log(`      ${paint(DIM, `evidence: ${r.evidence}`)}`);
+  }
+}
+
 // ─── entry ───────────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
@@ -280,6 +445,8 @@ async function main(): Promise<void> {
     case 'init': return commandInit(rest);
     case 'doctor': return commandDoctor(rest);
     case 'config': return commandConfig(rest);
+    case 'session': return commandSession(rest);
+    case 'report': return commandReport(rest);
     case '--version': case '-v': case 'version':
       console.log(packageVersion());
       return;

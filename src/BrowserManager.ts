@@ -2,9 +2,16 @@
 import { chromium } from 'playwright-extra';
 // @ts-ignore
 import stealth from 'puppeteer-extra-plugin-stealth';
-import type { Browser, Page, BrowserContext } from 'playwright';
+import type { Browser, Page, BrowserContext, BrowserContextOptions } from 'playwright';
 
-chromium.use(stealth());
+// StealthProfile assigns each session a DETERMINISTIC hardwareConcurrency; the
+// plugin's own evasion would pin every context to one shared value (4) and
+// erase that per-identity signal. Drop just that evasion — all the others
+// (including the critical user-agent Headless-token strip that default,
+// non-session branches rely on) stay enabled.
+const stealthPlugin = stealth();
+stealthPlugin.enabledEvasions.delete('navigator.hardwareConcurrency');
+chromium.use(stealthPlugin);
 
 import { TelemetryInterceptor } from './TelemetryInterceptor.js';
 import { SemanticExtractor } from './SemanticExtractor.js';
@@ -16,8 +23,12 @@ import { RecoveryMemory } from './RecoveryMemory.js';
 import type { SemanticDelta, FullTreeFallback, SpeculativeBranchSummary } from './types.js';
 import { OpenClawGateway } from './OpenClawGateway.js';
 import { discordNotifier } from './DiscordWebhook.js';
+import { resolveFingerprint, stealthContextOptions, stealthInitScript, type StealthFingerprint } from './StealthProfile.js';
+import { WebBotAuth } from './WebBotAuth.js';
+import { SessionStore, sessionBranchId, isSessionBranch, sessionNameFromBranch, sanitizeSessionName, type SessionRecord } from './SessionStore.js';
 import type { AuditOptions } from './SecurityAuditor.js';
 import { SpliceError, withRetry, isTransientError, errorMessage } from './Resilience.js';
+import { buildBehaviorReport, renderBehaviorMarkdown, type BehaviorEvent, type BehaviorReportDigest } from './BehaviorReport.js';
 import type { AgentStateDiagnosis, LedgerEntry, SemanticNode, SessionMetrics, VerifiedActionPlan, SummonRequest } from './types.js';
 import type {
   NetworkActivitySummary,
@@ -126,6 +137,15 @@ export class BrowserManager {
   // Live feed — ring buffer of last 20 actions
   private liveFeed: Array<{ type: string; detail: string; timestamp: number }> = [];
 
+  /**
+   * Behavior log — bounded in-memory record of every cognition event
+   * (observations, diagnoses, plans, actions, waits, assertions). This is the
+   * raw material for generateBehaviorReport(): the chain-of-thought digest an
+   * agent reads back to improve its own strategy on long runs.
+   */
+  private behaviorLog: BehaviorEvent[] = [];
+  private readonly MAX_BEHAVIOR_EVENTS = 2000;
+
   /** Out-of-band page events (dialogs, popups, downloads) the agent would otherwise miss. */
   private pageEvents: PageEventRecord[] = [];
   private readonly MAX_PAGE_EVENTS = 100;
@@ -134,6 +154,13 @@ export class BrowserManager {
   private spliceDir: string;
   private snapshotsDir: string;
   private vault!: CryptoManager;
+
+  /** Registry of isolated per-account browser identities. */
+  public sessions!: SessionStore;
+  /** Cryptographic bot identity for cooperative (Web Bot Auth) origins. */
+  public webBotAuth!: WebBotAuth;
+  /** Live fingerprint per branch — feeds get_stealth_profile and diagnostics. */
+  private fingerprints: Map<string, StealthFingerprint> = new Map();
 
   constructor() {
     this.spliceDir = path.join(process.cwd(), '.splice');
@@ -151,6 +178,8 @@ export class BrowserManager {
     // Initialize encryption vault — auto-generates key if needed
     this.vault = new CryptoManager(this.spliceDir);
     this.recoveryMemory = new RecoveryMemory(this.spliceDir);
+    this.sessions = new SessionStore(this.spliceDir);
+    this.webBotAuth = new WebBotAuth(this.spliceDir);
 
     // Watch mode from config/env: launch with a visible Chromium window.
     if (process.env.SPLICE_WATCH_MODE === '1') this.headless = false;
@@ -238,7 +267,16 @@ export class BrowserManager {
         this.contexts.delete(branchId);
         this.pages.delete(branchId);
         this.telemetry.delete(branchId);
-        await this.createBranch(branchId);
+        // Session branches rebuild with their persisted identity: the same
+        // deterministic fingerprint and the last saved storage state (login).
+        if (isSessionBranch(branchId)) {
+          const record = this.sessions.get(sessionNameFromBranch(branchId));
+          const fp = resolveFingerprint(record?.seed ?? sessionNameFromBranch(branchId));
+          const state = this.readSessionState(sessionNameFromBranch(branchId));
+          await this.createBranch(branchId, state, fp);
+        } else {
+          await this.createBranch(branchId);
+        }
         if (lastUrl && lastUrl !== 'about:blank') {
           await this.pages.get(branchId)!.goto(lastUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
         }
@@ -297,11 +335,56 @@ export class BrowserManager {
     return `speculative-${createHash('sha256').update(url).digest('hex').slice(0, 12)}`;
   }
 
-  private async createBranch(branchId: string, storageState?: any) {
+  private async createBranch(branchId: string, storageState?: any, fingerprint?: StealthFingerprint) {
     if (!this.browser) throw new Error('Browser not initialized');
 
-    const context = await this.browser.newContext(storageState ? { storageState } : undefined);
+    // A fingerprint makes the whole request/JS surface of this context agree
+    // (UA, platform, viewport, locale, timezone, client hints). Sessions pass
+    // a per-identity fingerprint so parallel accounts never share one.
+    const contextOptions: BrowserContextOptions = fingerprint ? stealthContextOptions(fingerprint) : {};
+    if (storageState) contextOptions.storageState = storageState;
+    const context = await this.browser.newContext(
+      Object.keys(contextOptions).length ? contextOptions : undefined
+    );
+    if (fingerprint) {
+      await context.addInitScript(stealthInitScript(fingerprint));
+    }
     const page = await context.newPage();
+
+    // puppeteer-extra-plugin-stealth normalizes UA + hardwareConcurrency across
+    // every context to one shared value. For a session we want the OPPOSITE:
+    // a distinct, deterministic identity per account. Assert it at the CDP
+    // layer (applied last, so it wins over the plugin) without disabling the
+    // plugin's other evasions that the default branches still rely on.
+    if (fingerprint) {
+      try {
+        const chromeMajor = /Chrome\/(\d+)/.exec(fingerprint.userAgent)?.[1] ?? '131';
+        const cdp = await context.newCDPSession(page);
+        await cdp.send('Network.setUserAgentOverride', {
+          userAgent: fingerprint.userAgent,
+          platform: fingerprint.platform,
+          acceptLanguage: `${fingerprint.locale},${fingerprint.locale.split('-')[0]};q=0.9`,
+          userAgentMetadata: {
+            brands: [
+              { brand: 'Chromium', version: chromeMajor },
+              { brand: 'Not(A:Brand', version: '24' },
+              { brand: 'Google Chrome', version: chromeMajor },
+            ],
+            fullVersion: `${chromeMajor}.0.0.0`,
+            platform: fingerprint.secChUaPlatform.replace(/"/g, ''),
+            platformVersion: '',
+            architecture: 'x86',
+            model: '',
+            mobile: false,
+          },
+        });
+        await cdp.send('Emulation.setHardwareConcurrencyOverride', {
+          hardwareConcurrency: fingerprint.hardwareConcurrency,
+        });
+      } catch (e) {
+        console.error(`[Splice Sessions] CDP fingerprint override failed for ${branchId}: ${errorMessage(e)}`);
+      }
+    }
 
     await context.tracing.start({ screenshots: true, snapshots: true });
 
@@ -406,6 +489,8 @@ export class BrowserManager {
     this.contexts.set(branchId, context);
     this.pages.set(branchId, page);
     this.telemetry.set(branchId, telemetry);
+    if (fingerprint) this.fingerprints.set(branchId, fingerprint);
+    else this.fingerprints.delete(branchId);
     // A freshly built branch is healthy by definition.
     this.crashedBranches.delete(branchId);
   }
@@ -431,6 +516,10 @@ export class BrowserManager {
     // Store micro-snapshots encrypted
     this.vault.writeEncrypted(snapPath, payload);
     this.pushLiveFeed(type, JSON.stringify(data).substring(0, 80));
+    this.behaviorLog.push({ type, timestamp: Date.now(), data });
+    if (this.behaviorLog.length > this.MAX_BEHAVIOR_EVENTS) {
+      this.behaviorLog.splice(0, this.behaviorLog.length - this.MAX_BEHAVIOR_EVENTS);
+    }
   }
 
   private tokenizeIntent(intent: string): string[] {
@@ -689,7 +778,12 @@ export class BrowserManager {
           // Every poll beyond the first replaced a would-be full observation.
           const estimatedTokensSaved = Math.max(0, pollCount - 1) * 350;
           this.metrics.tokensSavedEstimate += estimatedTokensSaved;
-          this.pushLiveFeed('wait_for', `${c.kind} satisfied in ${elapsedMs}ms (${pollCount} polls)`);
+          this.saveMicroSnapshot('wait_for', {
+            matched: `${c.kind}${c.value ? `("${c.value}")` : ''}`,
+            timedOut: false,
+            elapsedMs,
+            pollCount,
+          });
           return {
             satisfied: true,
             matched: { index: i, kind: c.kind, value: c.value },
@@ -707,7 +801,12 @@ export class BrowserManager {
         const elapsedMs = Date.now() - startedAt;
         const estimatedTokensSaved = Math.max(0, pollCount - 1) * 350;
         this.metrics.tokensSavedEstimate += estimatedTokensSaved;
-        this.pushLiveFeed('wait_for', `Timed out after ${elapsedMs}ms (${pollCount} polls)`);
+        this.saveMicroSnapshot('wait_for', {
+          conditions: conditions.map(c => `${c.kind}${c.value ? `("${c.value}")` : ''}`).join(', '),
+          timedOut: true,
+          elapsedMs,
+          pollCount,
+        });
         return {
           satisfied: false,
           elapsedMs,
@@ -1358,7 +1457,8 @@ export class BrowserManager {
       confidence: diagnosis.confidence,
       summary: diagnosis.summary,
       signals: diagnosis.signals,
-      likelyStuck: diagnosis.trend?.likelyStuck ?? false
+      likelyStuck: diagnosis.trend?.likelyStuck ?? false,
+      recoveryStrategySource: diagnosis.recommendedRecoveryStrategy?.source
     });
     return diagnosis;
   }
@@ -2238,7 +2338,7 @@ export class BrowserManager {
         if (!invalid.includes(n)) invalid.push(n);
       });
       const submitCandidates = Array.from(document.querySelectorAll<HTMLElement>('button[type="submit"], input[type="submit"], button, [role="button"]'))
-        .filter(b => /submit|continue|save|sign|log ?in|register|checkout|next|confirm|send|search|apply|pay|order|place/i.test(b.innerText || (b as HTMLInputElement).value || b.getAttribute('aria-label') || ''));
+        .filter(b => /submit|continue|save|sign|log ?in|register|create|checkout|next|confirm|send|search|apply|pay|order|place/i.test(b.innerText || (b as HTMLInputElement).value || b.getAttribute('aria-label') || ''));
       const isDisabled = (b: Element) => (b as HTMLButtonElement).disabled === true || b.getAttribute('aria-disabled') === 'true';
       const submitFound = submitCandidates.length > 0;
       const submitEnabled = !submitFound ? null : submitCandidates.some(b => !isDisabled(b));
@@ -2625,15 +2725,11 @@ export class BrowserManager {
 
     const passed = results.every(r => r.passed);
     const failedKinds = results.filter(r => !r.passed).map(r => `${r.kind}("${r.value}")`);
-    return {
-      passed,
-      results,
-      url,
-      title,
-      summary: passed
-        ? `All ${results.length} expectation(s) hold.`
-        : `${failedKinds.length}/${results.length} expectation(s) failed: ${failedKinds.join(', ')}.`
-    };
+    const summary = passed
+      ? `All ${results.length} expectation(s) hold.`
+      : `${failedKinds.length}/${results.length} expectation(s) failed: ${failedKinds.join(', ')}.`;
+    this.saveMicroSnapshot('assert_page_state', { expectations: results.length, passed, summary });
+    return { passed, results, url, title, summary };
   }
 
   /**
@@ -2982,6 +3078,200 @@ export class BrowserManager {
     this.pushLiveFeed('commit_branch', `Active: ${branchId}`);
   }
 
+  // -------------------------
+  // SESSION ISOLATION PRIMITIVES
+  // -------------------------
+  // A session is a named, parallel, isolated browser identity — one account.
+  // Every session gets its own BrowserContext (cookies and storage are already
+  // partitioned per context by Playwright), its own deterministic fingerprint
+  // (distinct UA/platform/WebGL/timezone per account, stable across restarts),
+  // and an optional encrypted storage-state file so its login survives process
+  // restarts. Sessions live as `session:<name>` branches, so they inherit the
+  // full observation, reliability, and recovery machinery for free.
+
+  /** Read a session's persisted (encrypted) storage state, if any. */
+  private readSessionState(name: string): any | undefined {
+    const statePath = this.sessions.statePath(name);
+    if (!fs.existsSync(statePath)) return undefined;
+    try {
+      return JSON.parse(this.vault.readDecrypted(statePath));
+    } catch (e) {
+      console.error(`[Splice Sessions] Could not read saved state for "${name}": ${errorMessage(e)}`);
+      return undefined;
+    }
+  }
+
+  private sessionSummary(name: string): {
+    name: string;
+    label?: string;
+    branchId: string;
+    live: boolean;
+    active: boolean;
+    seed: string;
+    persistent: boolean;
+    hasSavedState: boolean;
+    url: string | null;
+    fingerprint: { userAgent: string; platform: string; timezoneId: string; viewport: { width: number; height: number } } | null;
+  } {
+    const key = sanitizeSessionName(name);
+    const branchId = sessionBranchId(key);
+    const record = this.sessions.get(key);
+    const live = this.contexts.has(branchId);
+    const fp = this.fingerprints.get(branchId) ?? (record ? resolveFingerprint(record.seed) : undefined);
+    return {
+      name: key,
+      label: record?.label,
+      branchId,
+      live,
+      active: this.activeBranch === branchId,
+      seed: record?.seed ?? key,
+      persistent: record?.persistent ?? true,
+      hasSavedState: this.sessions.hasState(key),
+      url: live ? (this.lastKnownUrls.get(branchId) ?? this.pages.get(branchId)?.url() ?? null) : null,
+      fingerprint: fp
+        ? { userAgent: fp.userAgent, platform: fp.platform, timezoneId: fp.timezoneId, viewport: fp.viewport }
+        : null,
+    };
+  }
+
+  /**
+   * Spawn (or attach to) an isolated per-account browser identity and make it
+   * the active branch. Idempotent: calling it again with the same name attaches
+   * to the existing live session instead of duplicating it. Restores any saved
+   * login for the account, then optionally navigates to a starting URL.
+   */
+  async createSession(
+    name: string,
+    opts: { label?: string; seed?: string; persistent?: boolean; url?: string; agentId?: string } = {}
+  ) {
+    await this.ensureHealthy();
+    const key = sanitizeSessionName(name);
+    const branchId = sessionBranchId(key);
+
+    const record = this.sessions.upsert({
+      name: key,
+      label: opts.label,
+      seed: opts.seed,
+      persistent: opts.persistent,
+    });
+
+    if (!this.contexts.has(branchId)) {
+      const fingerprint = resolveFingerprint(record.seed);
+      const savedState = this.readSessionState(key);
+      await this.createBranch(branchId, savedState, fingerprint);
+      this.pushLiveFeed(
+        'session_spawn',
+        `Spawned session "${key}" (${fingerprint.platform}${savedState ? ', restored login' : ''})`
+      );
+    }
+
+    this.activeBranch = branchId;
+    if (opts.agentId) this.coordinator.acquireOwnership(branchId, opts.agentId);
+
+    if (opts.url) {
+      await this.navigate(opts.url);
+    }
+    this.coordinator.updateBranchStatus(branchId, this.pages.get(branchId)?.url() ?? 'about:blank');
+    this.sessions.touch(key);
+    return this.sessionSummary(key);
+  }
+
+  /** Switch the active branch to an existing session, spawning it if dormant. */
+  async switchSession(name: string) {
+    const key = sanitizeSessionName(name);
+    if (!this.contexts.has(sessionBranchId(key))) {
+      if (!this.sessions.get(key)) throw new Error(`No session named "${key}". Create it first with create_session.`);
+      // Registered but not live (e.g. after a restart) — respawn its identity.
+      return this.createSession(key);
+    }
+    this.activeBranch = sessionBranchId(key);
+    this.sessions.touch(key);
+    this.pushLiveFeed('session_switch', `Active session: ${key}`);
+    return this.sessionSummary(key);
+  }
+
+  /**
+   * Persist a session's current cookies + storage to its encrypted state file
+   * so the login survives a restart. Defaults to the active session.
+   */
+  async saveSession(name?: string) {
+    const branchId = name ? sessionBranchId(sanitizeSessionName(name)) : this.activeBranch;
+    if (!isSessionBranch(branchId)) {
+      throw new Error('save_session targets a session. The active branch is not a session — pass a session name.');
+    }
+    const context = this.contexts.get(branchId);
+    if (!context) throw new Error(`Session "${sessionNameFromBranch(branchId)}" is not live.`);
+    const key = sessionNameFromBranch(branchId);
+    const state = await context.storageState();
+    this.vault.writeEncrypted(this.sessions.statePath(key), JSON.stringify(state));
+    this.sessions.upsert({ name: key, persistent: true });
+    this.pushLiveFeed('session_save', `Saved login for session "${key}"`);
+    return this.sessionSummary(key);
+  }
+
+  /** List every known identity, merging durable registry with live state. */
+  listSessions() {
+    const names = new Set<string>(this.sessions.list().map((r) => r.name));
+    for (const branchId of this.contexts.keys()) {
+      if (isSessionBranch(branchId)) names.add(sessionNameFromBranch(branchId));
+    }
+    return {
+      activeSession: isSessionBranch(this.activeBranch) ? sessionNameFromBranch(this.activeBranch) : null,
+      sessions: Array.from(names).map((n) => this.sessionSummary(n)),
+    };
+  }
+
+  /**
+   * Tear down a session. Closes its live context and removes it from the
+   * registry. When purge is true, its saved login is also deleted from disk.
+   */
+  async destroySession(name: string, opts: { purge?: boolean } = {}) {
+    const key = sanitizeSessionName(name);
+    const branchId = sessionBranchId(key);
+    const existedLive = this.contexts.has(branchId);
+    if (existedLive) {
+      this.expectingShutdown = true;
+      try {
+        await this.contexts.get(branchId)?.close().catch(() => {});
+      } finally {
+        this.expectingShutdown = false;
+      }
+      this.contexts.delete(branchId);
+      this.pages.delete(branchId);
+      this.telemetry.delete(branchId);
+      this.fingerprints.delete(branchId);
+      this.lastKnownUrls.delete(branchId);
+      this.crashedBranches.delete(branchId);
+      this.treeSnapshots.delete(branchId);
+    }
+    const existedRegistered = this.sessions.remove(key, { purge: opts.purge });
+    // If we just closed the active session, fall back to main.
+    if (this.activeBranch === branchId) {
+      this.activeBranch = this.contexts.has('main') ? 'main' : (this.contexts.keys().next().value ?? 'main');
+    }
+    this.pushLiveFeed('session_destroy', `Removed session "${key}"${opts.purge ? ' (login purged)' : ''}`);
+    return { name: key, wasLive: existedLive, wasRegistered: existedRegistered, purged: !!opts.purge };
+  }
+
+  /**
+   * The agent's public identity: the active branch's coherent fingerprint plus
+   * the Web Bot Auth directory (JWK Set) an origin fetches to verify signed
+   * requests. This is what get_stealth_profile returns.
+   */
+  getStealthProfile() {
+    const fp = this.fingerprints.get(this.activeBranch);
+    return {
+      activeBranch: this.activeBranch,
+      session: isSessionBranch(this.activeBranch) ? sessionNameFromBranch(this.activeBranch) : null,
+      fingerprint: fp ?? null,
+      webBotAuth: {
+        keyId: this.webBotAuth.keyId(),
+        signatureAgentUrl: this.webBotAuth.signatureAgentUrl,
+        directory: this.webBotAuth.getDirectory(),
+      },
+    };
+  }
+
   /**
    * Atomically transfer write ownership of a branch from one agent to another.
    * The from-agent must currently own the branch. Records the transfer in the ledger.
@@ -3106,6 +3396,32 @@ export class BrowserManager {
   // -------------------------
   // OBSERVABILITY & CLEANUP
   // -------------------------
+
+  /**
+   * Chain-of-thought behavior report: reconstructs what the agent observed,
+   * decided, and did this session, scores action quality and observation
+   * economy, and emits prioritized self-improvement recommendations. Written
+   * as machine-readable JSON (feed it back to the agent at the start of the
+   * next run — or mid-run on long traversals) plus a markdown rendering.
+   */
+  generateBehaviorReport(): { digest: BehaviorReportDigest; jsonPath: string; markdownPath: string } {
+    const digest = buildBehaviorReport({
+      events: this.behaviorLog,
+      metrics: this.metrics,
+      journalStats: this.journalStatsProvider ? (this.journalStatsProvider() as BehaviorReportDigest['journal']) : undefined,
+      recoveryMemoryStats: this.recoveryMemory ? { totalPatterns: this.recoveryMemory.getStats().totalPatterns } : undefined,
+    });
+    const behaviorDir = path.join(this.spliceDir, 'behavior');
+    fs.mkdirSync(behaviorDir, { recursive: true });
+    const stamp = Date.now();
+    const jsonPath = path.join(behaviorDir, `behavior-${stamp}.json`);
+    const markdownPath = path.join(behaviorDir, `behavior-${stamp}.md`);
+    fs.writeFileSync(jsonPath, JSON.stringify(digest, null, 2), { mode: 0o600 });
+    fs.writeFileSync(markdownPath, renderBehaviorMarkdown(digest), { mode: 0o600 });
+    this.pushLiveFeed('behavior_report', `${digest.episodes.length} episode(s), ${digest.selfImprovement.length} recommendation(s)`);
+    return { digest, jsonPath, markdownPath };
+  }
+
   async generateObservabilityReport(): Promise<string> {
     const snaps = fs.readdirSync(this.snapshotsDir)
       .filter(f => f.startsWith('micro-snap-'))

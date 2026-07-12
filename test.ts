@@ -942,6 +942,50 @@ async function main() {
       return `connected=${health.browserConnected}, branches=${health.branches.length}, crashes=${health.browserCrashCount}`;
     });
 
+    await step('Isolated sessions partition storage and fingerprints', async () => {
+      // Two parallel per-account identities.
+      const a = await browser.createSession('acct-alpha', { url: fixture.url });
+      const b = await browser.createSession('acct-bravo', { url: fixture.url });
+      if (a.branchId === b.branchId) throw new Error('Sessions shared a branch');
+
+      // Distinct, coherent fingerprints (some axis must differ).
+      const same = JSON.stringify(a.fingerprint) === JSON.stringify(b.fingerprint);
+      if (same) throw new Error('Two accounts resolved to an identical fingerprint');
+
+      // Storage isolation: a value written in alpha must not appear in bravo.
+      await browser.switchSession('acct-alpha');
+      await browser.getActivePage().evaluate(() => localStorage.setItem('tenant', 'ALPHA'));
+      await browser.switchSession('acct-bravo');
+      const leaked = await browser.getActivePage().evaluate(() => localStorage.getItem('tenant'));
+      if (leaked !== null) throw new Error(`Storage leaked across sessions: saw ${leaked}`);
+
+      // Login persistence across a destroy + respawn.
+      await browser.getActivePage().evaluate(() => localStorage.setItem('tenant', 'BRAVO'));
+      await browser.saveSession('acct-bravo');
+      await browser.destroySession('acct-bravo');
+      await browser.createSession('acct-bravo', { url: fixture.url });
+      const restored = await browser.getActivePage().evaluate(() => localStorage.getItem('tenant'));
+      if (restored !== 'BRAVO') throw new Error('Saved login did not survive respawn');
+
+      const list = browser.listSessions();
+      await browser.destroySession('acct-alpha', { purge: true });
+      await browser.destroySession('acct-bravo', { purge: true });
+      browser.activeBranch = 'main';
+      return `2 isolated identities; storage partitioned; login persisted; registry listed ${list.sessions.length}`;
+    });
+
+    await step('Stealth profile exposes fingerprint and Web Bot Auth directory', async () => {
+      await browser.createSession('probe', {});
+      const profile = browser.getStealthProfile();
+      if (!profile.fingerprint || !profile.fingerprint.userAgent.includes('Chrome')) throw new Error('No fingerprint on active session');
+      const jwks = profile.webBotAuth.directory.keys;
+      if (!Array.isArray(jwks) || jwks[0]?.kty !== 'OKP' || !jwks[0]?.x) throw new Error('Web Bot Auth directory malformed');
+      if (profile.webBotAuth.keyId !== jwks[0].kid) throw new Error('keyId does not match published JWK');
+      await browser.destroySession('probe', { purge: true });
+      browser.activeBranch = 'main';
+      return `fingerprint=${profile.fingerprint.platform}; kid=${profile.webBotAuth.keyId.slice(0, 12)}…`;
+    });
+
     await step('Agent tracker profiles per-agent performance', async () => {
       const tracker = browser.agentTracker;
       tracker.recordAction('tracked-agent-1', { tool: 'navigate', outcome: 'ok', durationMs: 900 });

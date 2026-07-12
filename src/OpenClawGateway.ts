@@ -56,7 +56,8 @@ export class OpenClawGateway {
               'capture_screenshot',
               'session_status',
               'get_runtime_health',
-              'get_agent_analytics'
+              'get_agent_analytics',
+              'generate_behavior_report'
             ],
             timestamp: Date.now()
           }));
@@ -192,6 +193,11 @@ export class OpenClawGateway {
           result = agentId
             ? this.browser.agentTracker.getProfile(agentId) ?? { error: `No tracked activity for agent "${agentId}".` }
             : this.browser.agentTracker.getAllProfiles();
+          break;
+        }
+
+        case 'generate_behavior_report': {
+          result = this.browser.generateBehaviorReport();
           break;
         }
 

@@ -26,6 +26,8 @@
     "start": "node dist/cli.js start",
     "doctor": "node dist/cli.js doctor",
     "test": "npm run build:test && node dist_test/test.js",
+    "test:regression": "npm run build:test && node dist_test/regression.js",
+    "test:all": "npm run build:test && node dist_test/test.js && node dist_test/regression.js",
     "validate:local": "npm test",
     "demo:local": "npm test",
     "prepack": "npm run clean && npm run build"
