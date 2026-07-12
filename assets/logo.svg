@@ -1,62 +1,37 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 120" width="460" height="120" role="img" aria-label="Splice — browser cognition infrastructure for autonomous agents">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 110" width="440" height="110" role="img" aria-label="Splice — browser cognition for autonomous agents">
   <title>Splice</title>
   <defs>
-    <linearGradient id="strandA" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#34f5c5"/>
-      <stop offset="100%" stop-color="#38bdf8"/>
-    </linearGradient>
-    <linearGradient id="strandB" x1="100%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#a78bfa"/>
-      <stop offset="100%" stop-color="#38bdf8"/>
-    </linearGradient>
-    <linearGradient id="wordmark" x1="0%" y1="0%" x2="100%" y2="0%" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#34f5c5"/>
-      <stop offset="55%" stop-color="#38bdf8"/>
-      <stop offset="100%" stop-color="#a78bfa"/>
-      <animateTransform attributeName="gradientTransform" type="translate" values="-460 0; 460 0; -460 0" dur="6s" repeatCount="indefinite"/>
-    </linearGradient>
-    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
-      <feGaussianBlur stdDeviation="2.2" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
     <style>
-      .strand { fill: none; stroke-width: 7; stroke-linecap: round; }
-      .weaveA { stroke-dasharray: 210; animation: weave 3.6s cubic-bezier(0.45, 0, 0.25, 1) infinite; }
-      .weaveB { stroke-dasharray: 210; animation: weave 3.6s cubic-bezier(0.45, 0, 0.25, 1) infinite reverse; }
-      .pulse { animation: pulse 3.6s ease-in-out infinite; transform-origin: 60px 60px; }
-      @keyframes weave {
-        0%   { stroke-dashoffset: 210; opacity: 0.25; }
-        45%  { stroke-dashoffset: 0;   opacity: 1; }
-        80%  { stroke-dashoffset: 0;   opacity: 1; }
-        100% { stroke-dashoffset: -210; opacity: 0.25; }
+      .strand {
+        fill: none;
+        stroke: #6366f1;
+        stroke-width: 11;
+        stroke-linecap: round;
+        stroke-dasharray: 210;
+        animation: weave 4s cubic-bezier(0.45, 0, 0.25, 1) infinite;
       }
-      @keyframes pulse {
-        0%, 100% { transform: scale(1); }
-        60% { transform: scale(1.05); }
+      .strand-b { opacity: 0.45; animation-direction: reverse; }
+      @keyframes weave {
+        0%   { stroke-dashoffset: 210; }
+        40%  { stroke-dashoffset: 0; }
+        85%  { stroke-dashoffset: 0; }
+        100% { stroke-dashoffset: -210; }
       }
       @media (prefers-reduced-motion: reduce) {
-        .weaveA, .weaveB { animation: none; stroke-dashoffset: 0; }
-        .pulse { animation: none; }
-        #wordmark animateTransform { display: none; }
+        .strand { animation: none; stroke-dashoffset: 0; }
       }
     </style>
   </defs>
 
-  <!-- The mark: two strands spliced into one — cognition woven into the browser. -->
-  <g class="pulse" filter="url(#glow)">
-    <path class="strand weaveA" stroke="url(#strandA)"
-      d="M 22 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 98 90"/>
-    <path class="strand weaveB" stroke="url(#strandB)"
-      d="M 98 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 22 90"/>
-    <circle cx="60" cy="60" r="6" fill="#f6f8fc"/>
+  <!-- Mark: two strands spliced into one. -->
+  <g transform="translate(4, 7) scale(0.8)">
+    <path class="strand" d="M 22 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 98 90"/>
+    <path class="strand strand-b" d="M 98 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 22 90"/>
   </g>
 
-  <!-- Wordmark with a slow gradient sweep. -->
-  <text x="128" y="76" font-family="Inter, 'Segoe UI', system-ui, -apple-system, sans-serif"
-    font-size="52" font-weight="800" letter-spacing="1" fill="url(#wordmark)">SPLICE</text>
-  <text x="130" y="98" font-family="Inter, 'Segoe UI', system-ui, -apple-system, sans-serif"
-    font-size="13" font-weight="500" letter-spacing="3.5" fill="#8b97ab">BROWSER COGNITION FOR AGENTS</text>
+  <!-- Wordmark: mid-tone grays, legible on light and dark backgrounds. -->
+  <text x="122" y="66" font-family="Inter, 'Segoe UI', system-ui, -apple-system, sans-serif"
+    font-size="44" font-weight="700" letter-spacing="-1" fill="#6b7280">Splice</text>
+  <text x="124" y="90" font-family="Inter, 'Segoe UI', system-ui, -apple-system, sans-serif"
+    font-size="13" font-weight="500" letter-spacing="0.5" fill="#9ca3af">Browser cognition for autonomous agents</text>
 </svg>

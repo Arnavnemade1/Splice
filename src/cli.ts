@@ -55,8 +55,8 @@ const paint = (code: string, text: string) => (tty ? `${code}${text}${RESET}` : 
 
 // ─── animated banner ─────────────────────────────────────────────────────────
 
-/** Brand gradient: teal → blue → violet, matching the SVG logo and reports. */
-const BRAND_STOPS: Array<[number, number, number]> = [[52, 245, 197], [56, 189, 248], [167, 139, 250]];
+/** Brand palette: restrained slate → indigo, matching the SVG logo. */
+const BRAND_STOPS: Array<[number, number, number]> = [[148, 163, 184], [99, 102, 241]];
 
 function brandColor(t: number): [number, number, number] {
   const clamped = Math.max(0, Math.min(1, t));

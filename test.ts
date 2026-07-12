@@ -199,10 +199,10 @@ function writeReport(reportPath: string) {
   --text: #f6f8fc;
   --muted: #9aa5b8;
   --quiet: #626e84;
-  --brand-a: #34f5c5;
-  --brand-b: #38bdf8;
-  --brand-c: #a78bfa;
-  --brand-gradient: linear-gradient(135deg, var(--brand-a), var(--brand-b) 55%, var(--brand-c));
+  --brand-a: #818cf8;
+  --brand-b: #6366f1;
+  --brand-c: #6366f1;
+  --brand-gradient: linear-gradient(135deg, var(--brand-a), var(--brand-b));
   --green: #3ce9a4;
   --red: #ff5c7c;
   --blue: #58b6ff;
@@ -217,27 +217,14 @@ body {
   color: var(--text);
   -webkit-font-smoothing: antialiased;
 }
-body::before {
-  content: ""; position: fixed; inset: 0; pointer-events: none;
-  background-image:
-    linear-gradient(to right, rgba(255,255,255,0.022) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255,255,255,0.022) 1px, transparent 1px);
-  background-size: 34px 34px;
-  mask-image: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent 70%);
-}
-body::after {
-  content: ""; position: fixed; inset: 0; pointer-events: none;
-  background:
-    radial-gradient(52% 42% at 10% -12%, rgba(52,245,197,0.09), transparent 62%),
-    radial-gradient(46% 38% at 90% -14%, rgba(167,139,250,0.085), transparent 60%);
-}
+/* Flat surface — no ambient grid or aura effects. */
 main { position: relative; z-index: 1; width: min(1120px, calc(100vw - 32px)); margin: 0 auto; padding: 52px 0 64px; }
 header { display: flex; justify-content: space-between; gap: 28px; align-items: end; margin-bottom: 18px; flex-wrap: wrap; }
 .brand { display: flex; gap: 16px; align-items: center; }
 .mark {
   width: 46px; height: 46px; flex: none; border-radius: 13px; display: grid; place-items: center;
   background: var(--brand-gradient); color: #04060a; font-size: 21px; font-weight: 900;
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.12), 0 8px 28px -6px rgba(56,189,248,0.45), inset 0 1px 0 rgba(255,255,255,0.45);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.12);
 }
 h1 { margin: 0; font-size: clamp(24px, 3.4vw, 38px); font-weight: 800; letter-spacing: -0.025em; }
 h1 .wordmark { background: var(--brand-gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
@@ -258,8 +245,7 @@ p.lede { color: var(--muted); margin: 6px 0 0; font-size: 14px; }
 .meter { height: 4px; border-radius: 999px; background: rgba(255,255,255,0.06); overflow: hidden; margin: 22px 0 26px; }
 .meter-fill {
   height: 100%; border-radius: 999px; width: ${passRate}%;
-  background: ${failed ? 'linear-gradient(90deg, var(--red), #f7c95c)' : 'var(--brand-gradient)'};
-  box-shadow: 0 0 12px ${failed ? 'rgba(255,92,124,0.5)' : 'rgba(52,245,197,0.5)'};
+  background: ${failed ? 'var(--red)' : 'var(--brand-gradient)'};
   animation: fill 1s var(--ease) both;
 }
 @keyframes fill { from { width: 0; } }
