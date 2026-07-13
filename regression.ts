@@ -446,6 +446,40 @@ async function main() {
       return `J ${js.tokens.length}×${js.candidates.length} exact; σ1 ${js.spectrum.sigma1} (energy ${js.spectrum.dominantModeEnergy}); boundary unreachable; analytic = FD ${lens.consistency.agreements}/${lens.consistency.comparisons}`;
     });
 
+    await step('Decision workspace: low-dimensional J-space analog over concept axes', async () => {
+      await browser.navigate(`${fixture.url}/menu`);
+      await browser.compileVerifiedAction({ intent: 'click "Products"', execute: true });
+      await browser.waitFor([{ kind: 'text_present', value: 'quarterly reports' }], { timeoutMs: 4000, pollIntervalMs: 100 });
+
+      const lens = await browser.runJacobianLens('click "Quarterly reports"', { deep: true });
+      const ws = lens.jSpace?.workspace;
+      if (!ws) throw new Error('deep J-space did not include the decision workspace.');
+      // The workspace spans named concept axes and the activation matrix aligns.
+      if (!ws.concepts.includes('keywordMatch') || !ws.concepts.includes('actionAffinity')) {
+        throw new Error(`Concept axes missing: ${ws.concepts.join(', ')}`);
+      }
+      if (ws.activations.length < 2 || ws.activations[0].vector.length !== ws.concepts.length) {
+        throw new Error('Activation matrix shape does not match the concept axes.');
+      }
+      // A clean exact-label choice occupies few directions.
+      if (!(ws.effectiveDimension >= 1) || ws.effectiveDimension > 2.5) {
+        throw new Error(`Expected a low-dimensional workspace (1–2.5), got ${ws.effectiveDimension}.`);
+      }
+      // Variance shares of the returned directions are a valid partition.
+      const shareSum = ws.conceptDirections.reduce((s, d) => s + d.varianceShare, 0);
+      if (shareSum > 1.001 || shareSum < 0.5) throw new Error(`Variance shares implausible: sum ${shareSum}.`);
+      if (!ws.conceptDirections[0]?.separatesWinner) throw new Error('The winner should separate along the dominant concept direction.');
+      // The decision Jacobian is a softmax readout: the winner-leading concept
+      // must have positive sensitivity, and confidence must be a probability.
+      const kw = ws.decisionJacobian.find((d) => d.concept === 'keywordMatch');
+      if (!kw || kw.sensitivity <= 0) throw new Error(`keywordMatch should be a load-bearing concept: ${JSON.stringify(kw)}`);
+      if (ws.winnerProbability <= 0.5 || ws.winnerProbability > 1) throw new Error(`Winner probability out of range: ${ws.winnerProbability}.`);
+      if (!ws.interpretation.some((l) => l.toLowerCase().includes('not the calling model'))) {
+        throw new Error('Workspace must state the honest scope (not the model\'s hidden activations).');
+      }
+      return `workspace ~${ws.effectiveDimension}-D over ${ws.concepts.length} concepts; winner P=${ws.winnerProbability}; top concept "${ws.decisionJacobian[0].concept}"`;
+    });
+
     // ── Long-horizon endurance: repeated traversal must stay healthy ──
 
     const ENDURANCE_CYCLES = 3;

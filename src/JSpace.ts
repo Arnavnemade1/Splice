@@ -29,6 +29,7 @@ export interface JSpaceCandidate {
   keywordContributions: number[];
   queryBonus: number;
   structuralScore: number;
+  features?: Record<string, number>;
 }
 
 export interface TokenGeometry {
@@ -69,6 +70,50 @@ export interface FlipBoundary {
   unreachable: boolean;
 }
 
+/**
+ * The decision workspace — Splice's local analog of a model-internal J-space.
+ *
+ * Before Splice emits an action, it represents every candidate as a vector of
+ * named concept features (query match, keyword match, action affinity,
+ * obstruction, …). The choice is a readout of that shared representation. This
+ * structure asks the J-space questions of it: how low-dimensional is the space
+ * the decision actually lives in, which concept-directions carry it, and how
+ * sensitive is the emitted choice to each direction.
+ *
+ * Honest scope: this is Splice's OWN pre-action decision workspace, not the
+ * calling model's hidden activations. Splice is external tooling and cannot
+ * read an LLM's J-space. The analogy is structural — a low-dimensional space
+ * where decision-relevant information is globally available before output —
+ * not a claim of access to the model internals.
+ */
+export interface DecisionWorkspace {
+  concepts: string[];
+  /** Candidate × concept activation matrix — the workspace representation. */
+  activations: Array<{ label: string; vector: number[] }>;
+  /** Participation ratio of the centered activations: how many concept
+   *  directions the decision actually occupies (1 = one axis decides it). */
+  effectiveDimension: number;
+  /** Concept directions (SVD axes of the discriminative subspace), each with
+   *  its variance share and the concepts that load onto it. */
+  conceptDirections: Array<{
+    axis: number;
+    singularValue: number;
+    varianceShare: number;
+    dominantConcepts: Array<{ concept: string; loading: number }>;
+    /** Winner's coordinate along this axis vs the field's spread. */
+    winnerCoordinate: number;
+    separatesWinner: boolean;
+  }>;
+  /** ∂P(winner)/∂(scale of concept): how much the emitted choice's
+   *  probability moves if each concept-direction is amplified. Softmax
+   *  readout at the given temperature. */
+  decisionJacobian: Array<{ concept: string; sensitivity: number; winnerVsField: number }>;
+  /** Softmax confidence of the winner at the chosen temperature. */
+  winnerProbability: number;
+  temperature: number;
+  interpretation: string[];
+}
+
 export interface JSpaceReport {
   intent: string;
   tokens: string[];
@@ -81,6 +126,9 @@ export interface JSpaceReport {
   geometry: TokenGeometry;
   spectrum: JSpaceSpectrum;
   flipBoundaries: FlipBoundary[];
+  /** The decision workspace — the J-space analog (present when features
+   *  were captured by the scorer). */
+  workspace?: DecisionWorkspace;
   /** True when zeroing any single token still leaves the same winner. */
   winnerRobustToTokenDeletion: boolean;
   interpretation: string[];
@@ -96,6 +144,49 @@ function matVec(m: number[][], v: number[]): number[] {
   return m.map((row) => dot(row, v));
 }
 
+/**
+ * Full symmetric eigendecomposition via the classic cyclic Jacobi rotation
+ * method — accurate on the small (≤8×8) Gram matrices here, and unlike
+ * power-iteration-with-deflation it returns every eigenvalue, which the
+ * participation ratio needs. Returns eigenpairs sorted by eigenvalue desc.
+ */
+function jacobiEigen(input: number[][], sweeps = 40): Array<{ value: number; vector: number[] }> {
+  const n = input.length;
+  const a = input.map((row) => row.slice());
+  const v: number[][] = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)));
+  for (let sweep = 0; sweep < sweeps; sweep++) {
+    let off = 0;
+    for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++) off += a[p][q] * a[p][q];
+    if (off < 1e-18) break;
+    for (let p = 0; p < n; p++) {
+      for (let q = p + 1; q < n; q++) {
+        if (Math.abs(a[p][q]) < 1e-18) continue;
+        const theta = (a[q][q] - a[p][p]) / (2 * a[p][q]);
+        const t = Math.sign(theta || 1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+        const c = 1 / Math.sqrt(t * t + 1);
+        const s = t * c;
+        for (let i = 0; i < n; i++) {
+          const aip = a[i][p], aiq = a[i][q];
+          a[i][p] = c * aip - s * aiq;
+          a[i][q] = s * aip + c * aiq;
+        }
+        for (let i = 0; i < n; i++) {
+          const api = a[p][i], aqi = a[q][i];
+          a[p][i] = c * api - s * aqi;
+          a[q][i] = s * api + c * aqi;
+        }
+        for (let i = 0; i < n; i++) {
+          const vip = v[i][p], viq = v[i][q];
+          v[i][p] = c * vip - s * viq;
+          v[i][q] = s * vip + c * viq;
+        }
+      }
+    }
+  }
+  return Array.from({ length: n }, (_, k) => ({ value: a[k][k], vector: v.map((row) => row[k]) }))
+    .sort((x, y) => y.value - x.value);
+}
+
 /** Power iteration on the symmetric PSD matrix A; deterministic start. */
 function powerIteration(a: number[][], iterations = 60): { value: number; vector: number[] } {
   const n = a.length;
@@ -109,6 +200,124 @@ function powerIteration(a: number[][], iterations = 60): { value: number; vector
     value = dot(matVec(a, v), v);
   }
   return { value, vector: v };
+}
+
+// ─── the decision workspace (the J-space analog) ────────────────────────────
+
+/**
+ * Build Splice's decision workspace from the candidates' concept-feature
+ * vectors: the low-dimensional space the target choice actually lives in, the
+ * concept-directions that carry it, and the softmax sensitivity of the emitted
+ * choice to each direction. Temperature sets how sharply scores → a decision;
+ * it only affects the readout (decisionJacobian, winnerProbability), not the
+ * geometry.
+ */
+export function buildDecisionWorkspace(candidates: JSpaceCandidate[], temperature = 8): DecisionWorkspace | undefined {
+  const withFeatures = candidates.filter((c) => c.features && Object.keys(c.features).length > 0);
+  if (withFeatures.length < 2) return undefined;
+
+  const concepts = Object.keys(withFeatures[0].features!);
+  const nC = concepts.length;
+  const nCand = withFeatures.length;
+
+  // Activation matrix A: candidates × concepts.
+  const A = withFeatures.map((c) => concepts.map((k) => c.features![k] ?? 0));
+  const winnerIdx = 0; // candidates arrive sorted by score
+
+  // Center each concept column: the workspace is the DISCRIMINATIVE subspace,
+  // so a concept every candidate shares equally contributes no dimension.
+  const colMean = concepts.map((_, k) => A.reduce((s, row) => s + row[k], 0) / nCand);
+  const Ac = A.map((row) => row.map((v, k) => v - colMean[k]));
+
+  // Gram matrix (concept × concept) → eigenpairs give the SVD of Ac.
+  const gram: number[][] = Array.from({ length: nC }, (_, i) =>
+    Array.from({ length: nC }, (_, j) => Ac.reduce((s, row) => s + row[i] * row[j], 0))
+  );
+  const eig = jacobiEigen(gram).map((e) => ({ value: Math.max(0, e.value), vector: e.vector }));
+  const eigenvalues = eig.map((e) => e.value);
+  const totalVar = eigenvalues.reduce((a, b) => a + b, 0);
+
+  // Effective dimensionality: participation ratio (Σλ)² / Σλ².
+  const sumSq = eigenvalues.reduce((a, b) => a + b * b, 0);
+  const effectiveDimension = totalVar > 1e-9 ? Number(((totalVar * totalVar) / sumSq).toFixed(2)) : 0;
+
+  // Top concept-directions (axes carrying real variance).
+  const conceptDirections = eig
+    .filter((e) => totalVar > 1e-9 && e.value / totalVar > 0.01)
+    .slice(0, 3)
+    .map((e, idx) => {
+      const sv = Math.sqrt(e.value);
+      // Winner's coordinate along this axis, and the field's spread on it.
+      const coords = Ac.map((row) => row.reduce((s, v, k) => s + v * e.vector[k], 0));
+      const winnerCoordinate = coords[winnerIdx];
+      const spread = Math.sqrt(coords.reduce((s, c) => s + c * c, 0) / nCand) || 1;
+      return {
+        axis: idx + 1,
+        singularValue: Number(sv.toFixed(3)),
+        varianceShare: Number((e.value / totalVar).toFixed(3)),
+        dominantConcepts: concepts
+          .map((concept, k) => ({ concept, loading: Number(e.vector[k].toFixed(3)) }))
+          .filter((c) => Math.abs(c.loading) > 0.2)
+          .sort((a, b) => Math.abs(b.loading) - Math.abs(a.loading))
+          .slice(0, 3),
+        winnerCoordinate: Number(winnerCoordinate.toFixed(3)),
+        separatesWinner: Math.abs(winnerCoordinate) >= spread,
+      };
+    });
+
+  // Softmax readout at temperature T, and the decision Jacobian w.r.t. each
+  // concept: d P(winner) / d(scale of concept k) = p_win·(A[win][k] − E_p[A[k]]).
+  const scores = withFeatures.map((c) => c.score);
+  const maxScore = Math.max(...scores);
+  const exps = scores.map((s) => Math.exp((s - maxScore) / temperature));
+  const expSum = exps.reduce((a, b) => a + b, 0);
+  const p = exps.map((e) => e / expSum);
+  const winnerProbability = p[winnerIdx];
+  const decisionJacobian = concepts
+    .map((concept, k) => {
+      const expected = A.reduce((s, row, j) => s + p[j] * row[k], 0);
+      const winnerVsField = A[winnerIdx][k] - expected;
+      return {
+        concept,
+        sensitivity: Number((winnerProbability * winnerVsField).toFixed(3)),
+        winnerVsField: Number(winnerVsField.toFixed(3)),
+      };
+    })
+    .sort((a, b) => Math.abs(b.sensitivity) - Math.abs(a.sensitivity));
+
+  const interpretation: string[] = [];
+  interpretation.push(
+    `The choice lives in an effectively ${effectiveDimension}-dimensional workspace spanned by ${nC} concept axes — decision-relevant information made globally available before the action is emitted.`
+  );
+  const topAxis = conceptDirections[0];
+  if (topAxis) {
+    interpretation.push(
+      `Its dominant direction (${Math.round(topAxis.varianceShare * 100)}% of the variance) loads on ${topAxis.dominantConcepts.map((c) => c.concept).join(' + ') || 'nothing'}; the winner ${topAxis.separatesWinner ? 'sits clear of the field' : 'is not well separated'} along it.`
+    );
+  }
+  const topSens = decisionJacobian.find((d) => Math.abs(d.sensitivity) > 1e-6);
+  interpretation.push(
+    topSens
+      ? `The emitted choice is most sensitive to "${topSens.concept}" (∂P(winner) ${topSens.sensitivity >= 0 ? '+' : ''}${topSens.sensitivity} per unit scale); the winner leads the field by ${topSens.winnerVsField} there.`
+      : 'No concept discriminates the winner from the field — the choice is a near-tie readout.'
+  );
+  interpretation.push(
+    `Softmax confidence in the winner: ${Math.round(winnerProbability * 100)}% at temperature ${temperature}.`
+  );
+  interpretation.push(
+    'Scope: this is Splice\'s own pre-action decision workspace, not the calling model\'s hidden activations — a structural J-space analog, not access to model internals.'
+  );
+
+  return {
+    concepts,
+    activations: withFeatures.map((c, i) => ({ label: c.label.slice(0, 60), vector: A[i] })),
+    effectiveDimension,
+    conceptDirections,
+    decisionJacobian,
+    winnerProbability: Number(winnerProbability.toFixed(3)),
+    temperature,
+    interpretation,
+  };
 }
 
 // ─── the explorer ───────────────────────────────────────────────────────────
@@ -232,6 +441,13 @@ export function exploreJSpace(intent: string, tokens: string[], allCandidates: J
       : 'At least one token is load-bearing: deleting it flips the winner.'
   );
 
+  const workspace = buildDecisionWorkspace(candidates);
+  if (workspace) {
+    interpretation.push(
+      `Decision workspace: the choice is an effectively ${workspace.effectiveDimension}-dimensional readout over ${workspace.concepts.length} concept axes (see workspace).`
+    );
+  }
+
   return {
     intent,
     tokens,
@@ -243,10 +459,12 @@ export function exploreJSpace(intent: string, tokens: string[], allCandidates: J
     geometry: { tokenLeverage, redundantPairs, orthogonalPairs, inertTokens },
     spectrum,
     flipBoundaries,
+    ...(workspace ? { workspace } : {}),
     winnerRobustToTokenDeletion,
     interpretation,
     method:
       'Exact analytic Jacobian of the linear keyword term, read from the instrumented production scorer. ' +
-      'Query-phrase bonus and exact-text penalty are token-joint (nonlinear) and held constant; the finite-difference lens is the empirical cross-check.',
+      'The decision workspace is the concept-feature space the choice is read out of — Splice\'s own pre-action J-space analog, ' +
+      'not the calling model\'s hidden state. Query-phrase bonus and exact-text penalty are token-joint (nonlinear) and held constant; the finite-difference lens is the empirical cross-check.',
   };
 }

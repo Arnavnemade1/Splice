@@ -1609,6 +1609,10 @@ export class BrowserManager {
     queryBonus: number;
     /** Everything token-independent: action affinity, penalties, link heuristics. */
     structuralScore: number;
+    /** Named concept-feature vector — Splice's "activation" for this candidate.
+     *  These are the interpretable directions the decision workspace is built
+     *  from (query match, keyword match, action affinity, obstruction, …). */
+    features: Record<string, number>;
   }>> {
     const page = this.getActivePage();
     return page.evaluate((args: { keywords: string[]; query: string; currentHost: string; noExternal: boolean; requireExactText: boolean; inferredAction: string }) => {
@@ -1650,17 +1654,28 @@ export class BrowserManager {
             href
           ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
           const normalized = label.toLowerCase();
-          let score = 0;
-          let queryBonus = 0;
-          if (args.query && normalized === args.query) queryBonus = 42;
-          else if (args.query && normalized.includes(args.query)) queryBonus = 30;
-          score += queryBonus;
+          // Named concept features — the decision workspace's axes. The score
+          // is exactly their sum, so each is an interpretable direction along
+          // which the choice can be moved.
+          const features: Record<string, number> = {
+            queryMatch: 0,
+            keywordMatch: 0,
+            exactTextGate: 0,
+            actionAffinity: 0,
+            navHeuristic: 0,
+            disabledPenalty: 0,
+            externalPenalty: 0,
+            obstructionPenalty: 0,
+          };
+          if (args.query && normalized === args.query) features.queryMatch = 42;
+          else if (args.query && normalized.includes(args.query)) features.queryMatch = 30;
+          const queryBonus = features.queryMatch;
           const keywordContributions = args.keywords.map((keyword): number =>
             normalized === keyword ? 24 : normalized.includes(keyword) ? 10 : 0
           );
-          for (const contribution of keywordContributions) score += contribution;
+          features.keywordMatch = keywordContributions.reduce((a, b) => a + b, 0);
           if (args.requireExactText && args.keywords.length > 0 && !args.keywords.some(keyword => normalized.includes(keyword))) {
-            score -= 30;
+            features.exactTextGate = -30;
           }
           // Action affinity: the inferred action constrains what kind of
           // element can possibly satisfy the intent. A typing intent must
@@ -1668,30 +1683,29 @@ export class BrowserManager {
           // how well the button's label happens to match.
           const editable = tagName === 'input' || tagName === 'textarea' || el.isContentEditable;
           if (args.inferredAction === 'type') {
-            if (editable) score += 12;
-            else score -= 30;
+            features.actionAffinity = editable ? 12 : -30;
           } else if (args.inferredAction === 'select') {
-            if (tagName === 'select') score += 12;
-            else score -= 20;
+            features.actionAffinity = tagName === 'select' ? 12 : -20;
           } else if (args.inferredAction === 'click') {
-            if (tagName === 'button' || el.getAttribute('role') === 'button') score += 3;
+            features.actionAffinity = (tagName === 'button' || el.getAttribute('role') === 'button') ? 3 : 0;
           }
-          if (tagName === 'a' && /pricing|docs|login|sign|dashboard|settings|account/.test(normalized)) score += 2;
-          if ((el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true') score -= 25;
+          if (tagName === 'a' && /pricing|docs|login|sign|dashboard|settings|account/.test(normalized)) features.navHeuristic = 2;
+          if ((el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true') features.disabledPenalty = -25;
 
           let external = false;
           if (href && args.noExternal) {
             try { external = new URL(href).host !== args.currentHost; } catch { external = false; }
-            if (external) score -= 40;
+            if (external) features.externalPenalty = -40;
           }
 
           const centerX = rect.left + rect.width / 2;
           const centerY = rect.top + rect.height / 2;
           const topElement = document.elementFromPoint(centerX, centerY);
           const obstructed = !!topElement && topElement !== el && !el.contains(topElement);
-          if (obstructed) score -= 12;
+          if (obstructed) features.obstructionPenalty = -12;
 
-          const keywordSum = keywordContributions.reduce((a, b) => a + b, 0);
+          const score = Object.values(features).reduce((a, b) => a + b, 0);
+          const keywordSum = features.keywordMatch;
           return {
             id,
             tagName,
@@ -1704,7 +1718,8 @@ export class BrowserManager {
             external,
             keywordContributions,
             queryBonus,
-            structuralScore: score - keywordSum - queryBonus
+            structuralScore: score - keywordSum - queryBonus,
+            features
           };
         })
         .filter(candidate => candidate.id)
