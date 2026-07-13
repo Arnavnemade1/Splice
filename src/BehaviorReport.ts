@@ -139,6 +139,8 @@ export function summarizeEvent(event: BehaviorEvent): string {
       return `asserted ${d.expectations} postcondition(s) → ${d.passed ? 'all hold' : `FAILED: ${str(d.summary, 100)}`}`;
     case 'execute_script':
       return `ran script: ${str(d.script, 70)}`;
+    case 'jacobian_lens':
+      return `inspected intent "${str(d.intent, 60)}" through the Jacobian lens${d.deep ? ' (deep J-space)' : ''} — ${Array.isArray(d.flips) && d.flips.length > 0 ? `load-bearing: ${(d.flips as string[]).join(', ')}` : 'choice stable'}`;
     case 'prompt_optimized':
       return `optimized prompt "${str(d.original, 60)}" → "${str(d.optimized, 60)}"${d.routedTo ? ` [routed to ${str(d.routedTo)}]` : ''}${d.groundedTo ? ` [grounded to "${str(d.groundedTo, 40)}"]` : ''}`;
     case 'speculative_delta':

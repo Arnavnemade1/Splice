@@ -225,9 +225,9 @@ export class OpenClawGateway {
         }
 
         case 'run_jacobian_lens': {
-          const { intent } = args || {};
+          const { intent, deep, topCandidates } = args || {};
           if (!intent) throw new Error('Missing "intent" parameter for run_jacobian_lens');
-          result = await this.browser.runJacobianLens(intent);
+          result = await this.browser.runJacobianLens(intent, { deep: deep === true, topCandidates });
           break;
         }
 

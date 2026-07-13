@@ -380,7 +380,7 @@ async function main() {
 
       const filesAfter = fs.existsSync(behaviorDir) ? fs.readdirSync(behaviorDir).length : 0;
       if (filesAfter !== filesBefore) throw new Error('getSessionTrace persisted something — it must be in-memory only.');
-      if (!trace.note.includes('nothing was persisted')) throw new Error('Trace is missing its ephemerality note.');
+      if (trace.ephemeral !== true) throw new Error('Trace must declare itself ephemeral.');
       return `${trace.returned}/${trace.totalEvents} events narrated live; filters honest; nothing written`;
     });
 
@@ -390,32 +390,60 @@ async function main() {
       await browser.waitFor([{ kind: 'text_present', value: 'quarterly reports' }], { timeoutMs: 4000, pollIntervalMs: 100 });
 
       const lens = await browser.runJacobianLens('click "Quarterly reports"');
-      if (!lens.baseline.winner || !lens.baseline.winner.label.includes('Quarterly reports')) {
-        throw new Error(`Wrong baseline winner: ${JSON.stringify(lens.baseline.winner)}`);
+      if (!lens.winner || !lens.winner.label.includes('Quarterly reports')) {
+        throw new Error(`Wrong baseline winner: ${JSON.stringify(lens.winner)}`);
       }
-      if (lens.stability !== 'robust') throw new Error(`Exact-label intent should be robust, got ${lens.stability}: ${lens.summary}`);
-      if (lens.tokenSensitivities.some((t) => t.winnerChanged)) throw new Error('No single-token removal should flip an exact-label intent.');
-      if (lens.tokenSensitivities.length !== lens.tokens.length) throw new Error('One sensitivity row per token expected.');
+      if (lens.perToken.length !== lens.tokens.length) throw new Error('One finite-difference row per token expected.');
+      if (lens.perToken.some((t) => t.winnerChanged)) throw new Error('No single-token removal should flip an exact-label intent.');
+      if (!lens.insight.includes('stable')) throw new Error(`Insight does not state stability: ${lens.insight}`);
       if (lens.actionImpact.length < 1) throw new Error('Lens is missing the ∂page/∂action section.');
-      return `winner "${lens.baseline.winner.label}" robust across ${lens.tokens.length} token removals; ${lens.actionImpact.length} action impact(s)`;
+      return `winner "${lens.winner.label}" stable across ${lens.tokens.length} token removals; ${lens.actionImpact.length} action impact(s)`;
     });
 
-    await step('Jacobian lens: a tie-broken intent is exposed as flipping', async () => {
+    await step('Jacobian lens: a tie-broken intent is exposed as fragile', async () => {
       await browser.navigate(`${fixture.url}/form`);
       // "confirm password" matches the confirm field AND the password field by
-      // one token each — the ranking tie-breaks on document order. The lens
-      // must expose that hidden fragility instead of letting it pass silently.
+      // one token each — the lens must expose that fragility instead of
+      // letting the tie-break pass silently.
       const lens = await browser.runJacobianLens('click confirm password');
-      if (lens.stability !== 'flips') throw new Error(`Expected a flip, got ${lens.stability}: ${lens.summary}`);
-      const flip = lens.tokenSensitivities.find((t) => t.winnerChanged);
-      if (!flip) throw new Error('Flip stability without a flipping row.');
-      if (!lens.mostLoadBearingToken) throw new Error('Flipping lens must name the load-bearing token.');
-      if (!lens.summary.includes('flips') && !lens.summary.includes('Fragile')) throw new Error(`Summary does not explain the fragility: ${lens.summary}`);
-      const row = lens.tokenSensitivities[0];
-      if (!Array.isArray(row.scoreDeltas) || row.scoreDeltas.some((d) => typeof d.delta !== 'number')) {
-        throw new Error('Sensitivity matrix cells must be numeric deltas.');
+      const flip = lens.perToken.find((t) => t.winnerChanged);
+      if (!flip) throw new Error(`Expected a load-bearing token flip: ${JSON.stringify(lens.perToken)}`);
+      if (!lens.insight.includes('Load-bearing')) throw new Error(`Insight does not name the fragility: ${lens.insight}`);
+      if (lens.perToken.some((t) => typeof t.topScoreDelta !== 'number')) throw new Error('Sensitivity cells must be numeric.');
+      return `flip exposed on "${flip.token}" → ${flip.newWinner}`;
+    });
+
+    await step('J-space: exact Jacobian, geometry, spectrum, and flip boundaries', async () => {
+      await browser.navigate(`${fixture.url}/menu`);
+      await browser.compileVerifiedAction({ intent: 'click "Products"', execute: true });
+      await browser.waitFor([{ kind: 'text_present', value: 'quarterly reports' }], { timeoutMs: 4000, pollIntervalMs: 100 });
+
+      const lens = await browser.runJacobianLens('click "Quarterly reports"', { deep: true });
+      const js = lens.jSpace;
+      if (!js) throw new Error('deep: true did not return the J-space report.');
+      if (js.jacobian.length !== js.tokens.length || js.jacobian[0].length !== js.candidates.length) {
+        throw new Error(`Jacobian shape mismatch: ${js.jacobian.length}×${js.jacobian[0]?.length} vs ${js.tokens.length} tokens × ${js.candidates.length} candidates.`);
       }
-      return `flip exposed on "${flip.token}": ${flip.winner} takes over; advice: quote the exact label`;
+      // Exact values: both tokens partially match only the winner's label (+10 each).
+      const qi = js.tokens.indexOf('quarterly');
+      if (qi < 0 || js.jacobian[qi][0] !== 10) throw new Error(`Expected exact +10 contribution of "quarterly" to the winner, got ${qi < 0 ? 'no token' : js.jacobian[qi][0]}.`);
+      // Geometry: the two tokens pull the same single candidate → collinear rows.
+      if (!js.geometry.redundantPairs.some((p) => [p.a, p.b].includes('quarterly'))) {
+        throw new Error(`Collinear tokens not detected: ${JSON.stringify(js.geometry)}`);
+      }
+      // Spectrum: one winner-vs-rest axis → effectively rank one.
+      if (js.spectrum.sigma1 <= 0) throw new Error('σ1 must be positive.');
+      if (js.spectrum.dominantModeEnergy < 0.99) throw new Error(`Expected rank-one sensitivity, energy ${js.spectrum.dominantModeEnergy}.`);
+      if (js.spectrum.sigma2 > 0.01 * js.spectrum.sigma1) throw new Error(`σ2 should be negligible, got ${js.spectrum.sigma2}.`);
+      // Flip boundaries: the margin dwarfs any single token's leverage.
+      if (!js.flipBoundaries.every((f) => f.unreachable)) throw new Error(`No single-token reweighting should reach the boundary: ${JSON.stringify(js.flipBoundaries)}`);
+      if (!js.winnerRobustToTokenDeletion) throw new Error('Winner should be robust to token deletion.');
+      // Cross-check: analytic predictions must match the finite-difference reruns.
+      if (!lens.consistency || lens.consistency.agreements !== lens.consistency.comparisons) {
+        throw new Error(`Analytic/FD disagreement: ${JSON.stringify(lens.consistency)}`);
+      }
+      if (js.interpretation.length < 3) throw new Error('J-space report is missing its interpretation.');
+      return `J ${js.tokens.length}×${js.candidates.length} exact; σ1 ${js.spectrum.sigma1} (energy ${js.spectrum.dominantModeEnergy}); boundary unreachable; analytic = FD ${lens.consistency.agreements}/${lens.consistency.comparisons}`;
     });
 
     // ── Long-horizon endurance: repeated traversal must stay healthy ──

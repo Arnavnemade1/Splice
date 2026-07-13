@@ -31,6 +31,7 @@ import { SpliceError, withRetry, isTransientError, errorMessage } from './Resili
 import { buildBehaviorReport, renderBehaviorMarkdown, summarizeEvent, type BehaviorEvent, type BehaviorReportDigest } from './BehaviorReport.js';
 import { optimizePrompt, type PageLabel, type PromptOptimization } from './PromptOptimizer.js';
 import { A11Y_RULES, sortFindings, summarizeAudit, type A11yAuditReport } from './AccessibilityAuditor.js';
+import { exploreJSpace, type JSpaceReport } from './JSpace.js';
 import { assembleJacobianReport, type JacobianLensReport } from './JacobianLens.js';
 import type { AgentStateDiagnosis, LedgerEntry, SemanticNode, SessionMetrics, VerifiedActionPlan, SummonRequest } from './types.js';
 import type {
@@ -1601,6 +1602,13 @@ export class BrowserManager {
     id: string; tagName: string; label: string; href: string; score: number;
     disabled: boolean; obstructed: boolean;
     rect: { x: number; y: number; width: number; height: number }; external: boolean;
+    /** Per-keyword score contribution, aligned with `keywords` — the exact
+     *  Jacobian column for this candidate (the linear part of the score). */
+    keywordContributions: number[];
+    /** Bonus from the full joined query matching the label (nonlinear in tokens). */
+    queryBonus: number;
+    /** Everything token-independent: action affinity, penalties, link heuristics. */
+    structuralScore: number;
   }>> {
     const page = this.getActivePage();
     return page.evaluate((args: { keywords: string[]; query: string; currentHost: string; noExternal: boolean; requireExactText: boolean; inferredAction: string }) => {
@@ -1643,12 +1651,14 @@ export class BrowserManager {
           ].filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
           const normalized = label.toLowerCase();
           let score = 0;
-          if (args.query && normalized === args.query) score += 42;
-          else if (args.query && normalized.includes(args.query)) score += 30;
-          for (const keyword of args.keywords) {
-            if (normalized === keyword) score += 24;
-            else if (normalized.includes(keyword)) score += 10;
-          }
+          let queryBonus = 0;
+          if (args.query && normalized === args.query) queryBonus = 42;
+          else if (args.query && normalized.includes(args.query)) queryBonus = 30;
+          score += queryBonus;
+          const keywordContributions = args.keywords.map((keyword): number =>
+            normalized === keyword ? 24 : normalized.includes(keyword) ? 10 : 0
+          );
+          for (const contribution of keywordContributions) score += contribution;
           if (args.requireExactText && args.keywords.length > 0 && !args.keywords.some(keyword => normalized.includes(keyword))) {
             score -= 30;
           }
@@ -1681,6 +1691,7 @@ export class BrowserManager {
           const obstructed = !!topElement && topElement !== el && !el.contains(topElement);
           if (obstructed) score -= 12;
 
+          const keywordSum = keywordContributions.reduce((a, b) => a + b, 0);
           return {
             id,
             tagName,
@@ -1690,7 +1701,10 @@ export class BrowserManager {
             disabled: (el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true',
             obstructed,
             rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-            external
+            external,
+            keywordContributions,
+            queryBonus,
+            structuralScore: score - keywordSum - queryBonus
           };
         })
         .filter(candidate => candidate.id)
@@ -3504,88 +3518,161 @@ export class BrowserManager {
   // -------------------------
 
   /**
+   * Live, ephemeral session introspection: exactly what the agent has been
+   * thinking (intents, target reasoning, diagnosis evidence) and what
+   * happened (actions, waits, outcomes), straight from the in-memory
+   * behavior log. Nothing is written to disk and no event is recorded for
+   * the introspection itself — observing the session does not change it.
+   */
+  getSessionTrace(options: { limit?: number; type?: string; sinceMs?: number; includeRaw?: boolean } = {}): {
+    totalEvents: number;
+    returned: number;
+    windowMs: number;
+    thinking: string[];
+    events?: BehaviorEvent[];
+    ephemeral: true;
+  } {
+    const { limit = 200, type, sinceMs, includeRaw = false } = options;
+    const cutoff = sinceMs !== undefined ? Date.now() - sinceMs : 0;
+    const matched = this.behaviorLog.filter(
+      (e) => e.timestamp >= cutoff && (type === undefined || e.type === type)
+    );
+    const window = matched.slice(-Math.max(1, limit));
+    const startedAt = window[0]?.timestamp ?? Date.now();
+    return {
+      totalEvents: this.behaviorLog.length,
+      returned: window.length,
+      windowMs: window.length > 0 ? window[window.length - 1].timestamp - startedAt : 0,
+      thinking: window.map((e) => `[+${((e.timestamp - startedAt) / 1000).toFixed(1)}s] ${summarizeEvent(e)}`),
+      ...(includeRaw ? { events: window } : {}),
+      ephemeral: true,
+    };
+  }
+
+  /**
+   * Amateur Jacobian lens: how sensitive is the agent's target choice to its
+   * own words? For each intent token, the ranking is re-run without it
+   * (finite differences over the real scorer) to show which words are
+   * load-bearing. With deep: true the exact analytic J-space is explored on
+   * top — token geometry, dominant sensitivity mode, and the precise
+   * reweighting boundaries where the choice would flip — plus a consistency
+   * check between the analytic prediction and the finite-difference rerun.
+   * Recent action→page sensitivity is read from the in-memory delta log.
+   */
+  async runJacobianLens(intent: string, options: { deep?: boolean; topCandidates?: number } = {}): Promise<{
+    intent: string;
+    tokens: string[];
+    winner: { label: string; score: number } | null;
+    runnerUp?: { label: string; score: number };
+    margin: number | null;
+    perToken: Array<{
+      token: string;
+      newWinner: string | null;
+      winnerChanged: boolean;
+      topScoreDelta: number;
+      marginDelta: number | null;
+    }>;
+    actionImpact: Array<{ at: number; summary: string }>;
+    jSpace?: JSpaceReport;
+    consistency?: { agreements: number; comparisons: number; note: string };
+    insight: string;
+    ephemeral: true;
+  }> {
+    if (!intent || intent.trim().length === 0) throw new Error('An intent is required.');
+    await this.ensureHealthy();
+
+    const tokens = this.tokenizeIntent(intent).slice(0, 8);
+    if (tokens.length === 0) throw new Error(`Intent "${intent}" has no rankable tokens to perturb.`);
+    const inferredAction = this.inferActionFromIntent(intent);
+    const currentHost = (() => {
+      try { return new URL(this.getActivePage().url()).host; } catch { return ''; }
+    })();
+
+    const baseline = await this.rankIntentCandidates(tokens, inferredAction, currentHost);
+    const winner = baseline[0] ?? null;
+    const runnerUp = baseline[1];
+    const margin = winner && runnerUp ? winner.score - runnerUp.score : null;
+
+    // Finite differences: leave each token out and re-run the real ranking.
+    const perToken: Array<{ token: string; newWinner: string | null; winnerChanged: boolean; topScoreDelta: number; marginDelta: number | null }> = [];
+    for (let i = 0; i < tokens.length; i++) {
+      const reduced = tokens.filter((_, idx) => idx !== i);
+      const ranked = reduced.length > 0 ? await this.rankIntentCandidates(reduced, inferredAction, currentHost) : [];
+      const newTop = ranked[0] ?? null;
+      const newMargin = newTop && ranked[1] ? newTop.score - ranked[1].score : null;
+      perToken.push({
+        token: tokens[i],
+        newWinner: newTop ? newTop.label.slice(0, 80) : null,
+        winnerChanged: !!winner && (!newTop || newTop.id !== winner.id),
+        topScoreDelta: (newTop?.score ?? 0) - (winner?.score ?? 0),
+        marginDelta: margin !== null && newMargin !== null ? Number((newMargin - margin).toFixed(3)) : null,
+      });
+    }
+
+    // Action→page sensitivity: what each recent action actually perturbed.
+    const actionImpact = this.behaviorLog
+      .filter((e) => e.type === 'semantic_delta')
+      .slice(-8)
+      .map((e) => ({ at: e.timestamp, summary: String(e.data.summary ?? '').slice(0, 140) }));
+
+    let jSpace: JSpaceReport | undefined;
+    let consistency: { agreements: number; comparisons: number; note: string } | undefined;
+    if (options.deep && winner) {
+      jSpace = exploreJSpace(intent, tokens, baseline, options.topCandidates ?? 6);
+      // Cross-check: analytic winner with token i zeroed vs the FD rerun.
+      let agreements = 0;
+      for (let i = 0; i < tokens.length; i++) {
+        const analyticScores = baseline.map((c) => c.score - (c.keywordContributions[i] ?? 0));
+        const analyticWinner = baseline[analyticScores.indexOf(Math.max(...analyticScores))];
+        const fdWinner = perToken[i].newWinner;
+        if (fdWinner !== null && analyticWinner.label.slice(0, 80) === fdWinner) agreements++;
+      }
+      consistency = {
+        agreements,
+        comparisons: tokens.length,
+        note: agreements === tokens.length
+          ? 'Analytic J-space predictions match the finite-difference reruns exactly.'
+          : 'Disagreements come from the token-joint terms (query-phrase bonus, exact-text penalty) that the linear J holds constant.',
+      };
+    }
+
+    const flips = perToken.filter((p) => p.winnerChanged).map((p) => p.token);
+    const insight = winner
+      ? flips.length > 0
+        ? `Load-bearing token(s): ${flips.join(', ')} — removing any of them changes the chosen target away from "${winner.label.slice(0, 60)}".`
+        : `The choice of "${winner.label.slice(0, 60)}" is stable under every single-token deletion${margin !== null ? ` (margin ${margin})` : ''}.`
+      : 'No candidate scored at all — the intent tokens match nothing on this page.';
+
+    this.saveMicroSnapshot('jacobian_lens', {
+      intent: intent.slice(0, 100),
+      tokens,
+      winner: winner?.label.slice(0, 80) ?? null,
+      flips,
+      deep: options.deep === true,
+    });
+
+    return {
+      intent,
+      tokens,
+      winner: winner ? { label: winner.label.slice(0, 80), score: winner.score } : null,
+      ...(runnerUp ? { runnerUp: { label: runnerUp.label.slice(0, 80), score: runnerUp.score } } : {}),
+      margin,
+      perToken,
+      actionImpact,
+      ...(jSpace ? { jSpace } : {}),
+      ...(consistency ? { consistency } : {}),
+      insight,
+      ephemeral: true,
+    };
+  }
+
+  /**
    * Chain-of-thought behavior report: reconstructs what the agent observed,
    * decided, and did this session, scores action quality and observation
    * economy, and emits prioritized self-improvement recommendations. Written
    * as machine-readable JSON (feed it back to the agent at the start of the
    * next run — or mid-run on long traversals) plus a markdown rendering.
    */
-  /**
-   * Live, ephemeral introspection: exactly what the agent thought and did
-   * this session, straight from the in-memory behavior log. Unlike
-   * generateBehaviorReport, nothing is written to disk and no scores are
-   * computed — this is the raw chain of thought (intents, target reasoning,
-   * diagnoses with evidence, waits, assertions, outcomes), newest last.
-   */
-  getSessionTrace(options: { limit?: number; type?: string; sinceMs?: number; includeRaw?: boolean } = {}): {
-    totalEvents: number;
-    returned: number;
-    sessionDurationMs: number;
-    thinking: string[];
-    events?: BehaviorEvent[];
-    note: string;
-  } {
-    const { limit = 100, type, sinceMs, includeRaw = false } = options;
-    const cutoff = sinceMs !== undefined ? Date.now() - sinceMs : 0;
-    const filtered = this.behaviorLog.filter(
-      (e) => e.timestamp >= cutoff && (type === undefined || e.type === type)
-    );
-    const window = filtered.slice(-Math.max(1, limit));
-    const startedAt = this.behaviorLog[0]?.timestamp ?? Date.now();
-    return {
-      totalEvents: this.behaviorLog.length,
-      returned: window.length,
-      sessionDurationMs: this.behaviorLog.length > 0 ? Date.now() - startedAt : 0,
-      thinking: window.map((e) => `[+${((e.timestamp - startedAt) / 1000).toFixed(1)}s] ${summarizeEvent(e)}`),
-      ...(includeRaw ? { events: window } : {}),
-      note: 'In-memory only — nothing was persisted by this call. For a scored, saved digest use generate_behavior_report.',
-    };
-  }
-
-  /**
-   * Amateur Jacobian lens: finite-difference sensitivity of target selection.
-   * Re-runs the real candidate ranking with one intent token removed at a
-   * time, revealing which words are load-bearing, whether the chosen target
-   * would flip, and how much page state each recent action actually moved.
-   * Live and ephemeral — nothing is persisted.
-   */
-  async runJacobianLens(intent: string): Promise<JacobianLensReport> {
-    if (!intent || intent.trim().length === 0) throw new Error('An intent is required.');
-    await this.ensureHealthy();
-
-    const keywords = this.tokenizeIntent(intent).slice(0, 8);
-    const inferredAction = this.inferActionFromIntent(intent);
-    const page = this.getActivePage();
-    const currentHost = (() => {
-      try { return new URL(page.url()).host; } catch { return ''; }
-    })();
-
-    const toRanked = (candidates: Awaited<ReturnType<BrowserManager['rankIntentCandidates']>>) =>
-      candidates.map((c) => ({ id: c.id, label: c.label, score: c.score }));
-
-    const baseline = toRanked(await this.rankIntentCandidates(keywords, inferredAction, currentHost));
-    const perturbed = [];
-    for (const token of keywords) {
-      const without = keywords.filter((k) => k !== token);
-      perturbed.push({ token, ranking: toRanked(await this.rankIntentCandidates(without, inferredAction, currentHost)) });
-    }
-
-    // ∂page/∂action: what each recent action actually changed, from the
-    // session's recorded deltas.
-    const actionImpact = this.behaviorLog
-      .filter((e) => e.type === 'semantic_delta')
-      .slice(-5)
-      .map((e) => ({
-        sinceActionId: typeof e.data.sinceActionId === 'string' ? e.data.sinceActionId : undefined,
-        added: Number(e.data.added ?? 0),
-        removed: Number(e.data.removed ?? 0),
-        changed: Number(e.data.changed ?? 0),
-        summary: String(e.data.summary ?? '').slice(0, 140),
-      }));
-
-    return assembleJacobianReport(intent, keywords, baseline, perturbed, actionImpact);
-  }
-
   generateBehaviorReport(): { digest: BehaviorReportDigest; jsonPath: string; markdownPath: string } {
     const digest = buildBehaviorReport({
       events: this.behaviorLog,

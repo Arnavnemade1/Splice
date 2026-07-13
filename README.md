@@ -83,7 +83,7 @@ Modern autonomous web agents fail because browsers are stateful, noisy, and adve
 ### 🔍 Agent Introspection
 
 - `get_session_trace` — live, ephemeral chain of thought straight from memory: every intent with its target reasoning, every diagnosis, wait, and outcome. Nothing persisted.
-- `run_jacobian_lens` — an (amateur) finite-difference sensitivity probe of target selection: re-runs the real ranking with one intent token removed at a time to show which words are load-bearing, whether the chosen target flips without them, and how much page state each recent action actually moved.
+- `run_jacobian_lens` — an (amateur) sensitivity probe of target selection: re-runs the real ranking with one intent token removed at a time to show which words are load-bearing, whether the chosen target flips without them, and how much page state each recent action actually moved. With `deep: true` it looks into the J space itself: the scorer's keyword term is linear, so the **exact analytic Jacobian** `J[token][candidate]` is read off the instrumented ranking and explored — token geometry (collinear vs orthogonal words, inert tokens), the dominant sensitivity mode via power-iteration SVD with its energy share, and analytic flip boundaries (the precise reweighting at which the choice would flip, or proof that no single token can flip it) — cross-checked against the finite-difference reruns.
 - `generate_behavior_report` — the persisted counterpart: scored chain-of-thought digest with self-improvement recommendations, written to `.splice/behavior/`.
 
 ---

@@ -444,12 +444,14 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "run_jacobian_lens",
-        description: "Amateur Jacobian lens — a finite-difference sensitivity probe of target selection (Jacobian in spirit, not calculus). Re-runs the REAL candidate ranking behind compile_verified_action with one intent token removed at a time and returns the sensitivity matrix: which words are load-bearing, whether the chosen target flips without them, and how stable the winner's margin is (robust / fragile / flips). Also reports ∂page/∂action for recent actions — how many elements each one actually added, removed, or changed. Use it before acting on an ambiguous page to see whether your intent is well-grounded, or when a compiled action picked a surprising target to understand why. Live and ephemeral; nothing persisted.",
+        description: "Amateur Jacobian lens — sensitivity analysis of target selection. The base layer is finite differences: the REAL candidate ranking behind compile_verified_action is re-run with one intent token removed at a time, showing which words are load-bearing and whether the chosen target flips without them, plus ∂page/∂action for recent actions. With deep: true it looks into the J space itself: the keyword term of the scorer is linear, so the exact analytic Jacobian J[token][candidate] is read directly off the instrumented ranking — then explored: token geometry (collinear/redundant vs orthogonal words, inert tokens), an amateur power-iteration SVD giving the dominant sensitivity mode and its energy, and analytic flip boundaries (the precise per-token reweighting at which the choice would flip, or proof that no single token can flip it). A consistency section cross-checks the analytic predictions against the finite-difference reruns; disagreements localize the scorer's nonlinear terms. Use it before acting on an ambiguous page, or when a compiled action picked a surprising target. Live and ephemeral; the report is not persisted.",
         annotations: { title: "Jacobian Lens (Intent Sensitivity)", readOnlyHint: true },
         inputSchema: {
           type: "object",
           properties: {
             intent: { type: "string", description: "The intent to probe, e.g. 'click \"Confirm password\"'. Uses the same tokenization and scoring as compile_verified_action." },
+            deep: { type: "boolean", description: "Explore the J space: exact analytic Jacobian, token geometry, dominant sensitivity mode (power-iteration SVD), flip boundaries, and the analytic-vs-finite-difference consistency check. Default false." },
+            topCandidates: { type: "number", description: "How many top candidates the deep J-space analysis spans (default 6, max 8)." },
           },
           required: ["intent"],
         },
@@ -1091,8 +1093,11 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
     }
 
     if (request.params.name === "run_jacobian_lens") {
-      const { intent } = request.params.arguments as { intent: string };
-      const lens = await browser.runJacobianLens(intent);
+      const { intent, deep, topCandidates } = request.params.arguments as { intent: string; deep?: boolean; topCandidates?: number };
+      const lens = await browser.runJacobianLens(intent, {
+        deep: deep === true,
+        topCandidates: typeof topCandidates === 'number' ? Math.min(8, topCandidates) : undefined,
+      });
       return { content: [{ type: "text", text: JSON.stringify(lens, null, 2) }] };
     }
 
