@@ -2,13 +2,17 @@
 
 <img src="assets/logo.svg" alt="Splice — two strands spliced into one" width="440">
 
-### Browser cognition infrastructure for autonomous coding agents
+### Splice — two strands spliced into one
+
+#### Browser cognition infrastructure for autonomous coding agents
 
 [![CI](https://github.com/Arnavnemade1/Splice/workflows/CI/badge.svg)](https://github.com/Arnavnemade1/Splice/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-black.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6+-3178c6.svg)](https://www.typescriptlang.org/)
 [![Python](https://img.shields.io/badge/Python-3.10+-3776ab.svg)](https://www.python.org/)
 [![MCP](https://img.shields.io/badge/MCP-ready-41e6a2.svg)](https://modelcontextprotocol.io/)
+
+CI · License: MIT · TypeScript · Python · MCP
 
 Splice is an **MCP server** that gives AI coding agents a browser they can actually reason about. It doesn't stop at screenshots or raw DOM — it diagnoses browser state, compiles natural-language intent into verified actions, redacts hostile page content, isolates multi-account sessions, coordinates multiple agents on shared browser state, and records the evidence agents need to recover and improve.
 
