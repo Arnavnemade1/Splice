@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Get started — Splice</title>
+  <meta name="description" content="Free, MIT-licensed, and running entirely on your machine. Clone, build, and connect Splice to your agent in about two minutes.">
+  <link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="index.html" class="brand" aria-label="Splice home">
+        <svg width="22" height="22" viewBox="0 0 120 120" fill="none" aria-hidden="true">
+          <path d="M 22 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 98 90" stroke="currentColor" stroke-width="13" stroke-linecap="round"/>
+          <path d="M 98 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 22 90" stroke="currentColor" stroke-width="13" stroke-linecap="round" opacity="0.45"/>
+        </svg>
+        <span>Splice</span>
+      </a>
+      <div class="nav-links">
+        <a href="features.html">Features</a>
+        <a href="how.html">How it works</a>
+        <a href="agents.html">For agents</a>
+        <a href="https://github.com/Arnavnemade1/Splice" target="_blank" rel="noopener">GitHub</a>
+      </div>
+      <a href="start.html" class="btn btn-primary btn-sm" aria-current="page">Get started</a>
+    </div>
+  </nav>
+
+  <main>
+
+    <header class="pagehead">
+      <div class="media" aria-hidden="true">
+        <!-- Aurora borealis time-lapse via Pexels (Pexels License, commercial use OK). See index.html for full credit. -->
+        <video autoplay muted loop playsinline preload="auto"
+          poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='9'%3E%3Crect width='16' height='9' fill='%2305070d'/%3E%3C/svg%3E">
+          <source src="https://videos.pexels.com/video-files/852435/852435-hd_1920_1080_30fps.mp4" type="video/mp4">
+        </video>
+        <div class="media-scrim"></div>
+      </div>
+      <div class="container">
+        <p class="pill"><span class="pill-dot"></span>Free · MIT · Local</p>
+        <h1>Get started.</h1>
+        <p class="lede">Three lines. It clones, builds, and connects to Claude Code — then runs entirely on your machine.</p>
+      </div>
+    </header>
+
+    <section class="section">
+      <div class="container narrow">
+        <div class="code" data-copy data-reveal>
+          <pre><code>git clone https://github.com/Arnavnemade1/Splice.git
+cd Splice &amp;&amp; npm install &amp;&amp; npm run build
+claude mcp add splice -- node dist/cli.js start</code></pre>
+          <button class="copy-btn" aria-label="Copy install commands">Copy</button>
+        </div>
+
+        <div class="mini-list" style="margin-top:36px">
+          <div class="mini" data-reveal data-delay="1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
+            <div><strong>Node 20+</strong><span>The only prerequisite. The doctor checks the rest.</span></div>
+          </div>
+          <div class="mini" data-reveal data-delay="2">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2"/><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 12h8M8 16h5"/></svg>
+            <div><strong>Claude Code, Desktop &amp; Cursor</strong><span><code class="inline">splice init</code> prints the snippet for each.</span></div>
+          </div>
+          <div class="mini" data-reveal data-delay="3">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+            <div><strong>No cloud, no telemetry</strong><span>Everything stays on your machine. Session state is encrypted at rest.</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-tight">
+      <div class="container">
+        <div class="callout" data-reveal>
+          <h2>That's the whole install.</h2>
+          <p class="section-lede" style="margin:14px auto 30px">Star it if it saves your agents from one bad click. It probably will.</p>
+          <div class="hero-actions" style="margin-top:0">
+            <a href="https://github.com/Arnavnemade1/Splice" class="btn btn-primary" target="_blank" rel="noopener">Star on GitHub</a>
+            <a href="https://github.com/Arnavnemade1/Splice#readme" class="btn btn-glass" target="_blank" rel="noopener"><span class="btn-arrow">Read the docs</span></a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <a href="index.html" class="brand" aria-label="Splice home">
+        <svg width="18" height="18" viewBox="0 0 120 120" fill="none" aria-hidden="true">
+          <path d="M 22 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 98 90" stroke="currentColor" stroke-width="13" stroke-linecap="round"/>
+          <path d="M 98 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 22 90" stroke="currentColor" stroke-width="13" stroke-linecap="round" opacity="0.45"/>
+        </svg>
+        <span>Splice</span>
+      </a>
+      <div class="footer-links">
+        <a href="features.html">Features</a>
+        <a href="how.html">How it works</a>
+        <a href="agents.html">For agents</a>
+        <a href="start.html">Get started</a>
+        <a href="https://github.com/Arnavnemade1/Splice" target="_blank" rel="noopener">GitHub</a>
+      </div>
+      <p class="footer-copy">Browser cognition for autonomous agents · MIT licensed.</p>
+    </div>
+  </footer>
+
+  <script src="scripts.js"></script>
+</body>
+</html>

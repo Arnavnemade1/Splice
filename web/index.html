@@ -3,19 +3,19 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Splice — a reliable browser for your coding agent</title>
-  <meta name="description" content="Splice is an MCP server that gives coding agents a self-healing browser: verified actions, failure diagnosis, token-efficient observation, and behavior reports.">
+  <title>Splice — a browser your coding agent can rely on</title>
+  <meta name="description" content="Splice is an MCP server that gives coding agents a self-healing browser: it diagnoses the page, verifies every action, and learns from every failure.">
   <link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
   <nav class="nav">
     <div class="nav-inner">
-      <a href="#" class="nav-logo" aria-label="Splice home">
+      <a href="index.html" class="brand" aria-label="Splice home">
         <svg width="22" height="22" viewBox="0 0 120 120" fill="none" aria-hidden="true">
           <path d="M 22 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 98 90" stroke="currentColor" stroke-width="13" stroke-linecap="round"/>
           <path d="M 98 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 22 90" stroke="currentColor" stroke-width="13" stroke-linecap="round" opacity="0.45"/>
@@ -23,192 +23,104 @@
         <span>Splice</span>
       </a>
       <div class="nav-links">
-        <a href="#how">How it works</a>
-        <a href="#features">Features</a>
-        <a href="#agents">For agents</a>
+        <a href="features.html">Features</a>
+        <a href="how.html">How it works</a>
+        <a href="agents.html">For agents</a>
         <a href="https://github.com/Arnavnemade1/Splice" target="_blank" rel="noopener">GitHub</a>
       </div>
-      <a href="#install" class="btn btn-primary btn-sm">Get started</a>
+      <a href="start.html" class="btn btn-primary btn-sm">Get started</a>
     </div>
   </nav>
 
   <main>
 
     <!-- Hero -->
-    <header class="hero" id="top">
-      <div class="hero-media" aria-hidden="true">
+    <header class="hero">
+      <div class="media" aria-hidden="true">
         <!--
           Cinematic background: "Time Lapse Video Of Aurora Borealis" via Pexels.
           Source:  https://www.pexels.com/video/time-lapse-video-of-aurora-borealis-852435/
           License: Pexels License — free for commercial and personal use, no attribution required.
-          A natural event (the aurora borealis) chosen for atmosphere, not literal "AI" imagery.
+          A natural event (the aurora borealis), chosen for atmosphere rather than literal "AI" imagery.
         -->
-        <video
-          class="hero-video"
-          autoplay muted loop playsinline preload="auto"
-          poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='9'%3E%3Crect width='16' height='9' fill='%23060810'/%3E%3C/svg%3E">
+        <video autoplay muted loop playsinline preload="auto"
+          poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='9'%3E%3Crect width='16' height='9' fill='%2305070d'/%3E%3C/svg%3E">
           <source src="https://videos.pexels.com/video-files/852435/852435-hd_1920_1080_30fps.mp4" type="video/mp4">
         </video>
-        <div class="hero-scrim"></div>
+        <div class="media-scrim"></div>
       </div>
 
       <div class="container hero-content">
-        <p class="eyebrow"><span class="eyebrow-dot"></span>Open source · MCP server · MIT</p>
+        <p class="pill"><span class="pill-dot"></span>Open source · MCP server · MIT</p>
         <h1>A browser your coding agent<br>can actually rely on.</h1>
-        <p class="lede">
-          Agents fail in browsers for boring reasons — a modal they didn't see, a form that silently
-          rejected them, a page that re-rendered mid-click. Splice is the layer that diagnoses the
-          page, verifies every action, and learns from every failure.
-        </p>
+        <p class="lede">The layer that diagnoses the page, verifies every action, and learns from every failure.</p>
         <div class="hero-actions">
-          <a href="#install" class="btn btn-primary">Install in 2 minutes</a>
-          <a href="https://github.com/Arnavnemade1/Splice" class="btn btn-glass" target="_blank" rel="noopener">View on GitHub</a>
+          <a href="start.html" class="btn btn-primary">Install in 2 minutes</a>
+          <a href="features.html" class="btn btn-glass"><span class="btn-arrow">Explore features</span></a>
         </div>
         <p class="hero-note">Works with Claude Code, Claude Desktop, and Cursor. Node 20+.</p>
       </div>
 
-      <a href="#how" class="hero-scroll" aria-label="Scroll to content">
-        <span class="hero-scroll-line"></span>
-      </a>
+      <a href="#why" class="hero-scroll" aria-label="Scroll to content"><span></span></a>
     </header>
 
-    <!-- Proof strip -->
-    <section class="strip" aria-label="Key numbers">
-      <div class="container strip-inner">
-        <div class="stat"><strong>1 call</strong><span>replaces fill → check → retry loops</span></div>
-        <div class="stat"><strong>Fewer tokens</strong><span>agents read only what changed on the page</span></div>
-        <div class="stat"><strong>0 silent failures</strong><span>every action verified against the page</span></div>
-        <div class="stat"><strong>73 checks</strong><span>in the local test suites, all offline</span></div>
-      </div>
-    </section>
-
-    <!-- How it works -->
-    <section class="section" id="how">
+    <!-- Why -->
+    <section class="section" id="why">
       <div class="container">
-        <h2>How it works</h2>
-        <p class="section-lede">Three steps, then your agent stops guessing.</p>
-        <ol class="steps">
-          <li>
-            <span class="step-num">1</span>
-            <div class="step-body">
-              <h3>Install</h3>
-              <p>Clone, build, and health-check. The doctor tells you exactly what to fix if anything is off.</p>
-              <div class="code" data-copy>
-                <pre><code>git clone https://github.com/Arnavnemade1/Splice.git
-cd Splice &amp;&amp; npm install &amp;&amp; npm run build
-node dist/cli.js doctor</code></pre>
-                <button class="copy-btn" aria-label="Copy commands">Copy</button>
-              </div>
+        <div class="section-head center" data-reveal>
+          <span class="kicker">The problem</span>
+          <h2>Agents don't fail because they're dumb.<br>They fail because the page lied.</h2>
+          <p class="section-lede">A modal they didn't see. A form that silently rejected them. A re-render mid-click. Splice closes the gap between what the agent intended and what the page actually did.</p>
+        </div>
+
+        <div class="bento" style="margin-top:52px">
+          <div class="card" data-reveal data-delay="1">
+            <div class="card-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2 6 4-14 2 8h6"/></svg>
             </div>
-          </li>
-          <li>
-            <span class="step-num">2</span>
-            <div class="step-body">
-              <h3>Connect your agent</h3>
-              <p>One line for Claude Code. <code>splice init</code> prints snippets for Claude Desktop and Cursor.</p>
-              <div class="code" data-copy>
-                <pre><code>claude mcp add splice -- node dist/cli.js start</code></pre>
-                <button class="copy-btn" aria-label="Copy command">Copy</button>
-              </div>
+            <h3>Diagnose</h3>
+            <p>Before acting, the agent asks what state the page is in — and gets a straight answer, not a screenshot to guess from.</p>
+          </div>
+          <div class="card" data-reveal data-delay="2">
+            <div class="card-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
             </div>
-          </li>
-          <li>
-            <span class="step-num">3</span>
-            <div class="step-body">
-              <h3>Let it work</h3>
-              <p>The agent diagnoses each page before acting, executes intents that are verified after the fact, and reads only what changed — not the whole page, every time.</p>
-              <div class="code" data-copy>
-                <pre><code>compile_verified_action { intent: 'click "Place order"',
-  expect: [{ kind: "url_contains", value: "/thanks" }] }</code></pre>
-                <button class="copy-btn" aria-label="Copy example">Copy</button>
-              </div>
+            <h3>Verify</h3>
+            <p>Every intent is checked against the page after it runs. No silent failures — the agent knows if it worked.</p>
+          </div>
+          <div class="card" data-reveal data-delay="3">
+            <div class="card-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
             </div>
-          </li>
-        </ol>
+            <h3>Recover</h3>
+            <p>When a fix works, Splice remembers it per site and offers it the next time the same wall appears.</p>
+          </div>
+        </div>
       </div>
     </section>
 
-    <!-- Features -->
-    <section class="section section-alt" id="features">
+    <!-- Stats -->
+    <section class="section-tight">
       <div class="container">
-        <h2>What you get</h2>
-        <p class="section-lede">Everything an agent needs to survive real web apps, in one server.</p>
-        <div class="grid">
-          <div class="card">
-            <h3>Verified actions</h3>
-            <p>Say what you want in plain language. Splice picks the target, checks preconditions, acts, then proves the outcome — or tells you it didn't happen.</p>
-          </div>
-          <div class="card">
-            <h3>Failure diagnosis</h3>
-            <p>Stuck agents ask "what state is this page in?" and get an answer: blocked by a modal, failing validation, waiting on the network — with the recommended next move.</p>
-          </div>
-          <div class="card">
-            <h3>Token-efficient observation</h3>
-            <p>After the first look at a page, agents receive only what changed. Framework re-renders are filtered out instead of read as new content.</p>
-          </div>
-          <div class="card">
-            <h3>Recovery memory</h3>
-            <p>When a fix works — closing that cookie banner, dismissing that upsell — Splice remembers it per site and suggests it the next time the same wall appears.</p>
-          </div>
-          <div class="card">
-            <h3>Behavior reports</h3>
-            <p>Every session can be replayed as a readable chain of thought with scores and specific recommendations, so the next run is better than the last.</p>
-          </div>
-          <div class="card">
-            <h3>Prompt optimization</h3>
-            <p>Verbose instructions get rewritten into the terse, grounded intents that rank best — only with permission, never silently.</p>
-          </div>
-          <div class="card">
-            <h3>Accessibility audits</h3>
-            <p>Scored WCAG checks with concrete fixes. Pages that fail them are exactly the pages agents struggle with — fixing one fixes both.</p>
-          </div>
-          <div class="card">
-            <h3>Security guardrails</h3>
-            <p>Prompt-injection text is redacted before your agent reads it, secrets are blocked from leaving in requests, and session state is encrypted at rest.</p>
-          </div>
-          <div class="card">
-            <h3>Self-healing runtime</h3>
-            <p>Browser crashes recover automatically with state restored. A journal records every call so any run can be debugged after the fact.</p>
-          </div>
+        <div class="stats" data-reveal>
+          <div class="stat"><strong>1 call</strong><span>replaces fill → check → retry loops</span></div>
+          <div class="stat"><strong>Fewer tokens</strong><span>agents read only what changed</span></div>
+          <div class="stat"><strong>0</strong><span>silent failures — every action verified</span></div>
+          <div class="stat"><strong>73 checks</strong><span>in the local suites, all offline</span></div>
         </div>
       </div>
     </section>
 
-    <!-- For agents -->
-    <section class="section" id="agents">
-      <div class="container narrow">
-        <h2>Agents install it themselves</h2>
-        <p class="section-lede">
-          Point any coding agent at the install guide. Every step is a command with a
-          machine-checkable success criterion — the agent isn't done until
-          <code>splice doctor --json</code> says <code>"healthy": true</code>.
-        </p>
-        <div class="code" data-copy>
-          <pre><code>Read https://github.com/Arnavnemade1/Splice/blob/main/AGENT_INSTALL.md
-and follow it. Verify with `npx splice doctor --json` before reporting success.</code></pre>
-          <button class="copy-btn" aria-label="Copy agent prompt">Copy</button>
-        </div>
-        <p class="section-note">
-          That's the whole prompt. Once connected, the agent reads the built-in playbook resource
-          and knows the loop: diagnose → act verified → confirm → recover.
-        </p>
-      </div>
-    </section>
-
-    <!-- Install CTA -->
-    <section class="section section-alt" id="install">
-      <div class="container narrow center">
-        <h2>Get started</h2>
-        <p class="section-lede">Free, MIT-licensed, runs entirely on your machine.</p>
-        <div class="code code-left" data-copy>
-          <pre><code>git clone https://github.com/Arnavnemade1/Splice.git
-cd Splice &amp;&amp; npm install &amp;&amp; npm run build
-claude mcp add splice -- node dist/cli.js start</code></pre>
-          <button class="copy-btn" aria-label="Copy install commands">Copy</button>
-        </div>
-        <div class="hero-actions">
-          <a href="https://github.com/Arnavnemade1/Splice" class="btn btn-primary" target="_blank" rel="noopener">Star on GitHub</a>
-          <a href="https://github.com/Arnavnemade1/Splice#readme" class="btn btn-ghost" target="_blank" rel="noopener">Read the docs</a>
+    <!-- CTA -->
+    <section class="section">
+      <div class="container">
+        <div class="callout" data-reveal>
+          <h2>Give your agent a browser it can trust.</h2>
+          <p class="section-lede" style="margin:14px auto 30px">Free, MIT-licensed, and running entirely on your machine in about two minutes.</p>
+          <div class="hero-actions" style="margin-top:0">
+            <a href="start.html" class="btn btn-primary">Get started</a>
+            <a href="how.html" class="btn btn-glass"><span class="btn-arrow">See how it works</span></a>
+          </div>
         </div>
       </div>
     </section>
@@ -217,7 +129,7 @@ claude mcp add splice -- node dist/cli.js start</code></pre>
 
   <footer class="footer">
     <div class="container footer-inner">
-      <a href="#" class="nav-logo" aria-label="Splice home">
+      <a href="index.html" class="brand" aria-label="Splice home">
         <svg width="18" height="18" viewBox="0 0 120 120" fill="none" aria-hidden="true">
           <path d="M 22 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 98 90" stroke="currentColor" stroke-width="13" stroke-linecap="round"/>
           <path d="M 98 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 22 90" stroke="currentColor" stroke-width="13" stroke-linecap="round" opacity="0.45"/>
@@ -225,11 +137,13 @@ claude mcp add splice -- node dist/cli.js start</code></pre>
         <span>Splice</span>
       </a>
       <div class="footer-links">
+        <a href="features.html">Features</a>
+        <a href="how.html">How it works</a>
+        <a href="agents.html">For agents</a>
+        <a href="start.html">Get started</a>
         <a href="https://github.com/Arnavnemade1/Splice" target="_blank" rel="noopener">GitHub</a>
-        <a href="https://github.com/Arnavnemade1/Splice/blob/main/AGENT_INSTALL.md" target="_blank" rel="noopener">Agent install</a>
-        <a href="https://github.com/Arnavnemade1/Splice/blob/main/LICENSE" target="_blank" rel="noopener">MIT license</a>
       </div>
-      <p class="footer-copy">Browser cognition for autonomous agents.</p>
+      <p class="footer-copy">Browser cognition for autonomous agents · MIT licensed.</p>
     </div>
   </footer>
 

@@ -1,6 +1,8 @@
-// Splice site — minimal interactivity: nav state, reduced motion, copy buttons.
+// Splice site — nav state, scroll reveal, hover glow, reduced motion, copy buttons.
 
-// Swap the nav from its transparent over-hero state to a solid bar once scrolled.
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* Nav: transparent over the hero, solid once scrolled. */
 const nav = document.querySelector('.nav');
 if (nav) {
   const setNavState = () => nav.classList.toggle('scrolled', window.scrollY > 40);
@@ -8,15 +10,41 @@ if (nav) {
   window.addEventListener('scroll', setNavState, { passive: true });
 }
 
-// Honor reduced-motion: hold the hero video on its first frame instead of looping.
-if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-  const heroVideo = document.querySelector('.hero-video');
-  if (heroVideo) {
-    heroVideo.removeAttribute('autoplay');
-    heroVideo.pause();
-  }
+/* Hold the aurora video on its first frame when motion is reduced. */
+if (reduceMotion) {
+  document.querySelectorAll('video').forEach((v) => {
+    v.removeAttribute('autoplay');
+    v.pause();
+  });
 }
 
+/* Scroll reveal via IntersectionObserver. */
+const revealEls = document.querySelectorAll('[data-reveal]');
+if (reduceMotion || !('IntersectionObserver' in window)) {
+  revealEls.forEach((el) => el.classList.add('in'));
+} else {
+  const io = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('in');
+        io.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.12, rootMargin: '0px 0px -8% 0px' });
+  revealEls.forEach((el) => io.observe(el));
+}
+
+/* Let the card glow follow the cursor horizontally. */
+if (!reduceMotion) {
+  document.querySelectorAll('.card').forEach((card) => {
+    card.addEventListener('pointermove', (e) => {
+      const r = card.getBoundingClientRect();
+      card.style.setProperty('--mx', `${((e.clientX - r.left) / r.width) * 100}%`);
+    });
+  });
+}
+
+/* Copy buttons on code blocks. */
 function legacyCopy(text) {
   const scratch = document.createElement('textarea');
   scratch.value = text;
@@ -24,10 +52,10 @@ function legacyCopy(text) {
   scratch.style.cssText = 'position:fixed;top:-1000px;opacity:0';
   document.body.appendChild(scratch);
   scratch.select();
-  let copied = false;
-  try { copied = document.execCommand('copy'); } catch { copied = false; }
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
   scratch.remove();
-  return copied;
+  return ok;
 }
 
 document.querySelectorAll('[data-copy]').forEach((block) => {
@@ -37,28 +65,24 @@ document.querySelectorAll('[data-copy]').forEach((block) => {
 
   button.addEventListener('click', async () => {
     const text = code.innerText;
-    let copied = false;
+    let ok = false;
     try {
       await navigator.clipboard.writeText(text);
-      copied = true;
+      ok = true;
     } catch {
-      copied = legacyCopy(text);
+      ok = legacyCopy(text);
     }
 
-    if (copied) {
+    if (ok) {
       button.textContent = 'Copied';
       button.classList.add('copied');
-      setTimeout(() => {
-        button.textContent = 'Copy';
-        button.classList.remove('copied');
-      }, 1600);
+      setTimeout(() => { button.textContent = 'Copy'; button.classList.remove('copied'); }, 1600);
     } else {
-      // Last resort: select the text so a manual ⌘C works.
       const range = document.createRange();
       range.selectNodeContents(code);
-      const selection = window.getSelection();
-      selection.removeAllRanges();
-      selection.addRange(range);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
       button.textContent = 'Press ⌘C';
       setTimeout(() => { button.textContent = 'Copy'; }, 2000);
     }
