@@ -59,7 +59,9 @@ export class OpenClawGateway {
               'get_agent_analytics',
               'generate_behavior_report',
               'optimize_prompt',
-              'run_accessibility_audit'
+              'run_accessibility_audit',
+              'get_session_trace',
+              'run_jacobian_lens'
             ],
             timestamp: Date.now()
           }));
@@ -213,6 +215,19 @@ export class OpenClawGateway {
 
         case 'run_accessibility_audit': {
           result = await this.browser.runAccessibilityAudit();
+          break;
+        }
+
+        case 'get_session_trace': {
+          const { limit, type, sinceMs, includeRaw } = args || {};
+          result = this.browser.getSessionTrace({ limit, type, sinceMs, includeRaw: includeRaw === true });
+          break;
+        }
+
+        case 'run_jacobian_lens': {
+          const { intent } = args || {};
+          if (!intent) throw new Error('Missing "intent" parameter for run_jacobian_lens');
+          result = await this.browser.runJacobianLens(intent);
           break;
         }
 

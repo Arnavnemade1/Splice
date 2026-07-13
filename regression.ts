@@ -360,6 +360,64 @@ async function main() {
       return `score 100/100, ${report.passedRules.length} rules verified clean`;
     });
 
+    // ── Introspection: live session trace and the Jacobian lens ──
+
+    await step('Session trace: live chain of thought, filtered, and truly ephemeral', async () => {
+      const behaviorDir = path.join(process.cwd(), '.splice', 'behavior');
+      const filesBefore = fs.existsSync(behaviorDir) ? fs.readdirSync(behaviorDir).length : 0;
+
+      const trace = browser.getSessionTrace({ limit: 500 });
+      if (trace.totalEvents < 50) throw new Error(`Expected a rich session, got ${trace.totalEvents} events.`);
+      if (!trace.thinking.some((line) => line.includes('executed "click'))) throw new Error('Trace is missing executed intents.');
+      if (!trace.thinking.some((line) => line.includes('diagnosed'))) throw new Error('Trace is missing diagnoses.');
+      if (!trace.thinking.some((line) => line.includes('Best semantic and visual match'))) {
+        throw new Error('Trace is missing the reasoning behind target choices.');
+      }
+
+      const filtered = browser.getSessionTrace({ type: 'agent_state_diagnosis', limit: 20, includeRaw: true });
+      if (!filtered.events || filtered.events.length === 0) throw new Error('Type filter returned no events.');
+      if (!filtered.events.every((e) => e.type === 'agent_state_diagnosis')) throw new Error('Type filter leaked other event types.');
+
+      const filesAfter = fs.existsSync(behaviorDir) ? fs.readdirSync(behaviorDir).length : 0;
+      if (filesAfter !== filesBefore) throw new Error('getSessionTrace persisted something — it must be in-memory only.');
+      if (!trace.note.includes('nothing was persisted')) throw new Error('Trace is missing its ephemerality note.');
+      return `${trace.returned}/${trace.totalEvents} events narrated live; filters honest; nothing written`;
+    });
+
+    await step('Jacobian lens: a well-grounded intent reads as robust', async () => {
+      await browser.navigate(`${fixture.url}/menu`);
+      await browser.compileVerifiedAction({ intent: 'click "Products"', execute: true });
+      await browser.waitFor([{ kind: 'text_present', value: 'quarterly reports' }], { timeoutMs: 4000, pollIntervalMs: 100 });
+
+      const lens = await browser.runJacobianLens('click "Quarterly reports"');
+      if (!lens.baseline.winner || !lens.baseline.winner.label.includes('Quarterly reports')) {
+        throw new Error(`Wrong baseline winner: ${JSON.stringify(lens.baseline.winner)}`);
+      }
+      if (lens.stability !== 'robust') throw new Error(`Exact-label intent should be robust, got ${lens.stability}: ${lens.summary}`);
+      if (lens.tokenSensitivities.some((t) => t.winnerChanged)) throw new Error('No single-token removal should flip an exact-label intent.');
+      if (lens.tokenSensitivities.length !== lens.tokens.length) throw new Error('One sensitivity row per token expected.');
+      if (lens.actionImpact.length < 1) throw new Error('Lens is missing the ∂page/∂action section.');
+      return `winner "${lens.baseline.winner.label}" robust across ${lens.tokens.length} token removals; ${lens.actionImpact.length} action impact(s)`;
+    });
+
+    await step('Jacobian lens: a tie-broken intent is exposed as flipping', async () => {
+      await browser.navigate(`${fixture.url}/form`);
+      // "confirm password" matches the confirm field AND the password field by
+      // one token each — the ranking tie-breaks on document order. The lens
+      // must expose that hidden fragility instead of letting it pass silently.
+      const lens = await browser.runJacobianLens('click confirm password');
+      if (lens.stability !== 'flips') throw new Error(`Expected a flip, got ${lens.stability}: ${lens.summary}`);
+      const flip = lens.tokenSensitivities.find((t) => t.winnerChanged);
+      if (!flip) throw new Error('Flip stability without a flipping row.');
+      if (!lens.mostLoadBearingToken) throw new Error('Flipping lens must name the load-bearing token.');
+      if (!lens.summary.includes('flips') && !lens.summary.includes('Fragile')) throw new Error(`Summary does not explain the fragility: ${lens.summary}`);
+      const row = lens.tokenSensitivities[0];
+      if (!Array.isArray(row.scoreDeltas) || row.scoreDeltas.some((d) => typeof d.delta !== 'number')) {
+        throw new Error('Sensitivity matrix cells must be numeric deltas.');
+      }
+      return `flip exposed on "${flip.token}": ${flip.winner} takes over; advice: quote the exact label`;
+    });
+
     // ── Long-horizon endurance: repeated traversal must stay healthy ──
 
     const ENDURANCE_CYCLES = 3;

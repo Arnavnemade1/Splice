@@ -429,6 +429,32 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "get_session_trace",
+        description: "Live, ephemeral introspection: exactly what the agent thought and did this session, straight from the in-memory behavior log — every intent with the reasoning behind the chosen target, every diagnosis, wait, assertion, and outcome, with timing offsets. Nothing is written to disk by this call (unlike generate_behavior_report, which scores and persists). Filter with type (e.g. 'verified_action_plan', 'agent_state_diagnosis'), limit, or sinceMs; pass includeRaw: true for the raw event objects alongside the narrative.",
+        annotations: { title: "Session Trace (Live)", readOnlyHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {
+            limit: { type: "number", description: "Max events to return, newest kept (default 100)." },
+            type: { type: "string", description: "Only events of this type, e.g. 'verified_action_plan', 'agent_state_diagnosis', 'wait_for', 'semantic_delta'." },
+            sinceMs: { type: "number", description: "Only events from the last N milliseconds." },
+            includeRaw: { type: "boolean", description: "Include raw event payloads alongside the narrative lines (default false)." },
+          },
+        },
+      },
+      {
+        name: "run_jacobian_lens",
+        description: "Amateur Jacobian lens — a finite-difference sensitivity probe of target selection (Jacobian in spirit, not calculus). Re-runs the REAL candidate ranking behind compile_verified_action with one intent token removed at a time and returns the sensitivity matrix: which words are load-bearing, whether the chosen target flips without them, and how stable the winner's margin is (robust / fragile / flips). Also reports ∂page/∂action for recent actions — how many elements each one actually added, removed, or changed. Use it before acting on an ambiguous page to see whether your intent is well-grounded, or when a compiled action picked a surprising target to understand why. Live and ephemeral; nothing persisted.",
+        annotations: { title: "Jacobian Lens (Intent Sensitivity)", readOnlyHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {
+            intent: { type: "string", description: "The intent to probe, e.g. 'click \"Confirm password\"'. Uses the same tokenization and scoring as compile_verified_action." },
+          },
+          required: ["intent"],
+        },
+      },
+      {
         name: "run_accessibility_audit",
         description: "Deterministic WCAG accessibility audit of the active page: image alt text, form control labels, accessible names on buttons/links, document language and title, heading order, AA color contrast, positive tabindex, duplicate ids, and focusables inside aria-hidden trees. Returns a 0–100 score, findings worst-first with WCAG criteria and concrete fixes, the rules that passed, and agentImpact — how each failure class degrades agent operation on this page (unlabeled controls break label-based targeting; nameless buttons vanish from intent ranking). Run it on pages you operate to hand back a fix list, or when a page resists automation to learn why.",
         annotations: { title: "Accessibility Audit", readOnlyHint: true },
@@ -1051,6 +1077,23 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
     if (request.params.name === "run_accessibility_audit") {
       const report = await browser.runAccessibilityAudit();
       return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
+    }
+
+    if (request.params.name === "get_session_trace") {
+      const { limit, type, sinceMs, includeRaw } = (request.params.arguments as any) || {};
+      const trace = browser.getSessionTrace({
+        limit: typeof limit === 'number' ? limit : undefined,
+        type: typeof type === 'string' ? type : undefined,
+        sinceMs: typeof sinceMs === 'number' ? sinceMs : undefined,
+        includeRaw: includeRaw === true,
+      });
+      return { content: [{ type: "text", text: JSON.stringify(trace, null, 2) }] };
+    }
+
+    if (request.params.name === "run_jacobian_lens") {
+      const { intent } = request.params.arguments as { intent: string };
+      const lens = await browser.runJacobianLens(intent);
+      return { content: [{ type: "text", text: JSON.stringify(lens, null, 2) }] };
     }
 
     if (request.params.name === "optimize_prompt") {

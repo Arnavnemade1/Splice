@@ -28,9 +28,10 @@ import { WebBotAuth } from './WebBotAuth.js';
 import { SessionStore, sessionBranchId, isSessionBranch, sessionNameFromBranch, sanitizeSessionName, type SessionRecord } from './SessionStore.js';
 import type { AuditOptions } from './SecurityAuditor.js';
 import { SpliceError, withRetry, isTransientError, errorMessage } from './Resilience.js';
-import { buildBehaviorReport, renderBehaviorMarkdown, type BehaviorEvent, type BehaviorReportDigest } from './BehaviorReport.js';
+import { buildBehaviorReport, renderBehaviorMarkdown, summarizeEvent, type BehaviorEvent, type BehaviorReportDigest } from './BehaviorReport.js';
 import { optimizePrompt, type PageLabel, type PromptOptimization } from './PromptOptimizer.js';
 import { A11Y_RULES, sortFindings, summarizeAudit, type A11yAuditReport } from './AccessibilityAuditor.js';
+import { assembleJacobianReport, type JacobianLensReport } from './JacobianLens.js';
 import type { AgentStateDiagnosis, LedgerEntry, SemanticNode, SessionMetrics, VerifiedActionPlan, SummonRequest } from './types.js';
 import type {
   NetworkActivitySummary,
@@ -1586,94 +1587,23 @@ export class BrowserManager {
     return { source: 'general', advice: generalAdvice[state] ?? generalAdvice.unknown };
   }
 
-  async compileVerifiedAction(input: {
-    intent: string;
-    value?: string;
-    constraints?: {
-      noNavigationOutsideDomain?: boolean;
-      avoidDestructiveActions?: boolean;
-      requireExactText?: boolean;
-    };
-    execute?: boolean;
-    includeVision?: boolean;
-    /** Caller-declared postconditions verified after execution (url_contains, text_present, ...). */
-    expect?: PageExpectation[];
-    /** Per-call permission to optimize the intent (strip filler, ground the
-     *  target against visible labels, separate the value) before compiling.
-     *  Also granted globally via promptOptimization in splice.config.json.
-     *  Applied rewrites are reported in plan.intentOptimization. */
-    optimizeIntent?: boolean;
-  }): Promise<VerifiedActionPlan> {
-    const { constraints = {}, execute = false, includeVision, expect } = input;
-    let { intent, value } = input;
-    if (!intent || intent.trim().length === 0) throw new Error('Intent is required.');
-
-    await this.ensureHealthy();
-
-    // Prompt optimization is opt-in: per call via optimizeIntent, or standing
-    // via config. Never applied silently — the rewrite travels in the plan.
-    let intentOptimization: VerifiedActionPlan['intentOptimization'];
-    const optimizationPermitted = input.optimizeIntent === true || (input.optimizeIntent !== false && this.promptOptimizationAuto);
-    if (optimizationPermitted) {
-      const optimization = await this.optimizeIntent(intent).catch(() => null);
-      // Routing suggestions and multi-step chains are advice for the caller,
-      // not something a single compile call may act on — only single-intent
-      // textual rewrites are applied here.
-      if (optimization?.changed && !optimization.toolSuggestion && !optimization.steps) {
-        intentOptimization = {
-          original: intent,
-          optimized: optimization.optimized,
-          transformations: optimization.transformations,
-          estimatedTokensSaved: optimization.estimatedTokensSaved,
-        };
-        intent = optimization.optimized;
-        if (value === undefined && optimization.value !== undefined) value = optimization.value;
-      }
-    }
-
-    const structure = this.assessIntentStructure(intent);
-    if (!structure.structured) {
-      const suggestedIntents = await this.collectIntentSuggestions().catch(() => [] as string[]);
-      // Suggestion-only rescue: even without optimization permission, show
-      // what the optimizer would have made of this prompt. Advice, not action.
-      if (!optimizationPermitted) {
-        const hint = await this.optimizeIntent(intent).catch(() => null);
-        if (hint?.changed && hint.optimized !== intent && this.assessIntentStructure(hint.optimized).structured) {
-          suggestedIntents.unshift(hint.optimized);
-        }
-      }
-      const plan: VerifiedActionPlan = {
-        intent,
-        confidence: 0,
-        risk: 'high',
-        plan: [],
-        preconditions: ['The intent must name an action and a target visible on the page.'],
-        postconditions: ['No action executed.'],
-        evidence: [structure.reason ?? 'Intent is too vague to compile.'],
-        alternatives: [],
-        needsClarification: true,
-        clarification: {
-          reason: structure.reason ?? 'Intent is too vague to compile.',
-          suggestedIntents,
-          guidance: 'Restate the intent as action + target (e.g. \'click "Place order"\', \'type jane@x.com into "Email"\'). Optionally declare the outcome you expect via expect so success is verified, not assumed.'
-        }
-      };
-      if (intentOptimization) plan.intentOptimization = intentOptimization;
-      this.saveMicroSnapshot('verified_action_plan', { intent, confidence: 0, risk: 'high', executable: false, needsClarification: true });
-      return plan;
-    }
-    await this.getSemanticTree(intent, 'UX', 1200);
-    const diagnosis = await this.diagnoseAgentState(intent);
-    // Resolve the page only after health checks, which may rebuild the branch.
+  /**
+   * The candidate ranking behind compile_verified_action: score every visible
+   * actionable element against the intent tokens. Extracted so introspection
+   * tools (the Jacobian lens) probe the real ranking, not an approximation.
+   */
+  private async rankIntentCandidates(
+    keywords: string[],
+    inferredAction: string,
+    currentHost: string,
+    constraints: { noNavigationOutsideDomain?: boolean; requireExactText?: boolean } = {}
+  ): Promise<Array<{
+    id: string; tagName: string; label: string; href: string; score: number;
+    disabled: boolean; obstructed: boolean;
+    rect: { x: number; y: number; width: number; height: number }; external: boolean;
+  }>> {
     const page = this.getActivePage();
-    const keywords = this.tokenizeIntent(intent);
-    const inferredAction = this.inferActionFromIntent(intent, value);
-    const currentUrl = page.url();
-    const currentHost = (() => {
-      try { return new URL(currentUrl).host; } catch { return ''; }
-    })();
-
-    const candidates = await page.evaluate((args: { keywords: string[]; query: string; currentHost: string; noExternal: boolean; requireExactText: boolean; inferredAction: string }) => {
+    return page.evaluate((args: { keywords: string[]; query: string; currentHost: string; noExternal: boolean; requireExactText: boolean; inferredAction: string }) => {
       const selector = [
         'a[href]',
         'button',
@@ -1774,6 +1704,96 @@ export class BrowserManager {
       requireExactText: constraints.requireExactText === true,
       inferredAction
     });
+  }
+
+  async compileVerifiedAction(input: {
+    intent: string;
+    value?: string;
+    constraints?: {
+      noNavigationOutsideDomain?: boolean;
+      avoidDestructiveActions?: boolean;
+      requireExactText?: boolean;
+    };
+    execute?: boolean;
+    includeVision?: boolean;
+    /** Caller-declared postconditions verified after execution (url_contains, text_present, ...). */
+    expect?: PageExpectation[];
+    /** Per-call permission to optimize the intent (strip filler, ground the
+     *  target against visible labels, separate the value) before compiling.
+     *  Also granted globally via promptOptimization in splice.config.json.
+     *  Applied rewrites are reported in plan.intentOptimization. */
+    optimizeIntent?: boolean;
+  }): Promise<VerifiedActionPlan> {
+    const { constraints = {}, execute = false, includeVision, expect } = input;
+    let { intent, value } = input;
+    if (!intent || intent.trim().length === 0) throw new Error('Intent is required.');
+
+    await this.ensureHealthy();
+
+    // Prompt optimization is opt-in: per call via optimizeIntent, or standing
+    // via config. Never applied silently — the rewrite travels in the plan.
+    let intentOptimization: VerifiedActionPlan['intentOptimization'];
+    const optimizationPermitted = input.optimizeIntent === true || (input.optimizeIntent !== false && this.promptOptimizationAuto);
+    if (optimizationPermitted) {
+      const optimization = await this.optimizeIntent(intent).catch(() => null);
+      // Routing suggestions and multi-step chains are advice for the caller,
+      // not something a single compile call may act on — only single-intent
+      // textual rewrites are applied here.
+      if (optimization?.changed && !optimization.toolSuggestion && !optimization.steps) {
+        intentOptimization = {
+          original: intent,
+          optimized: optimization.optimized,
+          transformations: optimization.transformations,
+          estimatedTokensSaved: optimization.estimatedTokensSaved,
+        };
+        intent = optimization.optimized;
+        if (value === undefined && optimization.value !== undefined) value = optimization.value;
+      }
+    }
+
+    const structure = this.assessIntentStructure(intent);
+    if (!structure.structured) {
+      const suggestedIntents = await this.collectIntentSuggestions().catch(() => [] as string[]);
+      // Suggestion-only rescue: even without optimization permission, show
+      // what the optimizer would have made of this prompt. Advice, not action.
+      if (!optimizationPermitted) {
+        const hint = await this.optimizeIntent(intent).catch(() => null);
+        if (hint?.changed && hint.optimized !== intent && this.assessIntentStructure(hint.optimized).structured) {
+          suggestedIntents.unshift(hint.optimized);
+        }
+      }
+      const plan: VerifiedActionPlan = {
+        intent,
+        confidence: 0,
+        risk: 'high',
+        plan: [],
+        preconditions: ['The intent must name an action and a target visible on the page.'],
+        postconditions: ['No action executed.'],
+        evidence: [structure.reason ?? 'Intent is too vague to compile.'],
+        alternatives: [],
+        needsClarification: true,
+        clarification: {
+          reason: structure.reason ?? 'Intent is too vague to compile.',
+          suggestedIntents,
+          guidance: 'Restate the intent as action + target (e.g. \'click "Place order"\', \'type jane@x.com into "Email"\'). Optionally declare the outcome you expect via expect so success is verified, not assumed.'
+        }
+      };
+      if (intentOptimization) plan.intentOptimization = intentOptimization;
+      this.saveMicroSnapshot('verified_action_plan', { intent, confidence: 0, risk: 'high', executable: false, needsClarification: true });
+      return plan;
+    }
+    await this.getSemanticTree(intent, 'UX', 1200);
+    const diagnosis = await this.diagnoseAgentState(intent);
+    // Resolve the page only after health checks, which may rebuild the branch.
+    const page = this.getActivePage();
+    const keywords = this.tokenizeIntent(intent);
+    const inferredAction = this.inferActionFromIntent(intent, value);
+    const currentUrl = page.url();
+    const currentHost = (() => {
+      try { return new URL(currentUrl).host; } catch { return ''; }
+    })();
+
+    const candidates = await this.rankIntentCandidates(keywords, inferredAction, currentHost, constraints);
 
     const destructiveIntent = /\b(delete|remove|destroy|cancel subscription|purchase|buy|pay|submit payment|transfer|wire)\b/i.test(intent);
     const best = candidates[0];
@@ -1954,7 +1974,9 @@ export class BrowserManager {
       confidence: plan.confidence,
       risk: plan.risk,
       executed: plan.verification?.executed,
-      passed: plan.verification?.passed
+      passed: plan.verification?.passed,
+      why: plan.plan[0]?.why,
+      expectedOutcome: plan.expectedOutcome
     });
     return plan;
   }
@@ -3488,6 +3510,82 @@ export class BrowserManager {
    * as machine-readable JSON (feed it back to the agent at the start of the
    * next run — or mid-run on long traversals) plus a markdown rendering.
    */
+  /**
+   * Live, ephemeral introspection: exactly what the agent thought and did
+   * this session, straight from the in-memory behavior log. Unlike
+   * generateBehaviorReport, nothing is written to disk and no scores are
+   * computed — this is the raw chain of thought (intents, target reasoning,
+   * diagnoses with evidence, waits, assertions, outcomes), newest last.
+   */
+  getSessionTrace(options: { limit?: number; type?: string; sinceMs?: number; includeRaw?: boolean } = {}): {
+    totalEvents: number;
+    returned: number;
+    sessionDurationMs: number;
+    thinking: string[];
+    events?: BehaviorEvent[];
+    note: string;
+  } {
+    const { limit = 100, type, sinceMs, includeRaw = false } = options;
+    const cutoff = sinceMs !== undefined ? Date.now() - sinceMs : 0;
+    const filtered = this.behaviorLog.filter(
+      (e) => e.timestamp >= cutoff && (type === undefined || e.type === type)
+    );
+    const window = filtered.slice(-Math.max(1, limit));
+    const startedAt = this.behaviorLog[0]?.timestamp ?? Date.now();
+    return {
+      totalEvents: this.behaviorLog.length,
+      returned: window.length,
+      sessionDurationMs: this.behaviorLog.length > 0 ? Date.now() - startedAt : 0,
+      thinking: window.map((e) => `[+${((e.timestamp - startedAt) / 1000).toFixed(1)}s] ${summarizeEvent(e)}`),
+      ...(includeRaw ? { events: window } : {}),
+      note: 'In-memory only — nothing was persisted by this call. For a scored, saved digest use generate_behavior_report.',
+    };
+  }
+
+  /**
+   * Amateur Jacobian lens: finite-difference sensitivity of target selection.
+   * Re-runs the real candidate ranking with one intent token removed at a
+   * time, revealing which words are load-bearing, whether the chosen target
+   * would flip, and how much page state each recent action actually moved.
+   * Live and ephemeral — nothing is persisted.
+   */
+  async runJacobianLens(intent: string): Promise<JacobianLensReport> {
+    if (!intent || intent.trim().length === 0) throw new Error('An intent is required.');
+    await this.ensureHealthy();
+
+    const keywords = this.tokenizeIntent(intent).slice(0, 8);
+    const inferredAction = this.inferActionFromIntent(intent);
+    const page = this.getActivePage();
+    const currentHost = (() => {
+      try { return new URL(page.url()).host; } catch { return ''; }
+    })();
+
+    const toRanked = (candidates: Awaited<ReturnType<BrowserManager['rankIntentCandidates']>>) =>
+      candidates.map((c) => ({ id: c.id, label: c.label, score: c.score }));
+
+    const baseline = toRanked(await this.rankIntentCandidates(keywords, inferredAction, currentHost));
+    const perturbed = [];
+    for (const token of keywords) {
+      const without = keywords.filter((k) => k !== token);
+      perturbed.push({ token, ranking: toRanked(await this.rankIntentCandidates(without, inferredAction, currentHost)) });
+    }
+
+    // ∂page/∂action: what each recent action actually changed, from the
+    // session's recorded deltas.
+    const actionImpact = this.behaviorLog
+      .filter((e) => e.type === 'semantic_delta')
+      .slice(-5)
+      .map((e) => ({
+        sinceActionId: typeof e.data.sinceActionId === 'string' ? e.data.sinceActionId : undefined,
+        added: Number(e.data.added ?? 0),
+        removed: Number(e.data.removed ?? 0),
+        changed: Number(e.data.changed ?? 0),
+        summary: String(e.data.summary ?? '').slice(0, 140),
+      }));
+
+    return assembleJacobianReport(intent, keywords, baseline, perturbed, actionImpact);
+  }
+
   generateBehaviorReport(): { digest: BehaviorReportDigest; jsonPath: string; markdownPath: string } {
     const digest = buildBehaviorReport({
       events: this.behaviorLog,

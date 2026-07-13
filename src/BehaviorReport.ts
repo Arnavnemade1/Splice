@@ -119,10 +119,11 @@ export function summarizeEvent(event: BehaviorEvent): string {
       return `diagnosed ${str(d.state)} at ${pct(d.confidence)} confidence${stuck}${learned}`;
     }
     case 'verified_action_plan': {
+      const why = d.why ? ` — ${str(d.why, 100)}` : '';
       if (d.needsClarification) return `intent "${str(d.intent, 60)}" rejected as unstructured — clarification requested`;
       if (d.executed === undefined && d.executable === false) return `plan for "${str(d.intent, 60)}" compiled but not executable`;
-      if (d.executed) return `executed "${str(d.intent, 60)}" → ${d.passed ? 'verified' : 'VERIFICATION FAILED'}`;
-      return `compiled plan for "${str(d.intent, 60)}" (${pct(d.confidence)} confidence, risk ${str(d.risk)})`;
+      if (d.executed) return `executed "${str(d.intent, 60)}" → ${d.passed ? 'verified' : 'VERIFICATION FAILED'}${why}`;
+      return `compiled plan for "${str(d.intent, 60)}" (${pct(d.confidence)} confidence, risk ${str(d.risk)})${why}`;
     }
     case 'interact':
       return `${str(d.action)} on ${str(d.elementId)}${d.selfHealed ? ' [self-healed after stale target]' : ''}`;

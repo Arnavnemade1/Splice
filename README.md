@@ -78,6 +78,13 @@ Modern autonomous web agents fail because browsers are stateful, noisy, and adve
 - live agent tracking with health metrics and corrective directives
 - recovery memory that learns which fixes worked per domain
 - token efficiency engine to reduce unnecessary observation cost
+- `optimize_prompt` — permission-gated rewriting of verbose prompts into grounded intents
+
+### 🔍 Agent Introspection
+
+- `get_session_trace` — live, ephemeral chain of thought straight from memory: every intent with its target reasoning, every diagnosis, wait, and outcome. Nothing persisted.
+- `run_jacobian_lens` — an (amateur) finite-difference sensitivity probe of target selection: re-runs the real ranking with one intent token removed at a time to show which words are load-bearing, whether the chosen target flips without them, and how much page state each recent action actually moved.
+- `generate_behavior_report` — the persisted counterpart: scored chain-of-thought digest with self-improvement recommendations, written to `.splice/behavior/`.
 
 ---
 
