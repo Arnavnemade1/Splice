@@ -35,21 +35,41 @@
   <main>
 
     <!-- Hero -->
-    <header class="hero">
-      <div class="container">
-        <p class="eyebrow">Open source · MCP server · MIT</p>
+    <header class="hero" id="top">
+      <div class="hero-media" aria-hidden="true">
+        <!--
+          Cinematic background: "Time Lapse Video Of Aurora Borealis" via Pexels.
+          Source:  https://www.pexels.com/video/time-lapse-video-of-aurora-borealis-852435/
+          License: Pexels License — free for commercial and personal use, no attribution required.
+          A natural event (the aurora borealis) chosen for atmosphere, not literal "AI" imagery.
+        -->
+        <video
+          class="hero-video"
+          autoplay muted loop playsinline preload="auto"
+          poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='9'%3E%3Crect width='16' height='9' fill='%23060810'/%3E%3C/svg%3E">
+          <source src="https://videos.pexels.com/video-files/852435/852435-hd_1920_1080_30fps.mp4" type="video/mp4">
+        </video>
+        <div class="hero-scrim"></div>
+      </div>
+
+      <div class="container hero-content">
+        <p class="eyebrow"><span class="eyebrow-dot"></span>Open source · MCP server · MIT</p>
         <h1>A browser your coding agent<br>can actually rely on.</h1>
         <p class="lede">
-          Agents fail in browsers for boring reasons: a modal they didn't see, a form that silently
-          rejected them, a page that re-rendered mid-click. Splice is the missing layer that
-          diagnoses the page, verifies every action, and learns from every failure.
+          Agents fail in browsers for boring reasons — a modal they didn't see, a form that silently
+          rejected them, a page that re-rendered mid-click. Splice is the layer that diagnoses the
+          page, verifies every action, and learns from every failure.
         </p>
         <div class="hero-actions">
           <a href="#install" class="btn btn-primary">Install in 2 minutes</a>
-          <a href="https://github.com/Arnavnemade1/Splice" class="btn btn-ghost" target="_blank" rel="noopener">View on GitHub</a>
+          <a href="https://github.com/Arnavnemade1/Splice" class="btn btn-glass" target="_blank" rel="noopener">View on GitHub</a>
         </div>
         <p class="hero-note">Works with Claude Code, Claude Desktop, and Cursor. Node 20+.</p>
       </div>
+
+      <a href="#how" class="hero-scroll" aria-label="Scroll to content">
+        <span class="hero-scroll-line"></span>
+      </a>
     </header>
 
     <!-- Proof strip -->

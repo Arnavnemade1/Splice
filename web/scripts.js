@@ -1,4 +1,21 @@
-// Splice site — minimal interactivity: copy buttons only.
+// Splice site — minimal interactivity: nav state, reduced motion, copy buttons.
+
+// Swap the nav from its transparent over-hero state to a solid bar once scrolled.
+const nav = document.querySelector('.nav');
+if (nav) {
+  const setNavState = () => nav.classList.toggle('scrolled', window.scrollY > 40);
+  setNavState();
+  window.addEventListener('scroll', setNavState, { passive: true });
+}
+
+// Honor reduced-motion: hold the hero video on its first frame instead of looping.
+if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  const heroVideo = document.querySelector('.hero-video');
+  if (heroVideo) {
+    heroVideo.removeAttribute('autoplay');
+    heroVideo.pause();
+  }
+}
 
 function legacyCopy(text) {
   const scratch = document.createElement('textarea');
