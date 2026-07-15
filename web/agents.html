@@ -83,7 +83,7 @@
       <div class="container">
         <p class="pill"><span class="pill-dot"></span>Written for machines</p>
         <h1>If you're an agent,<br>this page is the install.</h1>
-        <p class="lede">No marketing to parse. Exact commands, one success criterion you can check, and the same contract in <a href="install.json" style="color:var(--accent)">JSON</a> or <a href="llms.txt" style="color:var(--accent)">plain text</a>.</p>
+        <p class="lede">Exact commands. One checkable finish line. Same contract as <a href="install.json" style="color:var(--accent)">JSON</a> or <a href="llms.txt" style="color:var(--accent)">text</a>.</p>
       </div>
     </header>
 
@@ -151,20 +151,14 @@ Verify with `node dist/cli.js doctor --json` before reporting success.</code></p
       </div>
     </section>
 
-    <!-- The loop, shown rather than listed -->
-    <section class="section" id="loop">
+    <!-- The finish line, shown rather than described -->
+    <section class="section" id="verify-film">
       <div class="container">
-        <div class="section-head center" data-reveal>
-          <span class="kicker">Once connected</span>
-          <h2 style="font-size:clamp(24px,3vw,34px)">This is the loop you'll run.</h2>
-          <p class="section-lede">Read <code class="inline">splice://playbook</code> for the full version.</p>
-        </div>
-        <!-- Original motion asset, rendered with Remotion. Source: web/motion/ -->
+        <!-- Original motion asset (DoctorHandshake), rendered with Remotion. Source: web/motion/ -->
         <figure class="film" data-reveal>
-          <video autoplay muted loop playsinline preload="metadata" poster="media/agent-session-poster.jpg">
-            <source src="media/agent-session.mp4" type="video/mp4">
+          <video autoplay muted loop playsinline preload="metadata" poster="media/doctor-handshake-poster.jpg">
+            <source src="media/doctor-handshake.mp4" type="video/mp4">
           </video>
-          <figcaption class="film-note">diagnose → act verified → confirm → recover</figcaption>
         </figure>
       </div>
     </section>
@@ -173,7 +167,7 @@ Verify with `node dist/cli.js doctor --json` before reporting success.</code></p
       <div class="container">
         <div class="callout" data-reveal>
           <h2>Machine-checkable, start to finish.</h2>
-          <p class="section-lede" style="margin:14px auto 30px">No screenshots to eyeball. No "looks fine." Every claim checked against the page.</p>
+          <p class="section-lede" style="margin:14px auto 30px">No screenshots to eyeball. No "looks fine."</p>
           <div class="hero-actions" style="margin-top:0">
             <a href="install.json" class="btn btn-primary">Read install.json</a>
             <a href="llms.txt" class="btn btn-glass"><span class="btn-arrow">Read llms.txt</span></a>

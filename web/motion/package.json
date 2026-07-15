@@ -5,8 +5,10 @@
   "description": "Remotion compositions that render Splice's original cinematic motion assets.",
   "scripts": {
     "studio": "remotion studio",
-    "render": "remotion render AgentSession ../media/agent-session.mp4 --codec=h264 --crf=20",
-    "still": "remotion still AgentSession ../media/agent-session-poster.jpg --frame=300"
+    "render": "npm run render:lie && npm run render:session && npm run render:doctor",
+    "render:lie": "remotion render TheLie ../media/the-lie.mp4 --codec=h264 --crf=20 && remotion still TheLie ../media/the-lie-poster.jpg --frame=330",
+    "render:session": "remotion render AgentSession ../media/agent-session.mp4 --codec=h264 --crf=20 && remotion still AgentSession ../media/agent-session-poster.jpg --frame=330",
+    "render:doctor": "remotion render DoctorHandshake ../media/doctor-handshake.mp4 --codec=h264 --crf=20 && remotion still DoctorHandshake ../media/doctor-handshake-poster.jpg --frame=370"
   },
   "dependencies": {
     "@remotion/cli": "4.0.361",

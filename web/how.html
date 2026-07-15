@@ -46,7 +46,7 @@
       <div class="container">
         <p class="pill"><span class="pill-dot"></span>Setup</p>
         <h1>From zero to verified<br>in three steps.</h1>
-        <p class="lede">Every step is a command with a machine-checkable result. You're done when the doctor says so — not before.</p>
+        <p class="lede">Every step is a command with a checkable result.</p>
       </div>
     </header>
 
@@ -58,7 +58,7 @@
             <div class="step-num">1</div>
             <div>
               <h3>Install</h3>
-              <p>Clone, build, and health-check. The doctor tells you exactly what to fix if anything is off.</p>
+              <p>The doctor names anything that's off.</p>
               <div class="code" data-copy>
                 <pre><code>git clone https://github.com/Arnavnemade1/Splice.git
 cd Splice &amp;&amp; npm install &amp;&amp; npm run build
@@ -72,7 +72,7 @@ node dist/cli.js doctor</code></pre>
             <div class="step-num">2</div>
             <div>
               <h3>Connect your agent</h3>
-              <p>One line for Claude Code. <code class="inline">splice init</code> prints snippets for Claude Desktop and Cursor.</p>
+              <p><code class="inline">splice init</code> prints snippets for Desktop and Cursor.</p>
               <div class="code" data-copy>
                 <pre><code>claude mcp add splice -- node dist/cli.js start</code></pre>
                 <button class="copy-btn" aria-label="Copy command">Copy</button>
@@ -84,7 +84,7 @@ node dist/cli.js doctor</code></pre>
             <div class="step-num">3</div>
             <div>
               <h3>Let it work</h3>
-              <p>The agent diagnoses each page before acting, runs intents that are verified after the fact, and reads only what changed.</p>
+              <p>Intents are verified after they run.</p>
               <div class="code" data-copy>
                 <pre><code>compile_verified_action { intent: 'click "Place order"',
   expect: [{ kind: "url_contains", value: "/thanks" }] }</code></pre>
@@ -102,14 +102,13 @@ node dist/cli.js doctor</code></pre>
       <div class="container">
         <div class="section-head center" data-reveal>
           <span class="kicker">The loop</span>
-          <h2 style="font-size:clamp(24px,3vw,32px)">Once connected, every task runs the same reliable cycle.</h2>
+          <h2 style="font-size:clamp(24px,3vw,32px)">Every task runs this cycle.</h2>
         </div>
-        <!-- Original motion asset, rendered with Remotion. Source: web/motion/ -->
+        <!-- Original motion asset (AgentSession), rendered with Remotion. Source: web/motion/ -->
         <figure class="film" data-reveal>
           <video autoplay muted loop playsinline preload="metadata" poster="media/agent-session-poster.jpg">
             <source src="media/agent-session.mp4" type="video/mp4">
           </video>
-          <figcaption class="film-note">Every task runs this cycle</figcaption>
         </figure>
       </div>
     </section>
@@ -117,11 +116,11 @@ node dist/cli.js doctor</code></pre>
     <section class="section">
       <div class="container">
         <div class="callout" data-reveal>
-          <h2>Two minutes to a healthier agent.</h2>
-          <p class="section-lede" style="margin:14px auto 30px">No accounts, no cloud, no telemetry. It runs entirely on your machine.</p>
+          <h2>Two minutes.</h2>
+          <p class="section-lede" style="margin:14px auto 30px">No accounts. No cloud. No telemetry.</p>
           <div class="hero-actions" style="margin-top:0">
             <a href="start.html" class="btn btn-primary">Get started</a>
-            <a href="agents.html" class="btn btn-glass"><span class="btn-arrow">Let the agent install it</span></a>
+            <a href="agents.html" class="btn btn-glass"><span class="btn-arrow">For agents</span></a>
           </div>
         </div>
       </div>

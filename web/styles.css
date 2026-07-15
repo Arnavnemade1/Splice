@@ -100,16 +100,44 @@ a { color: inherit; }
   z-index: 50;
   background: transparent;
   border-bottom: 1px solid transparent;
-  transition: background 0.35s var(--ease), border-color 0.35s var(--ease), backdrop-filter 0.35s var(--ease);
+  transition: background 0.35s var(--ease), border-color 0.35s var(--ease),
+    backdrop-filter 0.35s var(--ease), box-shadow 0.35s var(--ease);
 }
 
 .nav.scrolled {
-  background: rgba(8, 11, 20, 0.72);
-  backdrop-filter: saturate(160%) blur(14px);
+  background: rgba(8, 11, 20, 0.58);
+  backdrop-filter: saturate(190%) blur(22px);
   border-bottom-color: var(--line);
+  box-shadow: 0 12px 40px -24px rgba(0, 0, 0, 0.9);
 }
 
+/* a hairline of light along the top edge of the glass */
+.nav.scrolled .nav-inner::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.14) 30%, rgba(255, 255, 255, 0.14) 70%, transparent);
+}
+
+/* reading progress — the bar fills as the page is consumed */
+.nav::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  height: 1px;
+  width: var(--progress, 0%);
+  background: linear-gradient(90deg, rgba(103, 232, 195, 0) 0%, var(--accent) 85%, #fff 100%);
+  box-shadow: 0 0 14px var(--accent-glow);
+  opacity: 0;
+  transition: opacity 0.4s var(--ease);
+}
+
+.nav.scrolled::after { opacity: 1; }
+
 .nav-inner {
+  position: relative;
   max-width: var(--maxw);
   margin: 0 auto;
   padding: 17px 28px;
@@ -282,35 +310,6 @@ a { color: inherit; }
   margin-top: 22px;
   font-size: 13.5px;
   color: rgba(255, 255, 255, 0.48);
-}
-
-/* scroll cue */
-.hero-scroll {
-  position: absolute;
-  bottom: 30px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 26px;
-  height: 40px;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 999px;
-  display: grid;
-  place-items: start center;
-  padding-top: 8px;
-  z-index: 2;
-}
-
-.hero-scroll span {
-  width: 2px;
-  height: 8px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.7);
-  animation: cue 1.8s ease-in-out infinite;
-}
-
-@keyframes cue {
-  0%, 100% { opacity: 0.25; transform: translateY(0); }
-  50%      { opacity: 1; transform: translateY(6px); }
 }
 
 /* ── Inner page header band (aurora, shorter) ──────────────────────────────── */
@@ -736,7 +735,6 @@ code.inline {
   .stat + .stat { border-top: 1px solid var(--line); }
   .section { padding: 68px 0; }
   .hero { padding: 108px 0 84px; }
-  .hero-scroll { display: none; }
   .step { grid-template-columns: 40px 1fr; gap: 16px; padding: 26px 0; }
   .callout { padding: 60px 20px 16px; }
 }
@@ -744,5 +742,5 @@ code.inline {
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { transition: none !important; animation: none !important; }
-  [data-reveal] { opacity: 1; transform: none; }
+  [data-reveal] { opacity: 1; transform: none; filter: none; }
 }

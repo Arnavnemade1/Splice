@@ -28,14 +28,38 @@ web/
 Nav and footer markup is duplicated across the static pages (no build step); the
 active nav link is marked with `aria-current="page"`.
 
-## Cinematic background
+## Motion assets (Remotion)
 
-The aurora video is "Time Lapse Video Of Aurora Borealis" via
+`web/motion/` is a self-contained Remotion project — it renders the site's original
+films. It is isolated from the published package (the root `files` field ships only
+`dist`, `dashboard`, `assets`), so it never reaches npm consumers.
+
+Each page gets its **own** composition, so no film is reused:
+
+| Composition | Page | What it argues |
+| --- | --- | --- |
+| `TheLie` | `index.html` | The page reported success; the click never landed. Splice checked. |
+| `AgentSession` | `how.html` | The full loop: diagnose → recover → act → verify. |
+| `DoctorHandshake` | `agents.html` | `doctor --json` resolving to `"healthy": true`. |
+
+```
+cd web/motion
+npm install
+npm run render          # all three, into ../media/
+npm run render:lie      # or one at a time
+npm run studio          # live editor
+```
+
+Each film's canvas is `--bg` (`#06080f`), identical to the page, so it sits on the
+page with no frame or border. Palettes differ per film (see `src/theme.ts`) so the
+pages don't feel like reruns.
+
+## Aurora background
+
+The page-header aurora is "Time Lapse Video Of Aurora Borealis" via
 [Pexels](https://www.pexels.com/video/time-lapse-video-of-aurora-borealis-852435/),
-streamed from the Pexels CDN. It falls under the **Pexels License** (free for
-commercial and personal use, no attribution required); full credit lives in a
-comment in `index.html`. It is `muted`, `loop`, `playsinline`, and `autoplay`, so
-it plays inline without sound; a flat dark poster prevents any flash before load.
+streamed from the Pexels CDN under the **Pexels License** (free for commercial use,
+no attribution required). Full credit lives in a comment in `index.html`.
 
 ## Conventions
 

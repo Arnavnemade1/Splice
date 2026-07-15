@@ -1,18 +1,9 @@
 import React from 'react';
 import { AbsoluteFill, interpolate, useCurrentFrame } from 'remotion';
-import { loadFont as loadMono } from '@remotion/google-fonts/JetBrainsMono';
-import { loadFont as loadSans } from '@remotion/google-fonts/Inter';
-
-const { fontFamily: MONO } = loadMono();
-const { fontFamily: SANS } = loadSans();
+import { Aurora } from './Aurora';
+import { ACCENT, AMBER, BG, DIM, INK, MONO, PALETTES, SANS } from './theme';
 
 export const SESSION_DURATION = 430;
-
-const BG = '#06080f';
-const INK = '#f4f6fb';
-const DIM = 'rgba(244, 246, 251, 0.4)';
-const ACCENT = '#67e8c3';
-const AMBER = '#f7c95c';
 
 type Kind = 'intent' | 'dim' | 'warn' | 'ok';
 type Line = { at: number; kind: Kind; label: string; text: string };
@@ -41,48 +32,6 @@ const COLORS: Record<Kind, string> = {
   dim: DIM,
   warn: AMBER,
   ok: ACCENT,
-};
-
-/* Procedural aurora — original, drifting, no stock footage. */
-const Aurora: React.FC = () => {
-  const frame = useCurrentFrame();
-  const blobs = [
-    { c: 'rgba(103, 232, 195, 0.30)', x: 30, y: 26, s: 980, ax: 130, ay: 60, sp: 0.0062 },
-    { c: 'rgba(125, 211, 252, 0.20)', x: 70, y: 36, s: 880, ax: -150, ay: 80, sp: 0.0081 },
-    { c: 'rgba(129, 140, 248, 0.16)', x: 50, y: 76, s: 1120, ax: 100, ay: -70, sp: 0.0049 },
-  ];
-  const rise = interpolate(frame, [0, 40], [1.12, 1], { extrapolateRight: 'clamp' });
-
-  return (
-    <AbsoluteFill style={{ transform: `scale(${rise})` }}>
-      {blobs.map((b, i) => (
-        <div
-          key={i}
-          style={{
-            position: 'absolute',
-            left: `${b.x}%`,
-            top: `${b.y}%`,
-            width: b.s,
-            height: b.s,
-            marginLeft: -b.s / 2,
-            marginTop: -b.s / 2,
-            transform: `translate(${Math.sin(frame * b.sp + i) * b.ax}px, ${
-              Math.cos(frame * b.sp * 0.8 + i) * b.ay
-            }px)`,
-            background: `radial-gradient(circle, ${b.c} 0%, transparent 66%)`,
-            filter: 'blur(70px)',
-          }}
-        />
-      ))}
-      {/* settle the light so type stays legible */}
-      <AbsoluteFill
-        style={{
-          background:
-            'radial-gradient(120% 90% at 50% 40%, rgba(6,8,15,0) 35%, rgba(6,8,15,0.72) 100%)',
-        }}
-      />
-    </AbsoluteFill>
-  );
 };
 
 const PhaseRail: React.FC = () => {
@@ -208,7 +157,7 @@ export const AgentSession: React.FC = () => {
 
   return (
     <AbsoluteFill style={{ backgroundColor: BG, opacity: tail }}>
-      <Aurora />
+      <Aurora palette={PALETTES.session} />
       <AbsoluteFill
         style={{
           justifyContent: 'center',

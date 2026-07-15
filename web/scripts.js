@@ -2,12 +2,18 @@
 
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/* Nav: transparent over the hero, solid once scrolled. */
+/* Nav: transparent over the hero, glass once scrolled, with a reading-progress hairline. */
 const nav = document.querySelector('.nav');
 if (nav) {
-  const setNavState = () => nav.classList.toggle('scrolled', window.scrollY > 40);
+  const setNavState = () => {
+    nav.classList.toggle('scrolled', window.scrollY > 40);
+    const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+    const pct = scrollable > 0 ? (window.scrollY / scrollable) * 100 : 0;
+    nav.style.setProperty('--progress', `${Math.min(100, Math.max(0, pct))}%`);
+  };
   setNavState();
   window.addEventListener('scroll', setNavState, { passive: true });
+  window.addEventListener('resize', setNavState, { passive: true });
 }
 
 /* Hold the aurora video on its first frame when motion is reduced. */
