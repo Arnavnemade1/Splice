@@ -57,9 +57,7 @@
         <div class="bento">
 
           <div class="card card-wide" data-reveal>
-            <div class="card-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
-            </div>
+            <span class="card-idx">01</span>
             <h3>Verified actions</h3>
             <p>Say what you want in plain language. Splice picks the target, checks preconditions, acts — then proves the outcome, or tells you it didn't happen.</p>
             <pre class="card-code"><span class="tok-key">compile_verified_action</span> {
@@ -70,41 +68,31 @@
           </div>
 
           <div class="card" data-reveal data-delay="1">
-            <div class="card-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2 6 4-14 2 8h6"/></svg>
-            </div>
+            <span class="card-idx">02</span>
             <h3>Failure diagnosis</h3>
             <p>Stuck agents ask "what state is this page in?" and get an answer — blocked by a modal, failing validation, waiting on the network — with the next move.</p>
           </div>
 
           <div class="card" data-reveal data-delay="2">
-            <div class="card-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
-            </div>
+            <span class="card-idx">03</span>
             <h3>Token-efficient observation</h3>
             <p>After the first look, agents receive only what changed. Framework re-renders are filtered out instead of re-read as new content.</p>
           </div>
 
           <div class="card" data-reveal data-delay="3">
-            <div class="card-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
-            </div>
+            <span class="card-idx">04</span>
             <h3>Recovery memory</h3>
             <p>When a fix works — closing that cookie banner, dismissing that upsell — Splice remembers it per site and suggests it the next time.</p>
           </div>
 
           <div class="card" data-reveal data-delay="1">
-            <div class="card-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
-            </div>
+            <span class="card-idx">05</span>
             <h3>Security guardrails</h3>
             <p>Prompt-injection text is redacted before your agent reads it, secrets are blocked from leaving in requests, and session state is encrypted at rest.</p>
           </div>
 
           <div class="card" data-reveal data-delay="2">
-            <div class="card-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><polyline points="21 3 21 9 15 9"/></svg>
-            </div>
+            <span class="card-idx">06</span>
             <h3>Self-healing runtime</h3>
             <p>Browser crashes recover automatically with state restored. A journal records every call, so any run can be debugged after the fact.</p>
           </div>
@@ -122,16 +110,19 @@
         </div>
         <div class="mini-list">
           <div class="mini" data-reveal data-delay="1">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6"/><path d="M8 13h8M8 17h5"/></svg>
-            <div><strong>Behavior reports</strong><span>Replay a session as a readable chain of thought with scores and fixes.</span></div>
+            <span class="mini-idx">07</span>
+            <strong>Behavior reports</strong>
+            <span>Replay a session as a readable chain of thought with scores and fixes.</span>
           </div>
           <div class="mini" data-reveal data-delay="2">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4l1.8 4.2L18 10l-4.2 1.8L12 16l-1.8-4.2L6 10l4.2-1.8z"/></svg>
-            <div><strong>Prompt optimization</strong><span>Verbose instructions rewritten into terse, grounded intents — only with permission.</span></div>
+            <span class="mini-idx">08</span>
+            <strong>Prompt optimization</strong>
+            <span>Verbose instructions rewritten into terse, grounded intents — only with permission.</span>
           </div>
           <div class="mini" data-reveal data-delay="3">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="4.5" r="1.6"/><path d="M4 8h16M12 8v6M8.5 20l3.5-6 3.5 6"/></svg>
-            <div><strong>Accessibility audits</strong><span>Scored WCAG checks with concrete fixes. The pages agents struggle with are the same ones that fail them.</span></div>
+            <span class="mini-idx">09</span>
+            <strong>Accessibility audits</strong>
+            <span>Scored WCAG checks with concrete fixes — the pages agents struggle with are the ones that fail them.</span>
           </div>
         </div>
       </div>

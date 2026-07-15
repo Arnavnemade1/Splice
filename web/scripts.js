@@ -34,14 +34,22 @@ if (reduceMotion || !('IntersectionObserver' in window)) {
   revealEls.forEach((el) => io.observe(el));
 }
 
-/* Let the card glow follow the cursor horizontally. */
+/* Subtle parallax: drift the aurora slower than the page as you scroll. */
 if (!reduceMotion) {
-  document.querySelectorAll('.card').forEach((card) => {
-    card.addEventListener('pointermove', (e) => {
-      const r = card.getBoundingClientRect();
-      card.style.setProperty('--mx', `${((e.clientX - r.left) / r.width) * 100}%`);
-    });
-  });
+  const media = document.querySelector('.media video');
+  if (media) {
+    let ticking = false;
+    const drift = () => {
+      const y = window.scrollY;
+      if (y < window.innerHeight * 1.2) {
+        media.style.transform = `translateY(${y * 0.16}px) scale(1.08)`;
+      }
+      ticking = false;
+    };
+    window.addEventListener('scroll', () => {
+      if (!ticking) { requestAnimationFrame(drift); ticking = true; }
+    }, { passive: true });
+  }
 }
 
 /* Copy buttons on code blocks. */
