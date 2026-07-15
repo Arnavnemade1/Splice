@@ -600,6 +600,63 @@ code.inline {
 .copy-btn:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
 .copy-btn.copied { color: var(--accent); border-color: rgba(103, 232, 195, 0.4); }
 
+/* ── Film ──────────────────────────────────────────────────────────────────── */
+
+/* The Remotion-rendered session. Its canvas is --bg, so it melts into the page
+   with no frame, no border, no box. */
+.film {
+  position: relative;
+  margin: 56px auto 0;
+  max-width: 1180px;
+}
+
+.film video {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.film-note {
+  margin-top: 22px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+/* ── Agent-readable contract ───────────────────────────────────────────────── */
+
+.contract { display: grid; gap: 0; margin-top: 8px; }
+
+.contract-row {
+  display: grid;
+  grid-template-columns: 190px 1fr;
+  gap: 28px;
+  align-items: baseline;
+  padding: 26px 0;
+  border-top: 1px solid var(--line);
+}
+
+.contract-key {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.contract-val { font-size: 15px; color: var(--ink-2); }
+.contract-val strong { color: #fff; font-weight: 600; }
+.contract-val .cmd {
+  display: block;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--code-ink);
+  margin-top: 6px;
+}
+
 /* ── Callout ───────────────────────────────────────────────────────────────── */
 
 .callout {

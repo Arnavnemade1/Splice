@@ -3,13 +3,50 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>For agents — Splice</title>
-  <meta name="description" content="Point any coding agent at the install guide. Every step is a command with a machine-checkable success criterion — the agent isn't done until the doctor reports healthy.">
+  <title>For agents — install Splice</title>
+  <meta name="description" content="An install page written for autonomous agents. Exact commands, one machine-checkable success criterion, and a machine-readable contract at /install.json.">
   <link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+
+  <!-- Agent-facing discovery: plain text and JSON forms of this page. -->
+  <link rel="alternate" type="text/plain" href="llms.txt" title="Plain-text install instructions">
+  <link rel="alternate" type="application/json" href="install.json" title="Machine-readable install contract">
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "HowTo",
+    "name": "Install Splice",
+    "description": "Install the Splice MCP server and connect it to a coding agent.",
+    "totalTime": "PT2M",
+    "tool": [{ "@type": "HowToTool", "name": "Node.js 20+" }],
+    "step": [
+      {
+        "@type": "HowToStep",
+        "position": 1,
+        "name": "Clone and build",
+        "text": "git clone https://github.com/Arnavnemade1/Splice.git && cd Splice && npm install && npm run build",
+        "url": "https://github.com/Arnavnemade1/Splice#readme"
+      },
+      {
+        "@type": "HowToStep",
+        "position": 2,
+        "name": "Connect the agent",
+        "text": "claude mcp add splice -- node dist/cli.js start"
+      },
+      {
+        "@type": "HowToStep",
+        "position": 3,
+        "name": "Verify",
+        "text": "node dist/cli.js doctor --json must return \"healthy\": true"
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
 
@@ -44,52 +81,102 @@
         <div class="media-scrim"></div>
       </div>
       <div class="container">
-        <p class="pill"><span class="pill-dot"></span>Built for autonomy</p>
-        <h1>Agents install it<br>themselves.</h1>
-        <p class="lede">Point any coding agent at the guide. Every step has a machine-checkable success criterion, so it can't fake being done.</p>
+        <p class="pill"><span class="pill-dot"></span>Written for machines</p>
+        <h1>If you're an agent,<br>this page is the install.</h1>
+        <p class="lede">No marketing to parse. Exact commands, one success criterion you can check, and the same contract in <a href="install.json" style="color:var(--accent)">JSON</a> or <a href="llms.txt" style="color:var(--accent)">plain text</a>.</p>
       </div>
     </header>
 
-    <section class="section">
+    <!-- The prompt -->
+    <section class="section" id="prompt">
       <div class="container narrow">
         <div class="section-head" data-reveal>
-          <span class="kicker">The whole prompt</span>
-          <h2 style="font-size:clamp(24px,3vw,30px)">That's it. One instruction, one verifiable finish line.</h2>
+          <span class="kicker">If a human is delegating</span>
+          <h2 style="font-size:clamp(24px,3vw,32px)">Hand your agent this. Nothing else.</h2>
         </div>
-        <div class="code" data-copy data-reveal data-delay="1" style="margin-top:24px">
-          <pre><code>Read https://github.com/Arnavnemade1/Splice/blob/main/AGENT_INSTALL.md
-and follow it. Verify with `npx splice doctor --json` before reporting success.</code></pre>
+        <div class="code" data-copy data-reveal data-delay="1" style="margin-top:26px">
+          <pre><code>Install Splice: https://raw.githubusercontent.com/Arnavnemade1/Splice/main/AGENT_INSTALL.md
+Verify with `node dist/cli.js doctor --json` before reporting success.</code></pre>
           <button class="copy-btn" aria-label="Copy agent prompt">Copy</button>
         </div>
-        <p class="section-lede" data-reveal data-delay="2" style="margin-top:22px">
-          The agent isn't finished until <code class="inline">splice doctor --json</code> returns <code class="inline">"healthy": true</code>. Once connected, it reads the built-in playbook resource and knows the loop.
-        </p>
+      </div>
+    </section>
+
+    <!-- The contract -->
+    <section class="section-tight" id="contract">
+      <div class="container narrow">
+        <div class="section-head" data-reveal>
+          <span class="kicker">The contract</span>
+          <h2 style="font-size:clamp(24px,3vw,32px)">Three commands, one finish line.</h2>
+        </div>
+
+        <div class="contract">
+          <div class="contract-row" data-reveal data-delay="1">
+            <span class="contract-key">Requires</span>
+            <span class="contract-val"><strong>Node 20+</strong> — the doctor checks everything else.</span>
+          </div>
+          <div class="contract-row" data-reveal data-delay="1" id="step-clone">
+            <span class="contract-key">01 · Clone</span>
+            <span class="contract-val">
+              <strong>Fetch the source.</strong>
+              <code class="cmd">git clone https://github.com/Arnavnemade1/Splice.git</code>
+            </span>
+          </div>
+          <div class="contract-row" data-reveal data-delay="2" id="step-build">
+            <span class="contract-key">02 · Build</span>
+            <span class="contract-val">
+              <strong>Succeeds when <code class="inline">dist/cli.js</code> exists.</strong>
+              <code class="cmd">cd Splice &amp;&amp; npm install &amp;&amp; npm run build</code>
+            </span>
+          </div>
+          <div class="contract-row" data-reveal data-delay="3" id="step-connect">
+            <span class="contract-key">03 · Connect</span>
+            <span class="contract-val">
+              <strong>For Claude Desktop or Cursor, run <code class="inline">init</code> instead — it prints each snippet.</strong>
+              <code class="cmd">claude mcp add splice -- node dist/cli.js start</code>
+            </span>
+          </div>
+          <div class="contract-row" data-reveal data-delay="3" id="step-verify">
+            <span class="contract-key">Done when</span>
+            <span class="contract-val">
+              <strong>This returns <code class="inline">"healthy": true</code>. Not before.</strong>
+              <code class="cmd">node dist/cli.js doctor --json</code>
+            </span>
+          </div>
+          <div class="contract-row" data-reveal id="on-failure">
+            <span class="contract-key">On failure</span>
+            <span class="contract-val">The doctor names the failed check and its remedy. Apply it, re-run the same command.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- The loop, shown rather than listed -->
+    <section class="section" id="loop">
+      <div class="container">
+        <div class="section-head center" data-reveal>
+          <span class="kicker">Once connected</span>
+          <h2 style="font-size:clamp(24px,3vw,34px)">This is the loop you'll run.</h2>
+          <p class="section-lede">Read <code class="inline">splice://playbook</code> for the full version.</p>
+        </div>
+        <!-- Original motion asset, rendered with Remotion. Source: web/motion/ -->
+        <figure class="film" data-reveal>
+          <video autoplay muted loop playsinline preload="metadata" poster="media/agent-session-poster.jpg">
+            <source src="media/agent-session.mp4" type="video/mp4">
+          </video>
+          <figcaption class="film-note">diagnose → act verified → confirm → recover</figcaption>
+        </figure>
       </div>
     </section>
 
     <section class="section-tight">
       <div class="container">
-        <div class="section-head center" data-reveal>
-          <span class="kicker">The playbook</span>
-          <h2 style="font-size:clamp(24px,3vw,32px)">Diagnose → act verified → confirm → recover.</h2>
-        </div>
-        <div class="bento" style="margin-top:44px">
-          <div class="card" data-reveal data-delay="1"><span class="card-idx">01</span><h3>Diagnose</h3><p>Ask the page what state it's in before acting on it.</p></div>
-          <div class="card" data-reveal data-delay="2"><span class="card-idx">02</span><h3>Act verified</h3><p>Run the intent with an explicit expectation attached.</p></div>
-          <div class="card" data-reveal data-delay="3"><span class="card-idx">03</span><h3>Confirm</h3><p>Check the outcome against the page. No guessing.</p></div>
-          <div class="card" data-reveal data-delay="4"><span class="card-idx">04</span><h3>Recover</h3><p>Apply a remembered fix, then log what worked for next time.</p></div>
-        </div>
-      </div>
-    </section>
-
-    <section class="section">
-      <div class="container">
         <div class="callout" data-reveal>
-          <h2>Machine-checkable from install to done.</h2>
-          <p class="section-lede" style="margin:14px auto 30px">No screenshots to eyeball, no "looks fine." Every claim is verified against the page.</p>
+          <h2>Machine-checkable, start to finish.</h2>
+          <p class="section-lede" style="margin:14px auto 30px">No screenshots to eyeball. No "looks fine." Every claim checked against the page.</p>
           <div class="hero-actions" style="margin-top:0">
-            <a href="start.html" class="btn btn-primary">Get started</a>
-            <a href="https://github.com/Arnavnemade1/Splice/blob/main/AGENT_INSTALL.md" class="btn btn-glass" target="_blank" rel="noopener"><span class="btn-arrow">Read the agent guide</span></a>
+            <a href="install.json" class="btn btn-primary">Read install.json</a>
+            <a href="llms.txt" class="btn btn-glass"><span class="btn-arrow">Read llms.txt</span></a>
           </div>
         </div>
       </div>
@@ -110,7 +197,8 @@ and follow it. Verify with `npx splice doctor --json` before reporting success.<
         <a href="features.html">Features</a>
         <a href="how.html">How it works</a>
         <a href="agents.html">For agents</a>
-        <a href="start.html">Get started</a>
+        <a href="llms.txt">llms.txt</a>
+        <a href="install.json">install.json</a>
         <a href="https://github.com/Arnavnemade1/Splice" target="_blank" rel="noopener">GitHub</a>
       </div>
       <p class="footer-copy">Browser cognition for autonomous agents · MIT licensed.</p>

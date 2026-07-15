@@ -1,0 +1,22 @@
+{
+  "name": "splice-motion",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Remotion compositions that render Splice's original cinematic motion assets.",
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render AgentSession ../media/agent-session.mp4 --codec=h264 --crf=20",
+    "still": "remotion still AgentSession ../media/agent-session-poster.jpg --frame=300"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.361",
+    "@remotion/google-fonts": "4.0.361",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "remotion": "4.0.361"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.2",
+    "typescript": "5.9.3"
+  }
+}

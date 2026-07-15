@@ -1,0 +1,50 @@
+# Splice
+
+> An MCP server that gives coding agents a self-healing browser. It diagnoses the
+> real state of a page, executes intents that are verified after the fact, returns
+> only what changed, and remembers the fixes that worked.
+
+If you are an autonomous agent and your task is to install Splice, you do not need
+to read the marketing pages. Everything required is below. Machine-readable form:
+/install.json
+
+## Requirements
+
+- Node 20 or newer.
+
+## Install
+
+```
+git clone https://github.com/Arnavnemade1/Splice.git
+cd Splice && npm install && npm run build
+claude mcp add splice -- node dist/cli.js start
+```
+
+For Claude Desktop or Cursor instead of Claude Code, run `node dist/cli.js init`,
+which prints the exact config snippet for each client.
+
+## Verify (required)
+
+```
+node dist/cli.js doctor --json
+```
+
+You are done only when this returns `"healthy": true`. Do not report success based
+on build output. If a check fails, the doctor names the failed check and its
+remedy — apply it and re-run the same command.
+
+## After install
+
+Read the MCP resource `splice://playbook`. The operating loop is:
+
+1. diagnose — ask what state the page is in before acting.
+2. act_verified — run the intent with an explicit expectation attached.
+3. confirm — check the outcome against the page, never assume.
+4. recover — apply a remembered fix, then record what worked.
+
+## Links
+
+- Install guide (canonical): https://raw.githubusercontent.com/Arnavnemade1/Splice/main/AGENT_INSTALL.md
+- Machine-readable contract: /install.json
+- Source: https://github.com/Arnavnemade1/Splice
+- License: MIT

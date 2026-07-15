@@ -1,0 +1,44 @@
+{
+  "$comment": "Machine-readable install contract for autonomous agents. Human page: /agents.html",
+  "name": "splice",
+  "version": "2.3.0",
+  "summary": "MCP server that gives coding agents a self-healing browser: page diagnosis, verified actions, token-efficient observation, and recovery memory.",
+  "license": "MIT",
+  "homepage": "https://github.com/Arnavnemade1/Splice",
+  "guide": "https://raw.githubusercontent.com/Arnavnemade1/Splice/main/AGENT_INSTALL.md",
+  "requirements": {
+    "node": ">=20",
+    "network": "required for clone and npm install only; runtime is local"
+  },
+  "steps": [
+    {
+      "id": "clone",
+      "run": "git clone https://github.com/Arnavnemade1/Splice.git",
+      "success_when": "directory ./Splice exists"
+    },
+    {
+      "id": "build",
+      "run": "cd Splice && npm install && npm run build",
+      "success_when": "file ./dist/cli.js exists"
+    },
+    {
+      "id": "connect",
+      "run": "claude mcp add splice -- node dist/cli.js start",
+      "success_when": "the MCP server 'splice' is listed by your client",
+      "alternatives": {
+        "other_clients": "node dist/cli.js init  # prints config snippets for Claude Desktop and Cursor"
+      }
+    }
+  ],
+  "verify": {
+    "run": "node dist/cli.js doctor --json",
+    "expect": { "healthy": true },
+    "notes": "Exit only when this returns \"healthy\": true. Do not report success from build output alone."
+  },
+  "done_when": "`node dist/cli.js doctor --json` returns \"healthy\": true",
+  "on_failure": "The doctor reports each failed check with a remedy. Fix the reported check and re-run the same command.",
+  "after_install": {
+    "playbook": "Read the built-in MCP resource 'splice://playbook' for the operating loop.",
+    "loop": ["diagnose", "act_verified", "confirm", "recover"]
+  }
+}
