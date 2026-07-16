@@ -145,6 +145,32 @@ export class JSpaceMap {
     return this.observations.length > 0 ? this.observations[this.observations.length - 1].timestamp : null;
   }
 
+  /** Most recent observation, if any. */
+  latest(): JSpaceObservation | null {
+    return this.observations.length > 0 ? this.observations[this.observations.length - 1] : null;
+  }
+
+  /** Most recent observation whose intent matches (exact, then substring). */
+  findLatestByIntent(intent: string): JSpaceObservation | null {
+    const needle = intent.trim().toLowerCase().slice(0, 120);
+    for (let i = this.observations.length - 1; i >= 0; i--) {
+      if (this.observations[i].intent.toLowerCase() === needle) return this.observations[i];
+    }
+    for (let i = this.observations.length - 1; i >= 0; i--) {
+      const hay = this.observations[i].intent.toLowerCase();
+      if (hay.includes(needle) || needle.includes(hay)) return this.observations[i];
+    }
+    return null;
+  }
+
+  /** Tokens observed inert in at least `minOccurrences` decisions — the
+   *  session-learned dead weight the prompt optimizer can act on. */
+  recurringInertTokens(minOccurrences = 2): string[] {
+    const counts = new Map<string, number>();
+    for (const o of this.observations) for (const t of o.inertTokens) counts.set(t, (counts.get(t) ?? 0) + 1);
+    return [...counts.entries()].filter(([, c]) => c >= minOccurrences).map(([t]) => t);
+  }
+
   buildReport(): JSpaceMapReport {
     const obs = this.observations;
     const n = obs.length;

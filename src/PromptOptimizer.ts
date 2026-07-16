@@ -28,6 +28,21 @@ export interface PageLabel {
   label: string;
 }
 
+/**
+ * Session-learned context the optimizer may act on. Supplied by the live
+ * session (the J-space map); everything here is observational, and every
+ * application is reported in `transformations` like any other rewrite.
+ */
+export interface SessionHints {
+  /**
+   * Words observed to match nothing in 2+ decisions this session (recurring
+   * inert tokens from the J-space map). Stripped only when they also match no
+   * current page label — a word that is dead weight on one page may be the
+   * discriminating term on another.
+   */
+  inertTokens?: string[];
+}
+
 export interface PromptOptimization {
   original: string;
   optimized: string;
@@ -208,18 +223,18 @@ function detectToolRouting(prompt: string): PromptOptimization['toolSuggestion']
  */
 const STEP_SEPARATOR = /\s*(?:[,;.]\s*)?\b(?:and )?then\b\s*|\s*(?:[,;.]\s*)?\bafter (?:that|which)\b,?\s*|\s*;\s+/i;
 
-export function optimizePrompt(prompt: string, pageLabels: PageLabel[] = []): PromptOptimization {
+export function optimizePrompt(prompt: string, pageLabels: PageLabel[] = [], sessionHints?: SessionHints): PromptOptimization {
   const segments = prompt.split(new RegExp(STEP_SEPARATOR.source, 'gi')).map((s) => (s ?? '').trim()).filter(Boolean);
   if (segments.length >= 2) {
     const steps = segments.map((segment) => {
-      const sub = optimizeSingle(segment, pageLabels);
+      const sub = optimizeSingle(segment, pageLabels, sessionHints);
       return {
         intent: sub.optimized,
         ...(sub.value !== undefined ? { value: sub.value } : {}),
         ...(sub.toolSuggestion !== undefined ? { toolSuggestion: sub.toolSuggestion } : {}),
       };
     });
-    const first = optimizeSingle(segments[0], pageLabels);
+    const first = optimizeSingle(segments[0], pageLabels, sessionHints);
     return {
       ...first,
       original: prompt,
@@ -229,10 +244,46 @@ export function optimizePrompt(prompt: string, pageLabels: PageLabel[] = []): Pr
       estimatedTokensSaved: Math.max(0, Math.round((prompt.length - steps.reduce((n, s) => n + s.intent.length + (s.value?.length ?? 0), 0)) / 4)),
     };
   }
-  return optimizeSingle(prompt, pageLabels);
+  return optimizeSingle(prompt, pageLabels, sessionHints);
 }
 
-function optimizeSingle(prompt: string, pageLabels: PageLabel[] = []): PromptOptimization {
+/**
+ * Session-learned compression: drop words the J-space map has seen match
+ * nothing in 2+ decisions — but only when the word also matches no label on
+ * the CURRENT page, and never inside quoted (grounded) text.
+ */
+function stripSessionInert(text: string, hints: SessionHints | undefined, pageLabels: PageLabel[], transformations: string[]): string {
+  const inert = [...new Set((hints?.inertTokens ?? []).map((t) => t.toLowerCase()).filter((t) => t.length > 2))];
+  if (inert.length === 0) return text;
+  const labelTokens = pageLabels.flatMap((l) => tokensOf(l.label));
+  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const dropped: string[] = [];
+  // Quoted spans are grounded targets — never rewrite inside them.
+  const parts = text.split(/("[^"]*")/);
+  for (const token of inert) {
+    if (labelTokens.some((l) => l === token || l.startsWith(token) || token.startsWith(l))) continue;
+    const re = new RegExp(`\\s*\\b${escapeRe(token)}\\b`, 'gi');
+    let hit = false;
+    for (let i = 0; i < parts.length; i += 2) {
+      const next = parts[i].replace(re, ' ');
+      if (next !== parts[i]) {
+        parts[i] = next;
+        hit = true;
+      }
+    }
+    if (hit) dropped.push(token);
+  }
+  if (dropped.length === 0) return text;
+  const result = parts.join('').replace(/\s+/g, ' ').trim();
+  // Keep the original if stripping would gut the intent entirely.
+  if (result.replace(/[^a-z0-9]/gi, '').length < 3) return text;
+  transformations.push(
+    `session-learned: dropped ${dropped.map((t) => `"${t}"`).join(', ')} — matched nothing in earlier decisions and no label on this page`
+  );
+  return result;
+}
+
+function optimizeSingle(prompt: string, pageLabels: PageLabel[] = [], sessionHints?: SessionHints): PromptOptimization {
   const original = prompt;
   const transformations: string[] = [];
   let text = prompt.replace(/\s+/g, ' ').trim();
@@ -258,6 +309,9 @@ function optimizeSingle(prompt: string, pageLabels: PageLabel[] = []): PromptOpt
   }
   text = text.replace(/[.!?\s]+$/, '');
   if (inlineNotes.size > 0) transformations.push(`stripped filler (${[...inlineNotes].join(', ')})`);
+
+  // 1b. Session-learned compression from the J-space map.
+  text = stripSessionInert(text, sessionHints, pageLabels, transformations);
 
   // 2. Verb normalization onto the vocabulary candidate ranking expects.
   const verbFixes: Array<[RegExp, string]> = [

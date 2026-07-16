@@ -141,6 +141,8 @@ Commands:
               [journal]     path to a .jsonl journal (default: newest run
                             in ./.splice/journal/)
               --json        machine-readable digest
+              --jspace      show the latest J-space session map instead
+                            (decision geometry from ./.splice/jspace/)
             Live sessions get richer chain-of-thought reports via the
             generate_behavior_report MCP tool (written to .splice/behavior/).
 
@@ -422,6 +424,35 @@ function commandSession(args: string[]): void {
 
 async function commandReport(args: string[]): Promise<void> {
   if (!hasFlag(args, '--json')) await printBanner();
+
+  // --jspace: show the latest persisted J-space session map (decision
+  // geometry) instead of the journal digest. One is written automatically
+  // every time a session that compiled at least one action closes.
+  if (hasFlag(args, '--jspace')) {
+    const jspaceDir = path.join(process.cwd(), '.splice', 'jspace');
+    const wantJson = hasFlag(args, '--json');
+    const suffix = wantJson ? '.json' : '.md';
+    const reports = fs.existsSync(jspaceDir)
+      ? fs.readdirSync(jspaceDir).filter((f) => f.startsWith('jspace-') && f.endsWith(suffix)).sort()
+      : [];
+    if (reports.length === 0) {
+      console.error(`${paint(RED, 'No J-space session maps found.')} Looked in ${jspaceDir}.`);
+      console.error(`Run a session that compiles at least one action (${paint(CYAN, 'splice start')}) — a map is written automatically at session close.`);
+      process.exitCode = 1;
+      return;
+    }
+    const latest = path.join(jspaceDir, reports[reports.length - 1]);
+    const content = fs.readFileSync(latest, 'utf8');
+    if (wantJson) {
+      console.log(content);
+    } else {
+      console.log(`${paint(BOLD, 'Splice J-Space Session Map')} ${paint(DIM, `(${latest})`)}\n`);
+      console.log(content);
+      if (reports.length > 1) console.log(paint(DIM, `${reports.length - 1} earlier map(s) in ${jspaceDir}`));
+    }
+    return;
+  }
+
   const { buildJournalDigest } = await import('./BehaviorReport.js');
   const explicit = args.find((a) => !a.startsWith('--'));
 

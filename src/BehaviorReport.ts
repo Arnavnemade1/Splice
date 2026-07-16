@@ -15,6 +15,7 @@
  */
 
 import type { JournalEntry } from './RunJournal.js';
+import { buildCalibration, type CalibrationReport } from './Cognition.js';
 
 /** One cognition event, recorded as the session runs. */
 export interface BehaviorEvent {
@@ -84,6 +85,8 @@ export interface BehaviorReportDigest {
     tokensSavedEstimate: number;
     redundantObservationTokens: number;
   };
+  /** Does stated compile confidence track verified outcomes? (see Cognition.ts) */
+  calibration: CalibrationReport;
   recoveryMemory?: { totalPatterns: number };
   journal?: {
     sessionId: string;
@@ -274,6 +277,23 @@ function buildRecommendations(digest: Omit<BehaviorReportDigest, 'selfImprovemen
     });
   }
 
+  const cal = digest.calibration;
+  if (cal.verdict === 'overconfident') {
+    recs.push({
+      priority: 'high',
+      observation: 'Stated compile confidence ran ahead of verified outcomes — the agent believed more than the page delivered.',
+      recommendation: 'Discount compile confidence when gating execution, declare `expect` postconditions on every consequential action, and read the surprises list (calibration.surprises) to see where the page model diverged.',
+      evidence: `Confidence exceeded pass rate by ${Math.round((cal.calibrationGap ?? 0) * 100)} points over ${cal.samples} executed action(s); Brier ${cal.brierScore}.`,
+    });
+  } else if (cal.verdict === 'underconfident') {
+    recs.push({
+      priority: 'low',
+      observation: 'Verified outcomes ran ahead of stated confidence — intents are landing better than the agent believes.',
+      recommendation: 'Trust compiled plans at this confidence level and skip redundant pre-action observation on familiar pages.',
+      evidence: `Pass rate exceeded confidence by ${Math.round(-(cal.calibrationGap ?? 0) * 100)} points over ${cal.samples} executed action(s).`,
+    });
+  }
+
   if (fa.unresolvedAtEnd) {
     recs.push({
       priority: 'high',
@@ -382,6 +402,7 @@ export function buildBehaviorReport(input: BehaviorReportInput): BehaviorReportD
       tokensSavedEstimate: input.metrics?.tokensSavedEstimate ?? 0,
       redundantObservationTokens: input.metrics?.redundantObservationTokens ?? 0,
     },
+    calibration: buildCalibration(events),
     recoveryMemory: input.recoveryMemoryStats,
     journal: input.journalStats,
   };
@@ -413,6 +434,20 @@ export function renderBehaviorMarkdown(digest: BehaviorReportDigest): string {
     `- Plans compiled: ${aq.plansCompiled}, executed: ${aq.plansExecuted}, verified: ${aq.plansVerified}` +
       (aq.verificationRate !== null ? ` (${Math.round(aq.verificationRate * 100)}% verification rate)` : ''),
     `- Clarification requests: ${aq.clarificationRequests} · self-heals: ${aq.selfHeals}`,
+    '',
+    '## Confidence calibration',
+    '',
+    digest.calibration.samples === 0
+      ? '- No executed actions to calibrate against.'
+      : `- ${digest.calibration.samples} executed action(s) · Brier ${digest.calibration.brierScore} · gap ${
+          digest.calibration.calibrationGap !== null && digest.calibration.calibrationGap > 0 ? '+' : ''
+        }${Math.round((digest.calibration.calibrationGap ?? 0) * 100)}pt → **${digest.calibration.verdict}**`,
+    ...digest.calibration.bands
+      .filter((b) => b.count > 0)
+      .map((b) => `- ${b.band}: ${b.count} action(s), ${b.passRate !== null ? `${Math.round(b.passRate * 100)}% verified` : 'n/a'}`),
+    ...digest.calibration.surprises.map(
+      (s) => `- Surprise: "${s.intent}" at ${Math.round(s.confidence * 100)}% confidence failed verification.`
+    ),
     '',
     '## Failure analysis',
     '',

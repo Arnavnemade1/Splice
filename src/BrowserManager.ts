@@ -33,6 +33,7 @@ import { optimizePrompt, type PageLabel, type PromptOptimization } from './Promp
 import { A11Y_RULES, sortFindings, summarizeAudit, type A11yAuditReport } from './AccessibilityAuditor.js';
 import { exploreJSpace, type JSpaceReport } from './JSpace.js';
 import { JSpaceMap, observationFromReport, renderJSpaceMapMarkdown, type JSpaceMapReport } from './JSpaceMap.js';
+import { buildCalibration, explainDecision, type CalibrationReport, type DecisionExplanation } from './Cognition.js';
 import { assembleJacobianReport, type JacobianLensReport } from './JacobianLens.js';
 import type { AgentStateDiagnosis, LedgerEntry, SemanticNode, SessionMetrics, VerifiedActionPlan, SummonRequest } from './types.js';
 import type {
@@ -632,7 +633,10 @@ export class BrowserManager {
   async optimizeIntent(prompt: string): Promise<PromptOptimization> {
     if (!prompt || prompt.trim().length === 0) throw new Error('A prompt is required.');
     const labels = await this.collectActionableLabels(24).catch(() => [] as PageLabel[]);
-    const optimization = optimizePrompt(prompt, labels);
+    // Session-learned hints: words the J-space map saw match nothing in 2+
+    // decisions. The optimizer cross-checks them against this page's labels
+    // before acting, and reports every application in transformations.
+    const optimization = optimizePrompt(prompt, labels, { inertTokens: this.jSpaceMap.recurringInertTokens() });
     if (optimization.changed) {
       this.saveMicroSnapshot('prompt_optimized', {
         original: optimization.original.slice(0, 120),
@@ -3711,6 +3715,209 @@ export class BrowserManager {
   }
 
   /**
+   * A compiled decision, retold in plain language: what was chosen and why,
+   * what came second and by how much, which single word the choice hangs on,
+   * whether it verified, and whether this session's confidence has been
+   * trustworthy. Reads the behavior log and the J-space map; touches nothing.
+   */
+  explainLastDecision(intent?: string): DecisionExplanation {
+    const plans = this.behaviorLog.filter((e) => e.type === 'verified_action_plan');
+    let planEvent: BehaviorEvent | null = null;
+    if (intent && intent.trim().length > 0) {
+      const needle = intent.trim().toLowerCase();
+      planEvent = [...plans].reverse().find((e) => String(e.data.intent ?? '').toLowerCase().includes(needle)) ?? null;
+    } else {
+      planEvent = plans.length > 0 ? plans[plans.length - 1] : null;
+    }
+    const observation = planEvent
+      ? this.jSpaceMap.findLatestByIntent(String(planEvent.data.intent ?? ''))
+      : intent
+        ? this.jSpaceMap.findLatestByIntent(intent)
+        : this.jSpaceMap.latest();
+    return explainDecision(planEvent, observation, buildCalibration(this.behaviorLog));
+  }
+
+  /** The session's confidence-calibration record (see Cognition.ts). */
+  getCalibration(): CalibrationReport {
+    return buildCalibration(this.behaviorLog);
+  }
+
+  /**
+   * Intent experiment: race several phrasings of the same intent against the
+   * live page — the original, the optimizer's rewrite, an inert-token-stripped
+   * cut, an exact-label quote, and any caller-supplied variants — and measure
+   * each in J-space (winner, margin, robustness, flip distance, confidence).
+   * Nothing executes; ranking is compile-time only. The recommendation is the
+   * phrasing that elects the consensus target most robustly with the fewest
+   * tokens. If phrasings disagree on the target, that disagreement IS the
+   * finding — the intent is ambiguous on this page.
+   */
+  async runIntentExperiment(intent: string, extraVariants: string[] = [], topCandidates = 6): Promise<{
+    intent: string;
+    variants: Array<{
+      name: string;
+      phrase: string;
+      winner: string | null;
+      margin: number | null;
+      robust: boolean | null;
+      /** Distance to nearest flip boundary; null = unflippable by any single token. */
+      flipDistance: number | null;
+      winnerProbability: number | null;
+      effectiveDimension: number | null;
+      tokenCount: number;
+      inertTokens: string[];
+    }>;
+    consensus: { agreed: boolean; winner: string | null; distinctWinners: string[] };
+    recommendation: { name: string; phrase: string; reason: string } | null;
+    interpretation: string[];
+    method: string;
+    ephemeral: true;
+  }> {
+    if (!intent || intent.trim().length === 0) throw new Error('An intent is required.');
+    await this.ensureHealthy();
+    const currentHost = (() => {
+      try { return new URL(this.getActivePage().url()).host; } catch { return ''; }
+    })();
+
+    // Evaluate one phrasing: rank against the real page, explore its J-space.
+    const evaluate = async (name: string, phrase: string) => {
+      const tokens = this.tokenizeIntent(phrase).slice(0, 8);
+      const empty = {
+        name, phrase, winner: null as string | null, winnerId: null as string | null,
+        margin: null as number | null, robust: null as boolean | null,
+        flipDistance: null as number | null, winnerProbability: null as number | null,
+        effectiveDimension: null as number | null, tokenCount: tokens.length, inertTokens: [] as string[],
+      };
+      if (tokens.length === 0) return empty;
+      const ranking = await this.rankIntentCandidates(tokens, this.inferActionFromIntent(phrase), currentHost);
+      if (!ranking[0] || ranking[0].score <= 0) return empty;
+      const report = exploreJSpace(phrase, tokens, ranking, topCandidates);
+      const reachable = report.flipBoundaries.filter((f) => !f.unreachable && typeof f.distance === 'number');
+      const nearest = reachable.sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity))[0];
+      return {
+        name, phrase,
+        winner: report.winner,
+        winnerId: ranking[0].id,
+        margin: Number(report.margin.toFixed(3)),
+        robust: report.winnerRobustToTokenDeletion,
+        flipDistance: nearest ? nearest.distance! : null,
+        winnerProbability: report.workspace?.winnerProbability ?? null,
+        effectiveDimension: report.workspace?.effectiveDimension ?? null,
+        tokenCount: tokens.length,
+        inertTokens: report.geometry.inertTokens,
+      };
+    };
+
+    // Build the variant set. Order matters only for display; dedupe by text.
+    const candidates: Array<{ name: string; phrase: string }> = [{ name: 'original', phrase: intent }];
+    const optimization = await this.optimizeIntent(intent).catch(() => null);
+    if (optimization?.changed && optimization.optimized && !optimization.toolSuggestion) {
+      candidates.push({ name: 'optimized', phrase: optimization.optimized });
+    }
+    const baseline = await evaluate('original', intent);
+    if (baseline.inertTokens.length > 0) {
+      let strippedPhrase = intent;
+      for (const t of baseline.inertTokens) {
+        strippedPhrase = strippedPhrase.replace(new RegExp(`\\s*\\b${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi'), ' ');
+      }
+      strippedPhrase = strippedPhrase.replace(/\s+/g, ' ').trim();
+      if (strippedPhrase.length >= 3) candidates.push({ name: 'inert-stripped', phrase: strippedPhrase });
+    }
+    if (baseline.winner) {
+      const verb = { click: 'click', type: 'type into', select: 'select', focus: 'focus', press: 'press' }[this.inferActionFromIntent(intent)];
+      const label = baseline.winner.replace(/"/g, '').trim();
+      if (label.length > 0) candidates.push({ name: 'label-quoted', phrase: `${verb} "${label}"` });
+    }
+    for (let i = 0; i < extraVariants.length && i < 4; i++) {
+      candidates.push({ name: `custom-${i + 1}`, phrase: extraVariants[i] });
+    }
+    const seen = new Set<string>();
+    const variantSpecs = candidates.filter((c) => {
+      const key = c.phrase.trim().toLowerCase();
+      if (seen.has(key) || key.length === 0) return false;
+      seen.add(key);
+      return true;
+    }).slice(0, 6);
+
+    const variants = [];
+    for (const spec of variantSpecs) {
+      variants.push(spec.name === 'original' ? baseline : await evaluate(spec.name, spec.phrase));
+    }
+
+    // Consensus: do the phrasings even agree on what to act on?
+    const rankable = variants.filter((v) => v.winnerId !== null);
+    const winnerIds = [...new Set(rankable.map((v) => v.winnerId as string))];
+    const idCounts = new Map<string, number>();
+    for (const v of rankable) idCounts.set(v.winnerId as string, (idCounts.get(v.winnerId as string) ?? 0) + 1);
+    const consensusId = [...idCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+    const consensusWinner = rankable.find((v) => v.winnerId === consensusId)?.winner ?? null;
+    const agreed = winnerIds.length <= 1;
+
+    // Recommend: among phrasings electing the consensus target, prefer
+    // unflippable > farthest flip boundary > widest margin > fewest tokens.
+    const contenders = rankable.filter((v) => v.winnerId === consensusId);
+    contenders.sort((a, b) => {
+      const robustDiff = Number(b.robust) - Number(a.robust);
+      if (robustDiff !== 0) return robustDiff;
+      const aFlip = a.flipDistance ?? Infinity;
+      const bFlip = b.flipDistance ?? Infinity;
+      if (aFlip !== bFlip) return bFlip - aFlip;
+      if ((a.margin ?? 0) !== (b.margin ?? 0)) return (b.margin ?? 0) - (a.margin ?? 0);
+      return a.tokenCount - b.tokenCount;
+    });
+    const best = contenders[0] ?? null;
+    const recommendation = best
+      ? {
+          name: best.name,
+          phrase: best.phrase,
+          reason: `Elects "${best.winner}" ${best.robust ? 'robustly (no single word can flip it)' : 'with the strongest available footing'}${
+            best.flipDistance === null ? ', unflippable by any single-token reweighting' : `, nearest flip at ${best.flipDistance}`
+          }, margin ${best.margin}, ${best.tokenCount} token(s).`,
+        }
+      : null;
+
+    const interpretation: string[] = [];
+    interpretation.push(
+      agreed
+        ? `All ${rankable.length} rankable phrasing(s) elect the same target${consensusWinner ? ` ("${consensusWinner}")` : ''} — the intent is unambiguous on this page; pick the cheapest robust phrasing.`
+        : `Phrasings DISAGREE on the target (${winnerIds.length} distinct winners across ${rankable.length} phrasings) — the intent is ambiguous on this page. That is the finding: quote the exact label of the element you mean.`
+    );
+    if (recommendation) {
+      interpretation.push(`Recommended phrasing: ${recommendation.phrase} — ${recommendation.reason}`);
+    } else {
+      interpretation.push('No phrasing produced a scoring winner — the intent matches nothing actionable on this page.');
+    }
+    const weakest = rankable.filter((v) => v.robust === false);
+    if (weakest.length > 0 && agreed) {
+      interpretation.push(`Fragile phrasing(s) to avoid: ${weakest.map((v) => v.name).join(', ')} — a single word carries each.`);
+    }
+
+    this.saveMicroSnapshot('intent_experiment', {
+      intent: intent.slice(0, 100),
+      variantsTested: variants.length,
+      agreed,
+      recommended: recommendation?.phrase.slice(0, 100) ?? null,
+    });
+
+    return {
+      intent,
+      variants: variants.map(({ winnerId: _winnerId, ...v }) => v),
+      consensus: {
+        agreed,
+        winner: consensusWinner,
+        distinctWinners: winnerIds.map((id) => rankable.find((v) => v.winnerId === id)?.winner ?? id).filter((w): w is string => w !== null),
+      },
+      recommendation,
+      interpretation,
+      method:
+        'Each phrasing is tokenized and ranked by the real production scorer against the live page (compile-time only; nothing executes), ' +
+        'then measured in its J-space: margin, robustness to token deletion, flip-boundary distance, and softmax confidence. ' +
+        'Variants are deterministic rewrites (optimizer, inert-token strip, exact-label quote) plus any caller-supplied phrasings.',
+      ephemeral: true,
+    };
+  }
+
+  /**
    * Chain-of-thought behavior report: reconstructs what the agent observed,
    * decided, and did this session, scores action quality and observation
    * economy, and emits prioritized self-improvement recommendations. Written
@@ -3820,6 +4027,7 @@ export class BrowserManager {
         const runtimeHealth = ${toJs(this.getRuntimeHealth())};
         const agentProfiles = ${toJs(this.agentTracker.getAllProfiles())};
         const jspace = ${toJs(this.getJSpaceMap())};
+        const calibration = ${toJs(this.getCalibration())};
 
         const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({
           '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
@@ -3964,6 +4172,42 @@ export class BrowserManager {
               \${concepts ? \`<div class="jspace-panel"><div class="jspace-legend"><b>concept leaderboard</b> mean |∂P(winner)| per axis</div>\${concepts}</div>\` : ''}
               \${fragileCards}
               \${recs}
+            \`;
+          }
+        }
+
+        // ─── Confidence Calibration (does confidence track outcomes?) ────
+        const calEl = document.getElementById('calibration-feed');
+        if (calEl) {
+          if (!calibration.samples) {
+            calEl.innerHTML = empty('No executed actions to calibrate yet — calibration builds as verified actions run.');
+          } else {
+            const gapPts = Math.round((calibration.calibrationGap ?? 0) * 100);
+            const verdictTag = calibration.verdict === 'well-calibrated' ? 'green' : calibration.verdict === 'insufficient-data' ? 'blue' : 'amber';
+            const bandRows = calibration.bands.filter(b => b.count > 0).map(b => \`
+              <div>
+                <div class="tax-row"><span class="tax-label">\${esc(b.band)} stated</span><span class="tax-value zero">\${b.count} action(s) · \${b.passRate !== null ? Math.round(b.passRate * 100) + '% verified' : 'n/a'}</span></div>
+                <div class="conf-bar"><div class="conf-fill \${b.passRate !== null && b.passRate < 0.5 ? 'verylow' : b.passRate !== null && b.passRate < 0.8 ? 'low' : ''}" style="width:\${Math.round((b.passRate ?? 0) * 100)}%"></div></div>
+              </div>
+            \`).join('');
+            const surpriseCards = calibration.surprises.slice(0, 2).map(s => \`
+              <div class="info-card">
+                <div class="card-head">
+                  <div class="card-title">\${esc(s.intent)}</div>
+                  <div class="tag red">\${Math.round(s.confidence * 100)}% → failed</div>
+                </div>
+                <div class="card-body">Compiled confident, failed verification\${s.expectedOutcome ? ' — expected: ' + esc(s.expectedOutcome) : ''}.</div>
+              </div>
+            \`).join('');
+            calEl.innerHTML = \`
+              <div class="jspace-panel">
+                <div class="tax-row"><span class="tax-label">Verdict</span><span class="tax-value \${verdictTag === 'green' ? 'zero' : 'nonzero'}"><span class="tag \${verdictTag}">\${esc(calibration.verdict)}</span></span></div>
+                <div class="tax-row"><span class="tax-label">Executed Actions</span><span class="tax-value zero">\${calibration.samples}</span></div>
+                <div class="tax-row"><span class="tax-label">Brier Score</span><span class="tax-value zero">\${calibration.brierScore ?? '—'}</span></div>
+                <div class="tax-row"><span class="tax-label">Confidence − Pass Rate</span><span class="tax-value \${Math.abs(gapPts) > 15 ? 'nonzero' : 'zero'}">\${gapPts > 0 ? '+' : ''}\${gapPts}pt</span></div>
+                \${bandRows}
+              </div>
+              \${surpriseCards}
             \`;
           }
         }

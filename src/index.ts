@@ -52,7 +52,9 @@ Prompt hygiene: intents compile best as terse action + exact quoted target. If y
 
 Self-improvement loop for long runs: call **generate_behavior_report** at the end of every run — and every ~50 actions on long traversals. It reconstructs your chain of thought (observations → diagnoses → plans → actions → outcomes, grouped into navigation episodes), scores your verification rate and observation economy, and returns prioritized selfImprovement recommendations. Apply them immediately: they are computed from your own behavior this session, not generic advice. The report is also persisted to .splice/behavior/ so your next session can start by reading the previous one. Offline, \`splice report\` analyzes any persisted run journal the same way.
 
-Decision geometry: every compiled action is automatically mapped onto the session's J-space map — no call needed. Check **get_jspace_map** mid-run to see which concept axes are carrying your choices, which words in your intents are recurring dead weight, and which decisions were made near a flip boundary; apply its recommendations the same way. A J-space session report is written to .splice/jspace/ automatically when the session closes.`;
+Decision geometry: every compiled action is automatically mapped onto the session's J-space map — no call needed. Check **get_jspace_map** mid-run to see which concept axes are carrying your choices, which words in your intents are recurring dead weight, and which decisions were made near a flip boundary; apply its recommendations the same way. A J-space session report is written to .splice/jspace/ automatically when the session closes.
+
+Mind tools: **explain_last_decision** answers "why did you pick that?" in plain language — winner, runner-up, the word the choice hangs on, dead weight, prediction vs outcome, and whether your confidence has been trustworthy this session (behavior reports carry the full calibration record: Brier score, per-band reliability, and the high-confidence actions that failed anyway). When an intent could be phrased several ways — or a compiled choice looks fragile — run **run_intent_experiment** first: it races your phrasing against deterministic rewrites on the live page (nothing executes) and returns the phrasing that elects the consensus target most robustly; if phrasings disagree on the target, the intent is ambiguous on this page and you should quote the exact label. optimize_prompt also learns as the session runs: words the J-space map has seen match nothing repeatedly are stripped automatically (cross-checked against the current page's labels, always reported in transformations).`;
 
 const server = new Server(
   {
@@ -467,6 +469,31 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           properties: {
             persist: { type: "boolean", description: "Also write the map to .splice/jspace/ as JSON + markdown right now (default false). A session-end report is written automatically either way." },
           },
+        },
+      },
+      {
+        name: "explain_last_decision",
+        description: "A compiled decision, retold in plain language — the friendly face of the J-space machinery. Answers \"why did you pick that?\" in a ten-second story: what was chosen and why, what came second and by how much, which single word the choice hangs on (and the cheapest reweighting that would have flipped it), which words were dead weight, what the plan predicted vs what verification found, and whether this session's stated confidence has been trustworthy (calibration context). No matrices, no setup — it reads the records every decision already leaves behind. Pass intent to explain a specific earlier decision (substring match, newest first); omit it for the most recent one. Live and ephemeral.",
+        annotations: { title: "Explain Decision (Plain Language)", readOnlyHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {
+            intent: { type: "string", description: "Explain the most recent decision whose intent contains this text. Omit for the latest decision." },
+          },
+        },
+      },
+      {
+        name: "run_intent_experiment",
+        description: "Decision research: race several phrasings of the same intent against the live page BEFORE acting, and measure each in J-space. Splice auto-generates deterministic variants — the optimizer's rewrite, an inert-token-stripped cut, an exact-label quote of the current winner — and accepts up to 4 of your own via variants. Each phrasing is ranked by the real production scorer (compile-time only; nothing executes) and scored on: elected target, margin, robustness to single-token deletion, distance to the nearest flip boundary, and softmax confidence. Returns a per-variant comparison, whether the phrasings even agree on the target (disagreement = the intent is ambiguous on this page — that IS the finding), and a recommended phrasing (consensus target, elected most robustly, fewest tokens) ready to pass to compile_verified_action. Use it on ambiguous pages, before repeated actions on the same control, or to settle 'which wording is safer' empirically instead of guessing.",
+        annotations: { title: "Intent Experiment (Phrasing A/B)", readOnlyHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {
+            intent: { type: "string", description: "The intent to experiment on, e.g. 'click the save button'." },
+            variants: { type: "array", items: { type: "string" }, description: "Up to 4 additional phrasings of your own to include in the comparison." },
+            topCandidates: { type: "number", description: "How many top candidates each phrasing's J-space analysis spans (default 6, max 8)." },
+          },
+          required: ["intent"],
         },
       },
       {
@@ -1121,6 +1148,22 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
         return { content: [{ type: "text", text: [`J-space session map persisted to ${jsonPath} and ${markdownPath}.`, JSON.stringify(report, null, 2)].join("\n") }] };
       }
       return { content: [{ type: "text", text: JSON.stringify(browser.getJSpaceMap(), null, 2) }] };
+    }
+
+    if (request.params.name === "explain_last_decision") {
+      const { intent } = (request.params.arguments as any) || {};
+      const explanation = browser.explainLastDecision(typeof intent === 'string' ? intent : undefined);
+      return { content: [{ type: "text", text: JSON.stringify(explanation, null, 2) }] };
+    }
+
+    if (request.params.name === "run_intent_experiment") {
+      const { intent, variants, topCandidates } = request.params.arguments as { intent: string; variants?: string[]; topCandidates?: number };
+      const experiment = await browser.runIntentExperiment(
+        intent,
+        Array.isArray(variants) ? variants.filter((v): v is string => typeof v === 'string') : [],
+        typeof topCandidates === 'number' ? Math.min(8, Math.max(2, topCandidates)) : 6
+      );
+      return { content: [{ type: "text", text: JSON.stringify(experiment, null, 2) }] };
     }
 
     if (request.params.name === "optimize_prompt") {

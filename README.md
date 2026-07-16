@@ -56,7 +56,7 @@ See [AGENT_INSTALL.md](AGENT_INSTALL.md) for the deterministic, machine-checkabl
 
 ## Tool Reference
 
-Splice exposes **63 MCP tools** over stdio, grouped below by what they're for. Full JSON schemas live in [src/index.ts](src/index.ts); this table is the map.
+Splice exposes **65 MCP tools** over stdio, grouped below by what they're for. Full JSON schemas live in [src/index.ts](src/index.ts); this table is the map.
 
 ### Navigate & Observe
 | Tool | What it does |
@@ -106,8 +106,10 @@ Splice exposes **63 MCP tools** over stdio, grouped below by what they're for. F
 | `get_session_trace` | Live, ephemeral chain-of-thought — every intent, diagnosis, wait, and outcome from this session, nothing persisted. |
 | `run_jacobian_lens` | Sensitivity analysis of target selection: which intent words are load-bearing, whether the choice flips without them; with `deep: true`, the exact analytic Jacobian, token geometry, flip boundaries, **and the decision workspace** — Splice's low-dimensional J-space analog (named concept axes, effective dimensionality, concept-direction SVD, softmax decision Jacobian). Its own pre-action workspace, not the model's hidden state. |
 | `get_jspace_map` | The session's J-space map, built with zero setup: every compiled action and lens probe automatically records its decision geometry. Returns the dimensionality trend, session-wide concept leaderboard, choices made near a flip boundary, recurring dead-weight intent words, and map-derived recommendations. A session report (JSON + markdown) is written to `.splice/jspace/` automatically at session end. |
-| `generate_behavior_report` | Scored, persisted digest of a run's chain of thought with prioritized self-improvement recommendations (written to `.splice/behavior/`). |
-| `optimize_prompt` | Offline rewrite of a verbose/conversational prompt into the structured intent Splice ranks best, or a better-fit primitive call. |
+| `explain_last_decision` | "Why did you pick that?" answered in a ten-second, plain-language story: winner, runner-up and margin, the word the choice hangs on (and the cheapest reweighting that would have flipped it), dead-weight words, prediction vs verified outcome, and whether this session's confidence has been trustworthy. The friendly face of the J-space machinery — no matrices. |
+| `run_intent_experiment` | Decision research before acting: races your phrasing against deterministic rewrites (optimizer, inert-token strip, exact-label quote) plus up to 4 of your own, ranked by the real scorer on the live page — nothing executes. Reports per-phrasing robustness, flip distance, and margin; whether phrasings even agree on the target (disagreement = ambiguous intent); and a recommended phrasing ready to compile. |
+| `generate_behavior_report` | Scored, persisted digest of a run's chain of thought with prioritized self-improvement recommendations (written to `.splice/behavior/`) — now including a **confidence-calibration record**: Brier score, per-band reliability, and the high-confidence actions that failed anyway. |
+| `optimize_prompt` | Offline rewrite of a verbose/conversational prompt into the structured intent Splice ranks best, or a better-fit primitive call. **Session-learning:** words the J-space map has repeatedly seen match nothing are stripped automatically (cross-checked against the current page's labels, always reported). |
 | `generate_observability_report` | High-aesthetic, auto-refreshing HTML dashboard of session activity. |
 | `get_product_intelligence` | Analyzes behavior logs (clicks, rage-clicks, friction) into feature recommendations. |
 
@@ -219,6 +221,7 @@ src/                    # TypeScript source — MCP server, tool implementations
   StealthProfile.ts      # coherent per-session fingerprints + Web Bot Auth directory
   JacobianLens.ts / JSpace.ts   # sensitivity analysis of target selection
   JSpaceMap.ts           # session-wide decision-geometry map + per-session reports
+  Cognition.ts           # confidence calibration + plain-language decision explanations
   BehaviorReport.ts      # scored chain-of-thought digests and self-improvement recommendations
   PromptOptimizer.ts     # deterministic, offline intent rewriting
   AccessibilityAuditor.ts # WCAG audit engine
