@@ -410,6 +410,7 @@
     .agent-perf-card,
     .tax-meter,
     .reliability-meter,
+    .jspace-panel,
     .endpoint-row,
     .log-line {
       border: 1px solid var(--line);
@@ -650,6 +651,41 @@
 
     .conf-fill.low { background: var(--amber); box-shadow: 0 0 8px rgba(247, 201, 92, 0.5); }
     .conf-fill.verylow { background: var(--red); box-shadow: 0 0 8px rgba(255, 92, 124, 0.5); }
+
+    /* ── J-Space map (session decision geometry) ────────────────────── */
+    .jspace-map { display: grid; gap: 12px; }
+
+    .jspace-panel { padding: 14px 16px; display: grid; gap: 9px; }
+
+    .jspace-strip {
+      display: flex;
+      align-items: flex-end;
+      gap: 3px;
+      height: 54px;
+    }
+
+    .jspace-bar {
+      flex: 1 1 0;
+      max-width: 16px;
+      min-height: 3px;
+      border-radius: 3px 3px 0 0;
+      background: linear-gradient(180deg, var(--brand-a), var(--brand-b));
+      opacity: 0.9;
+      transition: height 0.5s var(--ease);
+    }
+
+    .jspace-bar.fragile { background: var(--amber); }
+    .jspace-bar.boundary { background: var(--red); }
+
+    .jspace-legend {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      font-size: 10px;
+      color: var(--quiet);
+    }
+
+    .jspace-legend b { color: var(--muted); font-weight: 600; }
 
     /* ── Agent badges & performance cards ───────────────────────────── */
     .agent-badge {
@@ -937,6 +973,11 @@
 
           <div class="section-label">Verified Action Plans</div>
           <div class="grid" id="verified-action-feed"></div>
+
+          <div class="section-label">J-Space Map
+            <span style="color:var(--quiet);font-weight:400;font-size:10px;text-transform:none;letter-spacing:0">session decision geometry</span>
+          </div>
+          <div class="jspace-map" id="jspace-map"></div>
 
           <div class="section-label">State Changes</div>
           <div class="grid" id="delta-feed"></div>

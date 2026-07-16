@@ -50,7 +50,9 @@ Efficiency: pass intent + maxTokens to get_semantic_tree_optimized to prune the 
 
 Prompt hygiene: intents compile best as terse action + exact quoted target. If your prompt is conversational or came verbatim from a user, run **optimize_prompt** first — it strips filler, grounds the target against the page's real labels, separates typed values, and tells you when fill_form / wait_for / extract_structured / assert_page_state fits the job better (with ready-to-use args). It only suggests; to have compile_verified_action apply it automatically, pass optimizeIntent: true (per-call permission) or set promptOptimization: true in splice.config.json (standing permission) — applied rewrites always come back in plan.intentOptimization with the original preserved.
 
-Self-improvement loop for long runs: call **generate_behavior_report** at the end of every run — and every ~50 actions on long traversals. It reconstructs your chain of thought (observations → diagnoses → plans → actions → outcomes, grouped into navigation episodes), scores your verification rate and observation economy, and returns prioritized selfImprovement recommendations. Apply them immediately: they are computed from your own behavior this session, not generic advice. The report is also persisted to .splice/behavior/ so your next session can start by reading the previous one. Offline, \`splice report\` analyzes any persisted run journal the same way.`;
+Self-improvement loop for long runs: call **generate_behavior_report** at the end of every run — and every ~50 actions on long traversals. It reconstructs your chain of thought (observations → diagnoses → plans → actions → outcomes, grouped into navigation episodes), scores your verification rate and observation economy, and returns prioritized selfImprovement recommendations. Apply them immediately: they are computed from your own behavior this session, not generic advice. The report is also persisted to .splice/behavior/ so your next session can start by reading the previous one. Offline, \`splice report\` analyzes any persisted run journal the same way.
+
+Decision geometry: every compiled action is automatically mapped onto the session's J-space map — no call needed. Check **get_jspace_map** mid-run to see which concept axes are carrying your choices, which words in your intents are recurring dead weight, and which decisions were made near a flip boundary; apply its recommendations the same way. A J-space session report is written to .splice/jspace/ automatically when the session closes.`;
 
 const server = new Server(
   {
@@ -444,7 +446,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "run_jacobian_lens",
-        description: "Amateur Jacobian lens — sensitivity analysis of target selection. The base layer is finite differences: the REAL candidate ranking behind compile_verified_action is re-run with one intent token removed at a time, showing which words are load-bearing and whether the chosen target flips without them, plus ∂page/∂action for recent actions. With deep: true it looks into the J space itself. Two views: (1) the exact analytic Jacobian J[token][candidate] read off the instrumented ranking, with token geometry (collinear vs orthogonal words), a power-iteration SVD of the dominant sensitivity mode, analytic flip boundaries, and a consistency check against the finite-difference reruns; and (2) the DECISION WORKSPACE — Splice's own low-dimensional J-space analog: every candidate is represented as a vector of named concept features (query match, keyword match, action affinity, obstruction, …), and the tool reports how many concept-directions the choice actually occupies (participation ratio), the SVD concept-axes that carry it, and the softmax decision Jacobian (∂P(winner) per concept). Honest scope, stated in the report: this is Splice's pre-action decision workspace, not the calling model's hidden activations — a structural analog, not access to model internals. Use it before acting on an ambiguous page, or when a compiled action picked a surprising target. Live and ephemeral; the report is not persisted.",
+        description: "Amateur Jacobian lens — sensitivity analysis of target selection. The base layer is finite differences: the REAL candidate ranking behind compile_verified_action is re-run with one intent token removed at a time, showing which words are load-bearing and whether the chosen target flips without them, plus ∂page/∂action for recent actions. With deep: true it looks into the J space itself. Two views: (1) the exact analytic Jacobian J[token][candidate] read off the instrumented ranking, with token geometry (collinear vs orthogonal words), a power-iteration SVD of the dominant sensitivity mode, analytic flip boundaries, and a consistency check against the finite-difference reruns; and (2) the DECISION WORKSPACE — Splice's own low-dimensional J-space analog: every candidate is represented as a vector of named concept features (query match, keyword match, action affinity, obstruction, …), and the tool reports how many concept-directions the choice actually occupies (participation ratio), the SVD concept-axes that carry it, and the softmax decision Jacobian (∂P(winner) per concept). Honest scope, stated in the report: this is Splice's pre-action decision workspace, not the calling model's hidden activations — a structural analog, not access to model internals. Use it before acting on an ambiguous page, or when a compiled action picked a surprising target. Live and ephemeral; the report itself is not persisted — but every probe's decision coordinates are recorded on the session J-space map (see get_jspace_map).",
         annotations: { title: "Jacobian Lens (Intent Sensitivity)", readOnlyHint: true },
         inputSchema: {
           type: "object",
@@ -454,6 +456,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             topCandidates: { type: "number", description: "How many top candidates the deep J-space analysis spans (default 6, max 8)." },
           },
           required: ["intent"],
+        },
+      },
+      {
+        name: "get_jspace_map",
+        description: "The session's J-space map — decision geometry, accumulated with zero setup. Every compile_verified_action and run_jacobian_lens call automatically records its decision's J-space coordinates (effective dimensionality of the decision workspace, which concept axes carried the choice, distance to the nearest flip boundary, softmax confidence, inert tokens); this tool reads the aggregate: a dimensionality trend, the session-wide concept leaderboard (which axes are load-bearing across ALL decisions, not just one), a fragility overview of choices made near a decision boundary, recurring dead-weight words the agent keeps paying for, and recommendations computed from this session's own map. Use it mid-run to check how your intents are landing, or at the end of a run alongside generate_behavior_report. Pass persist: true to write the report to .splice/jspace/ now (JSON + markdown); one is also written automatically when the session closes, so the next session can start by reading the previous map. Honest scope: this maps Splice's own pre-action decision workspace — a structural J-space analog, not the calling model's hidden activations.",
+        annotations: { title: "J-Space Map (Session Decision Geometry)", readOnlyHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {
+            persist: { type: "boolean", description: "Also write the map to .splice/jspace/ as JSON + markdown right now (default false). A session-end report is written automatically either way." },
+          },
         },
       },
       {
@@ -1099,6 +1112,15 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
         topCandidates: typeof topCandidates === 'number' ? Math.min(8, topCandidates) : undefined,
       });
       return { content: [{ type: "text", text: JSON.stringify(lens, null, 2) }] };
+    }
+
+    if (request.params.name === "get_jspace_map") {
+      const { persist } = (request.params.arguments as any) || {};
+      if (persist === true) {
+        const { report, jsonPath, markdownPath } = browser.generateJSpaceReport();
+        return { content: [{ type: "text", text: [`J-space session map persisted to ${jsonPath} and ${markdownPath}.`, JSON.stringify(report, null, 2)].join("\n") }] };
+      }
+      return { content: [{ type: "text", text: JSON.stringify(browser.getJSpaceMap(), null, 2) }] };
     }
 
     if (request.params.name === "optimize_prompt") {

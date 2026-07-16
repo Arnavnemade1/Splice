@@ -32,6 +32,7 @@ import { buildBehaviorReport, renderBehaviorMarkdown, summarizeEvent, type Behav
 import { optimizePrompt, type PageLabel, type PromptOptimization } from './PromptOptimizer.js';
 import { A11Y_RULES, sortFindings, summarizeAudit, type A11yAuditReport } from './AccessibilityAuditor.js';
 import { exploreJSpace, type JSpaceReport } from './JSpace.js';
+import { JSpaceMap, observationFromReport, renderJSpaceMapMarkdown, type JSpaceMapReport } from './JSpaceMap.js';
 import { assembleJacobianReport, type JacobianLensReport } from './JacobianLens.js';
 import type { AgentStateDiagnosis, LedgerEntry, SemanticNode, SessionMetrics, VerifiedActionPlan, SummonRequest } from './types.js';
 import type {
@@ -158,6 +159,15 @@ export class BrowserManager {
    */
   private behaviorLog: BehaviorEvent[] = [];
   private readonly MAX_BEHAVIOR_EVENTS = 2000;
+
+  /**
+   * J-space map — the session's decision geometry, accumulated. Every
+   * compiled action and Jacobian-lens probe records its decision's J-space
+   * coordinates here automatically; getJSpaceMap() reads the live map and
+   * close() persists it to .splice/jspace/ so every session ends with a report.
+   */
+  private jSpaceMap = new JSpaceMap();
+  private jSpaceReportWrittenAt = 0;
 
   /** Out-of-band page events (dialogs, popups, downloads) the agent would otherwise miss. */
   private pageEvents: PageEventRecord[] = [];
@@ -1851,6 +1861,13 @@ export class BrowserManager {
       this.saveMicroSnapshot('verified_action_plan', { intent, confidence: plan.confidence, risk: plan.risk, executable: false });
       return plan;
     }
+
+    // Map this decision onto the session's J-space map. Pure local math over
+    // the already-instrumented ranking (no page access, no extra tool call) —
+    // this is what makes the map build itself as the agent acts.
+    try {
+      this.jSpaceMap.record(observationFromReport(exploreJSpace(intent, keywords, candidates), 'action', currentUrl));
+    } catch { /* the map must never block an action */ }
 
     const topScore = Math.max(1, best.score);
     const secondScore = candidates[1]?.score ?? 0;
@@ -3630,6 +3647,18 @@ export class BrowserManager {
       .slice(-8)
       .map((e) => ({ at: e.timestamp, summary: String(e.data.summary ?? '').slice(0, 140) }));
 
+    // Every probe with a winner lands on the session's J-space map, deep or
+    // not — the exploration is pure local math over the instrumented ranking.
+    if (winner) {
+      try {
+        this.jSpaceMap.record(observationFromReport(
+          exploreJSpace(intent, tokens, baseline, options.topCandidates ?? 6),
+          'lens',
+          this.getActivePage().url()
+        ));
+      } catch { /* mapping must never fail a probe */ }
+    }
+
     let jSpace: JSpaceReport | undefined;
     let consistency: { agreements: number; comparisons: number; note: string } | undefined;
     if (options.deep && winner) {
@@ -3706,6 +3735,36 @@ export class BrowserManager {
     return { digest, jsonPath, markdownPath };
   }
 
+  /**
+   * The live J-space map: every decision this session, aggregated into its
+   * decision geometry — dimensionality, carrying concepts, fragility,
+   * recurring dead-weight tokens, and recommendations. Reads the in-memory
+   * map; persists nothing.
+   */
+  getJSpaceMap(): JSpaceMapReport {
+    return this.jSpaceMap.buildReport();
+  }
+
+  /**
+   * Persist the session's J-space map to .splice/jspace/ as JSON + markdown —
+   * the same pattern as behavior reports. Called on demand (get_jspace_map
+   * with persist: true) and automatically at session close, so every session
+   * that compiled at least one action leaves a decision-geometry report behind.
+   */
+  generateJSpaceReport(): { report: JSpaceMapReport; jsonPath: string; markdownPath: string } {
+    const report = this.jSpaceMap.buildReport();
+    const jspaceDir = path.join(this.spliceDir, 'jspace');
+    fs.mkdirSync(jspaceDir, { recursive: true });
+    const stamp = Date.now();
+    const jsonPath = path.join(jspaceDir, `jspace-${stamp}.json`);
+    const markdownPath = path.join(jspaceDir, `jspace-${stamp}.md`);
+    fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2), { mode: 0o600 });
+    fs.writeFileSync(markdownPath, renderJSpaceMapMarkdown(report), { mode: 0o600 });
+    this.jSpaceReportWrittenAt = stamp;
+    this.pushLiveFeed('jspace_report', `${report.observations} decision(s) mapped, ${report.recommendations.length} recommendation(s)`);
+    return { report, jsonPath, markdownPath };
+  }
+
   async generateObservabilityReport(): Promise<string> {
     const snaps = fs.readdirSync(this.snapshotsDir)
       .filter(f => f.startsWith('micro-snap-'))
@@ -3760,6 +3819,7 @@ export class BrowserManager {
         const summonsList = ${toJs(this.coordinator.getSummons())};
         const runtimeHealth = ${toJs(this.getRuntimeHealth())};
         const agentProfiles = ${toJs(this.agentTracker.getAllProfiles())};
+        const jspace = ${toJs(this.getJSpaceMap())};
 
         const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({
           '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
@@ -3849,6 +3909,63 @@ export class BrowserManager {
               </div>
             \`).join('')
             : empty('Run compile_verified_action to generate preconditions and postconditions.');
+        }
+
+        // ─── J-Space Map (session decision geometry) ─────────────────────
+        const jspaceEl = document.getElementById('jspace-map');
+        if (jspaceEl) {
+          if (!jspace.observations) {
+            jspaceEl.innerHTML = empty('No decisions mapped yet — the map fills itself as compile_verified_action and run_jacobian_lens run.');
+          } else {
+            const traj = jspace.trajectory || [];
+            const maxDim = Math.max(1, ...traj.map(p => p.effectiveDimension || 0));
+            const bars = traj.map(p => {
+              const height = Math.max(8, Math.round(((p.effectiveDimension || 0.4) / maxDim) * 100));
+              const cls = (p.flipDistance != null && p.flipDistance <= 0.5) ? 'boundary' : (!p.robust ? 'fragile' : '');
+              const conf = p.winnerProbability != null ? ' · conf ' + Math.round(p.winnerProbability * 100) + '%' : '';
+              const dim = p.effectiveDimension != null ? ' · dim ' + p.effectiveDimension : '';
+              return \`<div class="jspace-bar \${cls}" style="height:\${height}%" title="\${esc(p.intent)} → \${esc(p.winner)}\${dim}\${conf}"></div>\`;
+            }).join('');
+            const statVal = (value, warn) => \`<span class="tax-value \${warn ? 'nonzero' : 'zero'}">\${esc(String(value))}</span>\`;
+            const stats = [
+              \`<div class="tax-row"><span class="tax-label">Decisions Mapped</span>\${statVal(jspace.observations, false)}</div>\`,
+              \`<div class="tax-row"><span class="tax-label">Mean Effective Dimension</span>\${statVal(jspace.dimensionality ? jspace.dimensionality.mean : '—', false)}</div>\`,
+              \`<div class="tax-row"><span class="tax-label">Mean Winner Confidence</span>\${statVal(jspace.confidence ? Math.round(jspace.confidence.mean * 100) + '%' : '—', jspace.confidence ? jspace.confidence.mean < 0.5 : false)}</div>\`,
+              \`<div class="tax-row"><span class="tax-label">Robust Choices</span>\${statVal(jspace.fragility.robustDecisions + '/' + jspace.observations, jspace.fragility.fragileDecisions > 0)}</div>\`,
+              \`<div class="tax-row"><span class="tax-label">Near Flip Boundary</span>\${statVal(jspace.fragility.nearBoundary.length, jspace.fragility.nearBoundary.length > 0)}</div>\`,
+            ].join('');
+            const maxSens = Math.max(1e-9, ...jspace.conceptLeaderboard.map(c => c.meanAbsSensitivity));
+            const concepts = jspace.conceptLeaderboard.slice(0, 6).map(c => \`
+              <div>
+                <div class="tax-row"><span class="tax-label">\${esc(c.concept)}</span><span class="tax-value zero">\${c.meanAbsSensitivity} · dominant ×\${c.timesDominant}</span></div>
+                <div class="conf-bar"><div class="conf-fill" style="width:\${Math.max(4, Math.round((c.meanAbsSensitivity / maxSens) * 100))}%"></div></div>
+              </div>
+            \`).join('');
+            const fragileCards = jspace.fragility.nearBoundary.slice(0, 3).map(f => \`
+              <div class="info-card">
+                <div class="card-head">
+                  <div class="card-title">\${esc(f.intent)}</div>
+                  <div class="tag amber">flip @ \${f.distance}</div>
+                </div>
+                <div class="card-body">Chose "\${esc(f.winner)}" — reweighting "\${esc(f.token)}" flips it\${f.rival ? ' to "' + esc(f.rival) + '"' : ''}.</div>
+              </div>
+            \`).join('');
+            const recs = (jspace.recommendations || []).slice(0, 3).map(r => \`<div class="agent-directive">\${esc(r)}</div>\`).join('');
+            jspaceEl.innerHTML = \`
+              <div class="jspace-panel">\${stats}</div>
+              <div class="jspace-panel">
+                <div class="jspace-strip">\${bars}</div>
+                <div class="jspace-legend">
+                  <span><b>bars</b> effective dimension per decision, oldest → newest</span>
+                  <span style="color:var(--amber)">■ fragile</span>
+                  <span style="color:var(--red)">■ near flip boundary</span>
+                </div>
+              </div>
+              \${concepts ? \`<div class="jspace-panel"><div class="jspace-legend"><b>concept leaderboard</b> mean |∂P(winner)| per axis</div>\${concepts}</div>\` : ''}
+              \${fragileCards}
+              \${recs}
+            \`;
+          }
         }
 
         const deltaFeed = document.getElementById('delta-feed');
@@ -4415,6 +4532,17 @@ export class BrowserManager {
   }
 
   async close() {
+    // Session-end J-space report: every session that mapped at least one
+    // decision leaves its geometry behind for the next run to read. Skipped
+    // when nothing new happened since the last explicit persist.
+    const lastMapped = this.jSpaceMap.lastObservedAt;
+    if (lastMapped !== null && lastMapped > this.jSpaceReportWrittenAt) {
+      try {
+        this.generateJSpaceReport();
+      } catch (e) {
+        console.error('[Splice] J-space session report failed:', errorMessage(e));
+      }
+    }
     if (this.openclawGateway) {
       await this.openclawGateway.stop();
       this.openclawGateway = null;

@@ -56,7 +56,7 @@ See [AGENT_INSTALL.md](AGENT_INSTALL.md) for the deterministic, machine-checkabl
 
 ## Tool Reference
 
-Splice exposes **62 MCP tools** over stdio, grouped below by what they're for. Full JSON schemas live in [src/index.ts](src/index.ts); this table is the map.
+Splice exposes **63 MCP tools** over stdio, grouped below by what they're for. Full JSON schemas live in [src/index.ts](src/index.ts); this table is the map.
 
 ### Navigate & Observe
 | Tool | What it does |
@@ -105,6 +105,7 @@ Splice exposes **62 MCP tools** over stdio, grouped below by what they're for. F
 | --- | --- |
 | `get_session_trace` | Live, ephemeral chain-of-thought — every intent, diagnosis, wait, and outcome from this session, nothing persisted. |
 | `run_jacobian_lens` | Sensitivity analysis of target selection: which intent words are load-bearing, whether the choice flips without them; with `deep: true`, the exact analytic Jacobian, token geometry, flip boundaries, **and the decision workspace** — Splice's low-dimensional J-space analog (named concept axes, effective dimensionality, concept-direction SVD, softmax decision Jacobian). Its own pre-action workspace, not the model's hidden state. |
+| `get_jspace_map` | The session's J-space map, built with zero setup: every compiled action and lens probe automatically records its decision geometry. Returns the dimensionality trend, session-wide concept leaderboard, choices made near a flip boundary, recurring dead-weight intent words, and map-derived recommendations. A session report (JSON + markdown) is written to `.splice/jspace/` automatically at session end. |
 | `generate_behavior_report` | Scored, persisted digest of a run's chain of thought with prioritized self-improvement recommendations (written to `.splice/behavior/`). |
 | `optimize_prompt` | Offline rewrite of a verbose/conversational prompt into the structured intent Splice ranks best, or a better-fit primitive call. |
 | `generate_observability_report` | High-aesthetic, auto-refreshing HTML dashboard of session activity. |
@@ -217,6 +218,7 @@ src/                    # TypeScript source — MCP server, tool implementations
   SessionStore.ts        # named, isolated account sessions (cookies, storage, fingerprint)
   StealthProfile.ts      # coherent per-session fingerprints + Web Bot Auth directory
   JacobianLens.ts / JSpace.ts   # sensitivity analysis of target selection
+  JSpaceMap.ts           # session-wide decision-geometry map + per-session reports
   BehaviorReport.ts      # scored chain-of-thought digests and self-improvement recommendations
   PromptOptimizer.ts     # deterministic, offline intent rewriting
   AccessibilityAuditor.ts # WCAG audit engine
