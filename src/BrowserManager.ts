@@ -33,6 +33,7 @@ import { optimizePrompt, type PageLabel, type PromptOptimization } from './Promp
 import { A11Y_RULES, sortFindings, summarizeAudit, type A11yAuditReport } from './AccessibilityAuditor.js';
 import { exploreJSpace, type JSpaceReport } from './JSpace.js';
 import { JSpaceMap, observationFromReport, renderJSpaceMapMarkdown, type JSpaceMapReport } from './JSpaceMap.js';
+import { JSpaceDetector, type DetectionSummary, type JSpaceDetection } from './JSpaceDetector.js';
 import { buildCalibration, explainDecision, type CalibrationReport, type DecisionExplanation } from './Cognition.js';
 import { assembleJacobianReport, type JacobianLensReport } from './JacobianLens.js';
 import type { AgentStateDiagnosis, LedgerEntry, SemanticNode, SessionMetrics, VerifiedActionPlan, SummonRequest } from './types.js';
@@ -169,6 +170,8 @@ export class BrowserManager {
    */
   private jSpaceMap = new JSpaceMap();
   private jSpaceReportWrittenAt = 0;
+  /** Hazard detection over decision geometry — screens every mapped decision. */
+  private jSpaceDetector = new JSpaceDetector();
 
   /** Out-of-band page events (dialogs, popups, downloads) the agent would otherwise miss. */
   private pageEvents: PageEventRecord[] = [];
@@ -1866,12 +1869,28 @@ export class BrowserManager {
       return plan;
     }
 
-    // Map this decision onto the session's J-space map. Pure local math over
-    // the already-instrumented ranking (no page access, no extra tool call) —
-    // this is what makes the map build itself as the agent acts.
+    // Map this decision onto the session's J-space map and screen its
+    // geometry for hazards. Pure local math over the already-instrumented
+    // ranking — the map and the detector build themselves as the agent acts.
+    // Detections are advisory: they land in plan.evidence, never block.
     try {
-      this.jSpaceMap.record(observationFromReport(exploreJSpace(intent, keywords, candidates), 'action', currentUrl));
-    } catch { /* the map must never block an action */ }
+      const geometry = exploreJSpace(intent, keywords, candidates);
+      this.jSpaceMap.record(observationFromReport(geometry, 'action', currentUrl));
+      const findings = this.jSpaceDetector.screen(geometry).filter((f) => f.severity !== 'info');
+      for (const f of findings) {
+        evidence.push(`J-space detector [${f.severity}]: ${f.title}. ${f.recommendation}`);
+      }
+      if (findings.length > 0) {
+        const worst = findings.find((f) => f.severity === 'critical') ?? findings[0];
+        this.saveMicroSnapshot('jspace_detection', {
+          severity: worst.severity,
+          detectionType: worst.type,
+          title: worst.title.slice(0, 120),
+          count: findings.length,
+          intent: intent.slice(0, 100),
+        });
+      }
+    } catch { /* the map and detector must never block an action */ }
 
     const topScore = Math.max(1, best.score);
     const secondScore = candidates[1]?.score ?? 0;
@@ -3611,6 +3630,8 @@ export class BrowserManager {
     actionImpact: Array<{ at: number; summary: string }>;
     jSpace?: JSpaceReport;
     consistency?: { agreements: number; comparisons: number; note: string };
+    /** Hazards the J-space detector found in this decision's geometry. */
+    detections?: Array<{ severity: string; type: string; title: string; recommendation: string }>;
     insight: string;
     ephemeral: true;
   }> {
@@ -3651,22 +3672,23 @@ export class BrowserManager {
       .slice(-8)
       .map((e) => ({ at: e.timestamp, summary: String(e.data.summary ?? '').slice(0, 140) }));
 
-    // Every probe with a winner lands on the session's J-space map, deep or
-    // not — the exploration is pure local math over the instrumented ranking.
+    // Every probe with a winner lands on the session's J-space map and gets
+    // screened by the hazard detector, deep or not — the exploration is pure
+    // local math over the instrumented ranking, computed once and reused.
+    let exploration: JSpaceReport | undefined;
+    let detections: JSpaceDetection[] = [];
     if (winner) {
       try {
-        this.jSpaceMap.record(observationFromReport(
-          exploreJSpace(intent, tokens, baseline, options.topCandidates ?? 6),
-          'lens',
-          this.getActivePage().url()
-        ));
-      } catch { /* mapping must never fail a probe */ }
+        exploration = exploreJSpace(intent, tokens, baseline, options.topCandidates ?? 6);
+        this.jSpaceMap.record(observationFromReport(exploration, 'lens', this.getActivePage().url()));
+        detections = this.jSpaceDetector.screen(exploration);
+      } catch { /* mapping and detection must never fail a probe */ }
     }
 
     let jSpace: JSpaceReport | undefined;
     let consistency: { agreements: number; comparisons: number; note: string } | undefined;
-    if (options.deep && winner) {
-      jSpace = exploreJSpace(intent, tokens, baseline, options.topCandidates ?? 6);
+    if (options.deep && winner && exploration) {
+      jSpace = exploration;
       // Cross-check: analytic winner with token i zeroed vs the FD rerun.
       let agreements = 0;
       for (let i = 0; i < tokens.length; i++) {
@@ -3709,6 +3731,9 @@ export class BrowserManager {
       actionImpact,
       ...(jSpace ? { jSpace } : {}),
       ...(consistency ? { consistency } : {}),
+      ...(detections.length > 0
+        ? { detections: detections.map((d) => ({ severity: d.severity, type: d.type, title: d.title, recommendation: d.recommendation })) }
+        : {}),
       insight,
       ephemeral: true,
     };
@@ -3945,11 +3970,33 @@ export class BrowserManager {
   /**
    * The live J-space map: every decision this session, aggregated into its
    * decision geometry — dimensionality, carrying concepts, fragility,
-   * recurring dead-weight tokens, and recommendations. Reads the in-memory
-   * map; persists nothing.
+   * recurring dead-weight tokens, recommendations, and the hazard-detector
+   * summary. Reads the in-memory map; persists nothing.
    */
   getJSpaceMap(): JSpaceMapReport {
-    return this.jSpaceMap.buildReport();
+    return {
+      ...this.jSpaceMap.buildReport(),
+      hazards: this.jSpaceDetector.summarize(this.jSpaceMap.all()),
+    };
+  }
+
+  /**
+   * The J-space detector's session log: every hazard found in decision
+   * geometry (near-ties, aliased candidates, boundary proximity, concept
+   * conflicts, …) plus live session-trend detections (unstable targets,
+   * fragility streaks, chronic ambiguity). Advisory only — detections attach
+   * to plan evidence but never block or rescore an action.
+   */
+  getJSpaceDetections(options: { severity?: 'all' | 'warning' | 'critical'; limit?: number } = {}): DetectionSummary & { ephemeral: true } {
+    const limit = Math.max(1, Math.min(50, options.limit ?? 10));
+    const summary = this.jSpaceDetector.summarize(this.jSpaceMap.all(), 50);
+    const recent =
+      options.severity === 'critical'
+        ? summary.recent.filter((d) => d.severity === 'critical')
+        : options.severity === 'warning'
+          ? summary.recent.filter((d) => d.severity !== 'info')
+          : summary.recent;
+    return { ...summary, recent: recent.slice(0, limit), ephemeral: true };
   }
 
   /**
@@ -3959,7 +4006,7 @@ export class BrowserManager {
    * that compiled at least one action leaves a decision-geometry report behind.
    */
   generateJSpaceReport(): { report: JSpaceMapReport; jsonPath: string; markdownPath: string } {
-    const report = this.jSpaceMap.buildReport();
+    const report = this.getJSpaceMap();
     const jspaceDir = path.join(this.spliceDir, 'jspace');
     fs.mkdirSync(jspaceDir, { recursive: true });
     const stamp = Date.now();
@@ -4209,6 +4256,35 @@ export class BrowserManager {
               </div>
               \${surpriseCards}
             \`;
+          }
+        }
+
+        // ─── J-Space Detector (hazards in decision geometry) ─────────────
+        const detectorEl = document.getElementById('jspace-detector-feed');
+        if (detectorEl) {
+          const hz = jspace.hazards;
+          if (!hz || (hz.total === 0 && hz.sessionTrends.length === 0)) {
+            detectorEl.innerHTML = \`<div class="empty" style="color:var(--green);border-color:rgba(65,230,162,0.2)">✓ No hazards detected — decision geometry has been clean.</div>\`;
+          } else {
+            const sevTag = (s) => s === 'critical' ? 'red' : s === 'warning' ? 'amber' : 'blue';
+            const meter = \`
+              <div class="jspace-panel">
+                <div class="tax-row"><span class="tax-label">Critical</span><span class="tax-value \${hz.bySeverity.critical > 0 ? 'nonzero' : 'zero'}">\${hz.bySeverity.critical}</span></div>
+                <div class="tax-row"><span class="tax-label">Warning</span><span class="tax-value \${hz.bySeverity.warning > 0 ? 'nonzero' : 'zero'}">\${hz.bySeverity.warning}</span></div>
+                <div class="tax-row"><span class="tax-label">Info</span><span class="tax-value zero">\${hz.bySeverity.info}</span></div>
+                \${hz.sessionTrends.length ? \`<div class="tax-row"><span class="tax-label">Session Trends</span><span class="tax-value nonzero">\${hz.sessionTrends.length}</span></div>\` : ''}
+              </div>
+            \`;
+            const cards = [...hz.sessionTrends, ...hz.recent].slice(0, 4).map(d => \`
+              <div class="info-card">
+                <div class="card-head">
+                  <div class="card-title">\${esc(d.title)}</div>
+                  <div class="tag \${sevTag(d.severity)}">\${esc(d.severity)}</div>
+                </div>
+                <div class="card-body">\${esc(d.recommendation)}</div>
+              </div>
+            \`).join('');
+            detectorEl.innerHTML = meter + cards;
           }
         }
 

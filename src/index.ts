@@ -54,6 +54,8 @@ Self-improvement loop for long runs: call **generate_behavior_report** at the en
 
 Decision geometry: every compiled action is automatically mapped onto the session's J-space map — no call needed. Check **get_jspace_map** mid-run to see which concept axes are carrying your choices, which words in your intents are recurring dead weight, and which decisions were made near a flip boundary; apply its recommendations the same way. A J-space session report is written to .splice/jspace/ automatically when the session closes.
 
+Geometry hazards: the J-space detector screens every decision automatically and attaches warning/critical findings to the plan's evidence — read them before executing. A "J-space detector [critical]" line means the geometry is dangerous: a near-tie readout is a coin flip, aliased candidates mean label-based targeting cannot distinguish two elements (target by id or viewport instead), and a concept conflict means the winner is obstructed or external. **get_jspace_detections** returns the session's full hazard log plus trend detections — an unstable_target trend means the page changed under you: re-observe before repeating an intent.
+
 Mind tools: **explain_last_decision** answers "why did you pick that?" in plain language — winner, runner-up, the word the choice hangs on, dead weight, prediction vs outcome, and whether your confidence has been trustworthy this session (behavior reports carry the full calibration record: Brier score, per-band reliability, and the high-confidence actions that failed anyway). When an intent could be phrased several ways — or a compiled choice looks fragile — run **run_intent_experiment** first: it races your phrasing against deterministic rewrites on the live page (nothing executes) and returns the phrasing that elects the consensus target most robustly; if phrasings disagree on the target, the intent is ambiguous on this page and you should quote the exact label. optimize_prompt also learns as the session runs: words the J-space map has seen match nothing repeatedly are stripped automatically (cross-checked against the current page's labels, always reported in transformations).`;
 
 const server = new Server(
@@ -468,6 +470,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             persist: { type: "boolean", description: "Also write the map to .splice/jspace/ as JSON + markdown right now (default false). A session-end report is written automatically either way." },
+          },
+        },
+      },
+      {
+        name: "get_jspace_detections",
+        description: "The J-space detector's hazard log — automatic screening of every decision's geometry, with zero setup. Every compile_verified_action and run_jacobian_lens call is screened against a battery of precise geometric predicates: near-tie readouts (thin margin, soft softmax, high readout entropy), ALIASED CANDIDATES the scorer literally cannot tell apart (near-identical concept activations or duplicate visible labels — the classic 'which Delete button?' hazard), flip-boundary proximity, rank-one intents (all words redundant along one axis), inert-majority phrasings, concept conflicts (the winner prevailed DESPITE an active obstruction/external/disabled penalty), and dimensional collapse. This tool returns the session log plus live trend detections: unstable targets (the same intent electing different winners over time — the page drifted), fragility streaks, and chronic ambiguity. Warning/critical findings also attach automatically to each plan's evidence at compile time, so you see them at the moment of action. Detections are advisory: they never block or rescore. Filter with severity ('all' | 'warning' | 'critical') and limit.",
+        annotations: { title: "J-Space Detector (Geometry Hazards)", readOnlyHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {
+            severity: { type: "string", enum: ["all", "warning", "critical"], description: "Minimum severity to include in the recent list (default all)." },
+            limit: { type: "number", description: "Max recent detections to return (default 10, max 50)." },
           },
         },
       },
@@ -1148,6 +1162,15 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
         return { content: [{ type: "text", text: [`J-space session map persisted to ${jsonPath} and ${markdownPath}.`, JSON.stringify(report, null, 2)].join("\n") }] };
       }
       return { content: [{ type: "text", text: JSON.stringify(browser.getJSpaceMap(), null, 2) }] };
+    }
+
+    if (request.params.name === "get_jspace_detections") {
+      const { severity, limit } = (request.params.arguments as any) || {};
+      const detections = browser.getJSpaceDetections({
+        severity: severity === 'warning' || severity === 'critical' ? severity : 'all',
+        limit: typeof limit === 'number' ? limit : undefined,
+      });
+      return { content: [{ type: "text", text: JSON.stringify(detections, null, 2) }] };
     }
 
     if (request.params.name === "explain_last_decision") {

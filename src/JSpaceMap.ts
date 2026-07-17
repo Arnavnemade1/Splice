@@ -19,6 +19,7 @@
  */
 
 import type { JSpaceReport } from './JSpace.js';
+import type { DetectionSummary } from './JSpaceDetector.js';
 
 /** One decision, reduced to its J-space coordinates. */
 export interface JSpaceObservation {
@@ -89,6 +90,8 @@ export interface JSpaceMapReport {
   recommendations: string[];
   interpretation: string[];
   scope: string;
+  /** Hazard-detector summary, merged in by the session owner (BrowserManager). */
+  hazards?: DetectionSummary;
 }
 
 const MAX_OBSERVATIONS = 400;
@@ -161,6 +164,11 @@ export class JSpaceMap {
       if (hay.includes(needle) || needle.includes(hay)) return this.observations[i];
     }
     return null;
+  }
+
+  /** Read-only view of the recorded observations, oldest → newest. */
+  all(): readonly JSpaceObservation[] {
+    return this.observations;
   }
 
   /** Tokens observed inert in at least `minOccurrences` decisions — the
@@ -370,6 +378,23 @@ export function renderJSpaceMapMarkdown(report: JSpaceMapReport): string {
     lines.push('## Recurring inert tokens');
     lines.push('');
     lines.push(report.recurringInertTokens.map((t) => `\`${t.token}\` (×${t.occurrences})`).join(', '));
+    lines.push('');
+  }
+
+  if (report.hazards && (report.hazards.total > 0 || report.hazards.sessionTrends.length > 0)) {
+    lines.push('## Hazards');
+    lines.push('');
+    lines.push(report.hazards.interpretation);
+    lines.push('');
+    const sev = report.hazards.bySeverity;
+    lines.push(`Severity: ${sev.critical} critical / ${sev.warning} warning / ${sev.info} info.`);
+    lines.push('');
+    for (const d of report.hazards.recent) {
+      lines.push(`- **[${d.severity}] ${d.title}** — ${d.recommendation}`);
+    }
+    for (const t of report.hazards.sessionTrends) {
+      lines.push(`- **[trend · ${t.severity}] ${t.title}** — ${t.recommendation}`);
+    }
     lines.push('');
   }
 
