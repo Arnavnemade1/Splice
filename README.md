@@ -192,7 +192,9 @@ npm install
 npm run build
 npm start           # starts the MCP server (stdio)
 npm test            # 49-step local validation against a synthetic web app
-npm run test:regression   # known failure patterns: menus, validation, overlays, a11y
+npm run test:regression     # known failure patterns: menus, validation, overlays, a11y
+npm run test:introspection  # browser-free unit tests for the introspection stack
+npm run test:all            # everything: 17 + 49 + 29 = 95 checks
 ```
 
 ### CLI commands

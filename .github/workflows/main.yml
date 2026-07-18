@@ -27,6 +27,11 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+      # Browser-free unit tests for the introspection stack (J-space math,
+      # hazard detection, calibration, train of thought) — no Chromium needed.
+      - name: Introspection unit tests
+        run: npm run test:introspection
+
       - name: Use Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
