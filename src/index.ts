@@ -56,6 +56,8 @@ Decision geometry: every compiled action is automatically mapped onto the sessio
 
 Geometry hazards: the J-space detector screens every decision automatically and attaches warning/critical findings to the plan's evidence — read them before executing. A "J-space detector [critical]" line means the geometry is dangerous: a near-tie readout is a coin flip, aliased candidates mean label-based targeting cannot distinguish two elements (target by id or viewport instead), and a concept conflict means the winner is obstructed or external. **get_jspace_detections** returns the session's full hazard log plus trend detections — an unstable_target trend means the page changed under you: re-observe before repeating an intent.
 
+Train of thought: **generate_thought_report** reconstructs this session's cognition as a typed thinking transcript (observe → believe → decide → act → verify, with each decision's J-space why attached), detects the shape of your thinking — blind retries, thought loops, dithering, hesitation, unverified streaks — and returns ONE ranked chain-of-thinking optimization plan merging every introspection engine's advice. Run it at the end of every session (persisted to .splice/thought/) and apply the plan top-down; on long traversals run it every ~50 actions with includeStream: false.
+
 Mind tools: **explain_last_decision** answers "why did you pick that?" in plain language — winner, runner-up, the word the choice hangs on, dead weight, prediction vs outcome, and whether your confidence has been trustworthy this session (behavior reports carry the full calibration record: Brier score, per-band reliability, and the high-confidence actions that failed anyway). When an intent could be phrased several ways — or a compiled choice looks fragile — run **run_intent_experiment** first: it races your phrasing against deterministic rewrites on the live page (nothing executes) and returns the phrasing that elects the consensus target most robustly; if phrasings disagree on the target, the intent is ambiguous on this page and you should quote the exact label. optimize_prompt also learns as the session runs: words the J-space map has seen match nothing repeatedly are stripped automatically (cross-checked against the current page's labels, always reported in transformations).`;
 
 const server = new Server(
@@ -470,6 +472,18 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: "object",
           properties: {
             persist: { type: "boolean", description: "Also write the map to .splice/jspace/ as JSON + markdown right now (default false). A session-end report is written automatically either way." },
+          },
+        },
+      },
+      {
+        name: "generate_thought_report",
+        description: "Train of thought: the session's cognition reconstructed as a typed thinking transcript — every event classified as observe / believe / decide / act / verify / wait / recover / introspect, with each decision annotated by its J-space why (what won, by how much, which concept carried it, whether the geometry was hazardous). On top of the transcript, thinking-PATTERN analysis measures the shape of the reasoning itself: blind retries (a failure re-run with no re-read between), thought loops (the same intent compiled 3+ times), over-observation runs (dithering), hesitation loops (diagnosing without acting), unverified streaks (executing without declared expectations), and the healthy pattern worth keeping (failures answered with observation). Everything converges in a RANKED chain-of-thinking optimization plan that merges these pattern findings with the behavior report's recommendations, the J-space map's phrasing advice, hazard trends, and the calibration verdict — most impactful change first. Persisted to .splice/thought/ as JSON + markdown. Call it at the end of a run (or mid-run on long traversals) and apply the plan top-down; includeStream: false returns just the analysis without the transcript for token economy.",
+        annotations: { title: "Train of Thought (Thinking Transcript + Optimization)", readOnlyHint: true },
+        inputSchema: {
+          type: "object",
+          properties: {
+            includeStream: { type: "boolean", description: "Include the full annotated transcript in the response (default true). The persisted files always contain it." },
+            maxSteps: { type: "number", description: "Cap on transcript steps, newest kept (default 200, max 500)." },
           },
         },
       },
@@ -1162,6 +1176,20 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
         return { content: [{ type: "text", text: [`J-space session map persisted to ${jsonPath} and ${markdownPath}.`, JSON.stringify(report, null, 2)].join("\n") }] };
       }
       return { content: [{ type: "text", text: JSON.stringify(browser.getJSpaceMap(), null, 2) }] };
+    }
+
+    if (request.params.name === "generate_thought_report") {
+      const { includeStream, maxSteps } = (request.params.arguments as any) || {};
+      const { report, jsonPath, markdownPath } = browser.generateThoughtReport({
+        maxSteps: typeof maxSteps === 'number' ? maxSteps : undefined,
+      });
+      const payload = includeStream === false ? { ...report, stream: `omitted (includeStream: false) — full transcript in ${markdownPath}` } : report;
+      return {
+        content: [{
+          type: "text",
+          text: [`Train of thought persisted to ${jsonPath} and ${markdownPath}.`, JSON.stringify(payload, null, 2)].join("\n"),
+        }],
+      };
     }
 
     if (request.params.name === "get_jspace_detections") {

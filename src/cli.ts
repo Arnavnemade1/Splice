@@ -143,6 +143,8 @@ Commands:
               --json        machine-readable digest
               --jspace      show the latest J-space session map instead
                             (decision geometry from ./.splice/jspace/)
+              --thought     show the latest train-of-thought report instead
+                            (thinking transcript from ./.splice/thought/)
             Live sessions get richer chain-of-thought reports via the
             generate_behavior_report MCP tool (written to .splice/behavior/).
 
@@ -425,30 +427,36 @@ function commandSession(args: string[]): void {
 async function commandReport(args: string[]): Promise<void> {
   if (!hasFlag(args, '--json')) await printBanner();
 
-  // --jspace: show the latest persisted J-space session map (decision
-  // geometry) instead of the journal digest. One is written automatically
-  // every time a session that compiled at least one action closes.
-  if (hasFlag(args, '--jspace')) {
-    const jspaceDir = path.join(process.cwd(), '.splice', 'jspace');
+  // --jspace / --thought: show the latest persisted introspection report
+  // (decision geometry, or the train-of-thought transcript) instead of the
+  // journal digest. J-space maps are written automatically at session close;
+  // thought reports whenever generate_thought_report runs.
+  const introspection = hasFlag(args, '--jspace')
+    ? { dir: 'jspace', prefix: 'jspace-', title: 'Splice J-Space Session Map', hint: 'a map is written automatically at session close' }
+    : hasFlag(args, '--thought')
+      ? { dir: 'thought', prefix: 'thought-', title: 'Splice Train of Thought', hint: 'run the generate_thought_report MCP tool during a session' }
+      : null;
+  if (introspection) {
+    const reportDir = path.join(process.cwd(), '.splice', introspection.dir);
     const wantJson = hasFlag(args, '--json');
     const suffix = wantJson ? '.json' : '.md';
-    const reports = fs.existsSync(jspaceDir)
-      ? fs.readdirSync(jspaceDir).filter((f) => f.startsWith('jspace-') && f.endsWith(suffix)).sort()
+    const reports = fs.existsSync(reportDir)
+      ? fs.readdirSync(reportDir).filter((f) => f.startsWith(introspection.prefix) && f.endsWith(suffix)).sort()
       : [];
     if (reports.length === 0) {
-      console.error(`${paint(RED, 'No J-space session maps found.')} Looked in ${jspaceDir}.`);
-      console.error(`Run a session that compiles at least one action (${paint(CYAN, 'splice start')}) — a map is written automatically at session close.`);
+      console.error(`${paint(RED, `No ${introspection.title} reports found.`)} Looked in ${reportDir}.`);
+      console.error(`Run a session first (${paint(CYAN, 'splice start')}) — ${introspection.hint}.`);
       process.exitCode = 1;
       return;
     }
-    const latest = path.join(jspaceDir, reports[reports.length - 1]);
+    const latest = path.join(reportDir, reports[reports.length - 1]);
     const content = fs.readFileSync(latest, 'utf8');
     if (wantJson) {
       console.log(content);
     } else {
-      console.log(`${paint(BOLD, 'Splice J-Space Session Map')} ${paint(DIM, `(${latest})`)}\n`);
+      console.log(`${paint(BOLD, introspection.title)} ${paint(DIM, `(${latest})`)}\n`);
       console.log(content);
-      if (reports.length > 1) console.log(paint(DIM, `${reports.length - 1} earlier map(s) in ${jspaceDir}`));
+      if (reports.length > 1) console.log(paint(DIM, `${reports.length - 1} earlier report(s) in ${reportDir}`));
     }
     return;
   }

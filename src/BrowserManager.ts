@@ -35,6 +35,7 @@ import { exploreJSpace, type JSpaceReport } from './JSpace.js';
 import { JSpaceMap, observationFromReport, renderJSpaceMapMarkdown, type JSpaceMapReport } from './JSpaceMap.js';
 import { JSpaceDetector, type DetectionSummary, type JSpaceDetection } from './JSpaceDetector.js';
 import { buildCalibration, explainDecision, type CalibrationReport, type DecisionExplanation } from './Cognition.js';
+import { buildTrainOfThought, renderTrainOfThoughtMarkdown, type TrainOfThoughtReport } from './TrainOfThought.js';
 import { assembleJacobianReport, type JacobianLensReport } from './JacobianLens.js';
 import type { AgentStateDiagnosis, LedgerEntry, SemanticNode, SessionMetrics, VerifiedActionPlan, SummonRequest } from './types.js';
 import type {
@@ -2044,6 +2045,7 @@ export class BrowserManager {
       risk: plan.risk,
       executed: plan.verification?.executed,
       passed: plan.verification?.passed,
+      expectDeclared: (expect?.length ?? 0) > 0,
       why: plan.plan[0]?.why,
       expectedOutcome: plan.expectedOutcome
     });
@@ -4016,6 +4018,45 @@ export class BrowserManager {
     fs.writeFileSync(markdownPath, renderJSpaceMapMarkdown(report), { mode: 0o600 });
     this.jSpaceReportWrittenAt = stamp;
     this.pushLiveFeed('jspace_report', `${report.observations} decision(s) mapped, ${report.recommendations.length} recommendation(s)`);
+    return { report, jsonPath, markdownPath };
+  }
+
+  /**
+   * Train of thought: the session's cognition events reconstructed as a typed
+   * thinking transcript (observe → believe → decide → act → verify), each
+   * decision annotated with its J-space why and any geometry hazards, plus
+   * thinking-pattern analysis (blind retries, thought loops, dithering,
+   * hesitation, unverified streaks) and a ranked chain-of-thinking
+   * optimization plan merging every introspection engine's advice. Persisted
+   * to .splice/thought/ as JSON + markdown, like the other reports.
+   */
+  generateThoughtReport(options: { maxSteps?: number } = {}): { report: TrainOfThoughtReport; jsonPath: string; markdownPath: string } {
+    const digest = buildBehaviorReport({
+      events: this.behaviorLog,
+      metrics: this.metrics,
+      journalStats: this.journalStatsProvider ? (this.journalStatsProvider() as BehaviorReportDigest['journal']) : undefined,
+      recoveryMemoryStats: this.recoveryMemory ? { totalPatterns: this.recoveryMemory.getStats().totalPatterns } : undefined,
+    });
+    const mapReport = this.jSpaceMap.buildReport();
+    const report = buildTrainOfThought(
+      {
+        events: this.behaviorLog,
+        observations: this.jSpaceMap.all(),
+        hazards: this.jSpaceDetector.summarize(this.jSpaceMap.all(), 50),
+        calibration: digest.calibration,
+        behaviorRecommendations: digest.selfImprovement,
+        mapRecommendations: mapReport.recommendations,
+      },
+      Math.max(20, Math.min(500, options.maxSteps ?? 200))
+    );
+    const thoughtDir = path.join(this.spliceDir, 'thought');
+    fs.mkdirSync(thoughtDir, { recursive: true });
+    const stamp = Date.now();
+    const jsonPath = path.join(thoughtDir, `thought-${stamp}.json`);
+    const markdownPath = path.join(thoughtDir, `thought-${stamp}.md`);
+    fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2), { mode: 0o600 });
+    fs.writeFileSync(markdownPath, renderTrainOfThoughtMarkdown(report), { mode: 0o600 });
+    this.pushLiveFeed('thought_report', `${report.stepCount} step(s), ${report.optimizations.length} optimization(s)`);
     return { report, jsonPath, markdownPath };
   }
 
