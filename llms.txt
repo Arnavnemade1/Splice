@@ -20,3 +20,5 @@
 - Recommended loop: navigate → diagnose_agent_state → compile_verified_action (with declared `expect` postconditions) → verify via deltas.
 - Long runs: call generate_behavior_report periodically and apply its selfImprovement section.
 - Prompts: run optimize_prompt on conversational intents; enable promptOptimization in splice.config.json for automatic rewrites (always reported, never silent).
+- Introspection stack (builds itself, zero extra calls): every decision is mapped in J-space (get_jspace_map), screened for geometry hazards that attach to plan evidence (get_jspace_detections), calibrated against verified outcomes, explainable in plain language (explain_last_decision), testable across phrasings before acting (run_intent_experiment), and reconstructed into a train-of-thought report with a ranked chain-of-thinking optimization plan (generate_thought_report).
+- Session artifacts for the next run: .splice/jspace/ and .splice/thought/ are written automatically at session close; read them at startup (`splice report --jspace` / `--thought` offline).

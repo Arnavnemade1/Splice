@@ -135,6 +135,21 @@ export interface JSpaceReport {
   method: string;
 }
 
+/**
+ * Display-side label hygiene. Ranked labels deliberately include hrefs (URL
+ * tokens carry matching signal for intents like "click the pricing link"),
+ * but reports should read like the page, not like its markup: URLs are
+ * stripped for display, with a raw-prefix fallback when nothing else remains
+ * (e.g. an unnamed icon link whose only identity is its href).
+ */
+export function cleanLabel(label: string): string {
+  const cleaned = label
+    .replace(/(?:https?|file|blob|javascript|data):[^\s]+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned.length > 0 ? cleaned : label.slice(0, 40);
+}
+
 // ─── small dense linear algebra (matrices here are at most 8×8) ─────────────
 
 const dot = (a: number[], b: number[]) => a.reduce((s, v, i) => s + v * b[i], 0);
@@ -310,7 +325,7 @@ export function buildDecisionWorkspace(candidates: JSpaceCandidate[], temperatur
 
   return {
     concepts,
-    activations: withFeatures.map((c, i) => ({ label: c.label.slice(0, 60), vector: A[i] })),
+    activations: withFeatures.map((c, i) => ({ label: cleanLabel(c.label).slice(0, 60), vector: A[i] })),
     effectiveDimension,
     conceptDirections,
     decisionJacobian,
@@ -369,7 +384,7 @@ export function exploreJSpace(intent: string, tokens: string[], allCandidates: J
     sigma1: Number(sigma1.toFixed(3)),
     sigma2: Number(sigma2.toFixed(3)),
     dominantTokenMix: tokens.map((token, i) => ({ token, weight: Number(first.vector[i].toFixed(3)) })),
-    dominantCandidateMix: candidates.map((c, j) => ({ label: c.label.slice(0, 60), weight: Number(candidateMixRaw[j].toFixed(3)) })),
+    dominantCandidateMix: candidates.map((c, j) => ({ label: cleanLabel(c.label).slice(0, 60), weight: Number(candidateMixRaw[j].toFixed(3)) })),
     dominantModeEnergy: traceEnergy > 1e-9 ? Number((first.value / traceEnergy).toFixed(3)) : 0,
   };
 
@@ -395,7 +410,7 @@ export function exploreJSpace(intent: string, tokens: string[], allCandidates: J
       if (best.unreachable || distance < (best.distance ?? Infinity)) {
         best = {
           token,
-          rival: rival.label.slice(0, 60),
+          rival: cleanLabel(rival.label).slice(0, 60),
           requiredWeight: Number(requiredWeight.toFixed(3)),
           distance: Number(distance.toFixed(3)),
           direction,
@@ -451,9 +466,9 @@ export function exploreJSpace(intent: string, tokens: string[], allCandidates: J
   return {
     intent,
     tokens,
-    candidates: candidates.map((c) => ({ label: c.label.slice(0, 80), score: c.score })),
-    winner: winner.label.slice(0, 80),
-    runnerUp: runnerUp?.label.slice(0, 80),
+    candidates: candidates.map((c) => ({ label: cleanLabel(c.label).slice(0, 80), score: c.score })),
+    winner: cleanLabel(winner.label).slice(0, 80),
+    runnerUp: runnerUp ? cleanLabel(runnerUp.label).slice(0, 80) : undefined,
     margin,
     jacobian,
     geometry: { tokenLeverage, redundantPairs, orthogonalPairs, inertTokens },

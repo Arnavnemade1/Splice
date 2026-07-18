@@ -106,6 +106,8 @@ export const DETECTOR_THRESHOLDS = {
 const MAX_DETECTIONS = 200;
 const T = DETECTOR_THRESHOLDS;
 
+const intentKeyOf = (s: string) => s.trim().toLowerCase().slice(0, 120);
+
 const norm = (v: number[]) => Math.sqrt(v.reduce((s, x) => s + x * x, 0));
 const cosine = (a: number[], b: number[]) => {
   const na = norm(a);
@@ -367,12 +369,21 @@ export function screenTrends(observations: readonly JSpaceObservation[]): JSpace
 
 export class JSpaceDetector {
   private log: JSpaceDetection[] = [];
+  private seen = new Set<string>();
 
-  /** Screen a decision and record its findings. Returns them for attachment. */
+  /**
+   * Screen a decision and record its findings. Returns every finding (each
+   * decision deserves its warning in plan evidence), but the LOG dedupes on
+   * (type, title, intent): re-compiling the same hazardous intent five times
+   * is one distinct hazard, not five — summaries count hazards, not retries.
+   */
   screen(report: JSpaceReport): JSpaceDetection[] {
     const found = screenDecision(report);
-    if (found.length > 0) {
-      this.log.push(...found);
+    for (const f of found) {
+      const key = `${f.type}|${f.title}|${intentKeyOf(f.intent)}`;
+      if (this.seen.has(key)) continue;
+      this.seen.add(key);
+      this.log.push(f);
       if (this.log.length > MAX_DETECTIONS) this.log.splice(0, this.log.length - MAX_DETECTIONS);
     }
     return found;
@@ -394,7 +405,7 @@ export class JSpaceDetector {
     const interpretation =
       this.log.length === 0 && sessionTrends.length === 0
         ? 'No hazards detected — decision geometry has been clean this session.'
-        : `${this.log.length} decision-level detection(s) (worst: ${worst})${
+        : `${this.log.length} distinct hazard(s) (worst: ${worst})${
             sessionTrends.length > 0 ? ` and ${sessionTrends.length} session trend(s): ${sessionTrends.map((t) => t.type).join(', ')}` : ''
           }. Detections are advisory — they attach to plan evidence but never block an action.`;
     return {

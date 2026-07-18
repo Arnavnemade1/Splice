@@ -687,6 +687,16 @@
 
     .jspace-legend b { color: var(--muted); font-weight: 600; }
 
+    .thought-bar {
+      display: flex;
+      height: 10px;
+      border-radius: 999px;
+      overflow: hidden;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .thought-seg { min-width: 2px; }
+
     /* ── Agent badges & performance cards ───────────────────────────── */
     .agent-badge {
       display: inline-flex;
@@ -988,6 +998,11 @@
             <span style="color:var(--quiet);font-weight:400;font-size:10px;text-transform:none;letter-spacing:0">hazards in decision geometry</span>
           </div>
           <div class="jspace-map" id="jspace-detector-feed"></div>
+
+          <div class="section-label">Train of Thought
+            <span style="color:var(--quiet);font-weight:400;font-size:10px;text-transform:none;letter-spacing:0">thinking shape + optimization</span>
+          </div>
+          <div class="jspace-map" id="thought-feed"></div>
 
           <div class="section-label">State Changes</div>
           <div class="grid" id="delta-feed"></div>

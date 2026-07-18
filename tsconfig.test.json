@@ -4,5 +4,11 @@
     "rootDir": ".",
     "outDir": "dist_test"
   },
-  "include": ["src/**/*", "fixtures/**/*", "test.ts", "regression.ts"]
+  "include": [
+    "src/**/*",
+    "fixtures/**/*",
+    "test.ts",
+    "regression.ts",
+    "introspection.test.ts"
+  ]
 }

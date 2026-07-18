@@ -31,7 +31,7 @@ import { SpliceError, withRetry, isTransientError, errorMessage } from './Resili
 import { buildBehaviorReport, renderBehaviorMarkdown, summarizeEvent, type BehaviorEvent, type BehaviorReportDigest } from './BehaviorReport.js';
 import { optimizePrompt, type PageLabel, type PromptOptimization } from './PromptOptimizer.js';
 import { A11Y_RULES, sortFindings, summarizeAudit, type A11yAuditReport } from './AccessibilityAuditor.js';
-import { exploreJSpace, type JSpaceReport } from './JSpace.js';
+import { exploreJSpace, cleanLabel, type JSpaceReport } from './JSpace.js';
 import { JSpaceMap, observationFromReport, renderJSpaceMapMarkdown, type JSpaceMapReport } from './JSpaceMap.js';
 import { JSpaceDetector, type DetectionSummary, type JSpaceDetection } from './JSpaceDetector.js';
 import { buildCalibration, explainDecision, type CalibrationReport, type DecisionExplanation } from './Cognition.js';
@@ -171,6 +171,7 @@ export class BrowserManager {
    */
   private jSpaceMap = new JSpaceMap();
   private jSpaceReportWrittenAt = 0;
+  private thoughtReportWrittenAt = 0;
   /** Hazard detection over decision geometry — screens every mapped decision. */
   private jSpaceDetector = new JSpaceDetector();
 
@@ -1911,7 +1912,7 @@ export class BrowserManager {
         action: inferredAction,
         target: best.id,
         value,
-        why: `Best semantic and visual match: "${best.label || best.tagName}" scored ${best.score}.`
+        why: `Best semantic and visual match: "${cleanLabel(best.label) || best.tagName}" scored ${best.score}.`
       }],
       preconditions: [
         `Target ${best.id} is visible.`,
@@ -3661,7 +3662,7 @@ export class BrowserManager {
       const newMargin = newTop && ranked[1] ? newTop.score - ranked[1].score : null;
       perToken.push({
         token: tokens[i],
-        newWinner: newTop ? newTop.label.slice(0, 80) : null,
+        newWinner: newTop ? cleanLabel(newTop.label).slice(0, 80) : null,
         winnerChanged: !!winner && (!newTop || newTop.id !== winner.id),
         topScoreDelta: (newTop?.score ?? 0) - (winner?.score ?? 0),
         marginDelta: margin !== null && newMargin !== null ? Number((newMargin - margin).toFixed(3)) : null,
@@ -3697,7 +3698,7 @@ export class BrowserManager {
         const analyticScores = baseline.map((c) => c.score - (c.keywordContributions[i] ?? 0));
         const analyticWinner = baseline[analyticScores.indexOf(Math.max(...analyticScores))];
         const fdWinner = perToken[i].newWinner;
-        if (fdWinner !== null && analyticWinner.label.slice(0, 80) === fdWinner) agreements++;
+        if (fdWinner !== null && cleanLabel(analyticWinner.label).slice(0, 80) === fdWinner) agreements++;
       }
       consistency = {
         agreements,
@@ -3711,14 +3712,14 @@ export class BrowserManager {
     const flips = perToken.filter((p) => p.winnerChanged).map((p) => p.token);
     const insight = winner
       ? flips.length > 0
-        ? `Load-bearing token(s): ${flips.join(', ')} — removing any of them changes the chosen target away from "${winner.label.slice(0, 60)}".`
-        : `The choice of "${winner.label.slice(0, 60)}" is stable under every single-token deletion${margin !== null ? ` (margin ${margin})` : ''}.`
+        ? `Load-bearing token(s): ${flips.join(', ')} — removing any of them changes the chosen target away from "${cleanLabel(winner.label).slice(0, 60)}".`
+        : `The choice of "${cleanLabel(winner.label).slice(0, 60)}" is stable under every single-token deletion${margin !== null ? ` (margin ${margin})` : ''}.`
       : 'No candidate scored at all — the intent tokens match nothing on this page.';
 
     this.saveMicroSnapshot('jacobian_lens', {
       intent: intent.slice(0, 100),
       tokens,
-      winner: winner?.label.slice(0, 80) ?? null,
+      winner: winner ? cleanLabel(winner.label).slice(0, 80) : null,
       flips,
       deep: options.deep === true,
     });
@@ -3726,8 +3727,8 @@ export class BrowserManager {
     return {
       intent,
       tokens,
-      winner: winner ? { label: winner.label.slice(0, 80), score: winner.score } : null,
-      ...(runnerUp ? { runnerUp: { label: runnerUp.label.slice(0, 80), score: runnerUp.score } } : {}),
+      winner: winner ? { label: cleanLabel(winner.label).slice(0, 80), score: winner.score } : null,
+      ...(runnerUp ? { runnerUp: { label: cleanLabel(runnerUp.label).slice(0, 80), score: runnerUp.score } } : {}),
       margin,
       perToken,
       actionImpact,
@@ -4030,7 +4031,9 @@ export class BrowserManager {
    * optimization plan merging every introspection engine's advice. Persisted
    * to .splice/thought/ as JSON + markdown, like the other reports.
    */
-  generateThoughtReport(options: { maxSteps?: number } = {}): { report: TrainOfThoughtReport; jsonPath: string; markdownPath: string } {
+  /** Build the live train-of-thought report without persisting anything —
+   *  shared by generateThoughtReport (which persists) and the dashboard. */
+  private buildThoughtNow(maxSteps = 200): TrainOfThoughtReport {
     const digest = buildBehaviorReport({
       events: this.behaviorLog,
       metrics: this.metrics,
@@ -4038,7 +4041,7 @@ export class BrowserManager {
       recoveryMemoryStats: this.recoveryMemory ? { totalPatterns: this.recoveryMemory.getStats().totalPatterns } : undefined,
     });
     const mapReport = this.jSpaceMap.buildReport();
-    const report = buildTrainOfThought(
+    return buildTrainOfThought(
       {
         events: this.behaviorLog,
         observations: this.jSpaceMap.all(),
@@ -4047,8 +4050,12 @@ export class BrowserManager {
         behaviorRecommendations: digest.selfImprovement,
         mapRecommendations: mapReport.recommendations,
       },
-      Math.max(20, Math.min(500, options.maxSteps ?? 200))
+      Math.max(20, Math.min(500, maxSteps))
     );
+  }
+
+  generateThoughtReport(options: { maxSteps?: number } = {}): { report: TrainOfThoughtReport; jsonPath: string; markdownPath: string } {
+    const report = this.buildThoughtNow(options.maxSteps ?? 200);
     const thoughtDir = path.join(this.spliceDir, 'thought');
     fs.mkdirSync(thoughtDir, { recursive: true });
     const stamp = Date.now();
@@ -4056,6 +4063,7 @@ export class BrowserManager {
     const markdownPath = path.join(thoughtDir, `thought-${stamp}.md`);
     fs.writeFileSync(jsonPath, JSON.stringify(report, null, 2), { mode: 0o600 });
     fs.writeFileSync(markdownPath, renderTrainOfThoughtMarkdown(report), { mode: 0o600 });
+    this.thoughtReportWrittenAt = stamp;
     this.pushLiveFeed('thought_report', `${report.stepCount} step(s), ${report.optimizations.length} optimization(s)`);
     return { report, jsonPath, markdownPath };
   }
@@ -4116,6 +4124,7 @@ export class BrowserManager {
         const agentProfiles = ${toJs(this.agentTracker.getAllProfiles())};
         const jspace = ${toJs(this.getJSpaceMap())};
         const calibration = ${toJs(this.getCalibration())};
+        const thought = ${toJs((() => { const t = this.buildThoughtNow(60); return { ...t, stream: t.stream.slice(-5) }; })())};
 
         const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({
           '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
@@ -4326,6 +4335,32 @@ export class BrowserManager {
               </div>
             \`).join('');
             detectorEl.innerHTML = meter + cards;
+          }
+        }
+
+        // ─── Train of Thought (thinking shape + optimization) ────────────
+        const thoughtEl = document.getElementById('thought-feed');
+        if (thoughtEl) {
+          if (!thought.stepCount) {
+            thoughtEl.innerHTML = empty('No cognition events yet — the train of thought builds as the agent works.');
+          } else {
+            const palette = { observe: 'var(--blue)', believe: 'var(--amber)', decide: 'var(--purple)', act: 'var(--green)', verify: 'var(--brand-a)', wait: 'var(--quiet)', recover: 'var(--red)', introspect: 'var(--muted)' };
+            const active = Object.entries(thought.tempo.shares).filter(([, v]) => v > 0);
+            const segs = active.map(([k, v]) => \`<div class="thought-seg" style="flex:\${v};background:\${palette[k] || 'var(--quiet)'}" title="\${esc(k)} \${Math.round(v * 100)}%"></div>\`).join('');
+            const legend = active.map(([k, v]) => \`<span><b style="color:\${palette[k] || 'var(--quiet)'}">■</b> \${esc(k)} \${Math.round(v * 100)}%</span>\`).join('');
+            const chips = thought.patterns.map(p => \`<span class="tag \${p.severity === 'good' ? 'green' : p.severity === 'high' ? 'red' : 'amber'}">\${esc(p.pattern)} ×\${p.occurrences}</span>\`).join('');
+            const opts = thought.optimizations.slice(0, 3).map(o => \`<div class="agent-directive">\${o.rank}. [\${esc(o.priority)}] \${esc(o.change)}</div>\`).join('');
+            const lastSteps = thought.stream.map(s => \`<div class="log-line"><div class="mono">\${esc(s.kind)}</div><div class="log-msg">\${esc(s.summary)}</div></div>\`).join('');
+            thoughtEl.innerHTML = \`
+              <div class="jspace-panel">
+                <div class="thought-bar">\${segs}</div>
+                <div class="jspace-legend">\${legend}</div>
+                <div class="jspace-legend">tempo \${thought.tempo.eventsPerMinute} thought(s)/min · \${thought.stepCount} step(s) this session</div>
+              </div>
+              \${chips ? \`<div class="jspace-panel"><div class="jspace-legend"><b>thinking patterns</b></div><div style="display:flex;flex-wrap:wrap;gap:6px">\${chips}</div></div>\` : ''}
+              \${opts}
+              \${lastSteps ? \`<div class="jspace-panel"><div class="jspace-legend"><b>latest thoughts</b></div>\${lastSteps}</div>\` : ''}
+            \`;
           }
         }
 
@@ -4893,15 +4928,23 @@ export class BrowserManager {
   }
 
   async close() {
-    // Session-end J-space report: every session that mapped at least one
-    // decision leaves its geometry behind for the next run to read. Skipped
-    // when nothing new happened since the last explicit persist.
+    // Session-end reports: every session that mapped at least one decision
+    // leaves its geometry AND its train of thought behind for the next run
+    // to read. Skipped when nothing new happened since the last persist.
     const lastMapped = this.jSpaceMap.lastObservedAt;
     if (lastMapped !== null && lastMapped > this.jSpaceReportWrittenAt) {
       try {
         this.generateJSpaceReport();
       } catch (e) {
         console.error('[Splice] J-space session report failed:', errorMessage(e));
+      }
+    }
+    const lastThought = this.behaviorLog.length > 0 ? this.behaviorLog[this.behaviorLog.length - 1].timestamp : null;
+    if (this.behaviorLog.length >= 5 && lastThought !== null && lastThought > this.thoughtReportWrittenAt) {
+      try {
+        this.generateThoughtReport();
+      } catch (e) {
+        console.error('[Splice] Train-of-thought session report failed:', errorMessage(e));
       }
     }
     if (this.openclawGateway) {

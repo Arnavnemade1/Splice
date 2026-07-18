@@ -1,6 +1,6 @@
 {
   "name": "splice",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Secure browser infrastructure and observability for autonomous web agents.",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -28,10 +28,11 @@
     "doctor": "node dist/cli.js doctor",
     "test": "npm run build:test && node dist_test/test.js",
     "test:regression": "npm run build:test && node dist_test/regression.js",
-    "test:all": "npm run build:test && node dist_test/test.js && node dist_test/regression.js",
+    "test:all": "npm run build:test && node dist_test/introspection.test.js && node dist_test/test.js && node dist_test/regression.js",
     "validate:local": "npm test",
     "demo:local": "npm test",
-    "prepack": "npm run clean && npm run build"
+    "prepack": "npm run clean && npm run build",
+    "test:introspection": "npm run build:test && node dist_test/introspection.test.js"
   },
   "repository": {
     "type": "git",

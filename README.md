@@ -12,7 +12,7 @@
 
 Splice is an **MCP server** that gives AI coding agents a browser they can actually reason about. It doesn't stop at screenshots or raw DOM — it diagnoses browser state, compiles natural-language intent into verified actions, redacts hostile page content, isolates multi-account sessions, coordinates multiple agents on shared browser state, and records the evidence agents need to recover and improve.
 
-[Install](#install) · [Why Splice](#why-splice) · [Tool Reference](#tool-reference) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Security Model](#security-model) · [Contributing](#contributing)
+[Install](#install) · [Why Splice](#why-splice) · [Tool Reference](#tool-reference) · [Introspection Stack](#the-introspection-stack) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Security Model](#security-model) · [Contributing](#contributing)
 
 </div>
 
@@ -30,7 +30,7 @@ Modern autonomous web agents fail because browsers are stateful, noisy, and adve
 - recover from browser crashes and stale element references,
 - run multiple isolated account sessions in parallel,
 - coordinate several agents against one shared browser without stepping on each other, and
-- introspect and improve their own behavior across a run.
+- **explain, measure, and optimize their own thinking** — every decision is mapped, screened for hazards, calibrated against outcomes, and reconstructed into a train-of-thought report with a ranked optimization plan.
 
 > Splice is the cognitive browser layer for MCP-based agents — the safety and observability layer every agent stack should assume is present.
 
@@ -141,6 +141,42 @@ Splice exposes **67 MCP tools** over stdio, grouped below by what they're for. F
 
 ### MCP Resources
 Beyond tools, Splice exposes resources: the raw semantic tree, telemetry data, a health/performance dashboard, a live heartbeat feed, the recommended agent playbook (`splice://guide/agent-playbook`), and the animated Splice logo.
+
+---
+
+## The Introspection Stack
+
+Splice's most distinctive layer: the agent's own decisions become measurable objects. Everything below builds itself passively as the agent acts — zero extra calls — and each layer feeds the next:
+
+```text
+every compiled action / lens probe
+  │
+  ├─ J-SPACE MAP (get_jspace_map) ────────── the decision's geometry, recorded:
+  │    effective dimensionality, carrying concept axes, flip-boundary distance,
+  │    softmax confidence, dead-weight words — aggregated across the session
+  │
+  ├─ DETECTOR (get_jspace_detections) ────── the geometry, screened:
+  │    near-ties, aliased candidates ("which Delete button?"), boundary
+  │    proximity, concept conflicts, page drift — warnings attach to the
+  │    plan's evidence at the moment of action
+  │
+  ├─ CALIBRATION (in behavior reports) ───── the confidence, audited:
+  │    stated compile confidence vs verified outcomes — Brier score, per-band
+  │    reliability, the high-confidence actions that failed anyway
+  │
+  ├─ EXPLAIN / EXPERIMENT ────────────────── the decision, interrogated:
+  │    explain_last_decision retells any choice in plain language;
+  │    run_intent_experiment races phrasings on the live page before acting
+  │
+  └─ TRAIN OF THOUGHT (generate_thought_report) ── the thinking, optimized:
+       a typed transcript (observe → believe → decide → act → verify) with
+       each decision's why inline, thinking-pattern detection (blind retries,
+       loops, dithering, hesitation), and ONE ranked optimization plan
+```
+
+Session artifacts land in `.splice/` for the next run to read: `jspace/` (decision-geometry map, written automatically at close), `thought/` (train of thought, written automatically at close), `behavior/` (chain-of-thought digest with calibration). Offline: `splice report --jspace` and `splice report --thought`.
+
+The optimizer closes the loop: words the map has seen match nothing repeatedly are stripped from future intents automatically (cross-checked against the current page's labels, always reported). Honest scope, everywhere: this measures Splice's own pre-action decision workspace and observable cognition events — a structural analog of model introspection, never a claim of access to the calling model's hidden state.
 
 ---
 
