@@ -19,3 +19,8 @@ python/splice_mcp/__pycache__/
 !src/**/*.ts
 !test.ts
 !web/**/*.js
+
+# Model Mind Lab (lab/) — local environment and generated reports
+lab/.venv/
+lab/mindlab-report.html
+lab/mindlab-report.json

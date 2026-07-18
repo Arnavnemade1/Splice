@@ -12,6 +12,7 @@
 ## Docs
 
 - [README](README.md): full feature and tool reference.
+- [lab/RESEARCH.md](lab/RESEARCH.md) + [lab/mindlab.py](lab/mindlab.py): the Model Mind Lab — Anthropic-style interpretability experiments (Jacobian saliency, logit lens, activation patching, concept injection, induction heads) runnable from scratch on open-weights models. Standalone; not part of the MCP server.
 - MCP resource `splice://guide/agent-playbook` (after install): the recommended cognition loop — diagnose → compile verified action → verify → recover.
 
 ## Key facts

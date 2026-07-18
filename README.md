@@ -178,6 +178,8 @@ Session artifacts land in `.splice/` for the next run to read: `jspace/` (decisi
 
 The optimizer closes the loop: words the map has seen match nothing repeatedly are stripped from future intents automatically (cross-checked against the current page's labels, always reported). Honest scope, everywhere: this measures Splice's own pre-action decision workspace and observable cognition events — a structural analog of model introspection, never a claim of access to the calling model's hidden state.
 
+Want to ask these questions of a **real model's internals**? [`lab/`](lab/) is the Model Mind Lab: the interpretability experiments behind Anthropic's research program (Jacobian saliency, logit lens, activation patching, concept injection, induction heads) implemented from scratch on open weights, with the research mapped in [`lab/RESEARCH.md`](lab/RESEARCH.md). Standalone, CPU-only, not part of the MCP server.
+
 ---
 
 ## Quick Start
@@ -274,6 +276,8 @@ dist/                   # compiled runtime output
 dist_test/              # compiled tests
 dashboard/              # local observability UI
 python/                 # optional Python MCP server integration
+lab/                    # Model Mind Lab — real interpretability experiments on open weights
+                        #   (Jacobian saliency, logit lens, patching, steering, induction heads)
 assets/                 # logo and static resources
 ```
 
