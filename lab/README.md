@@ -14,6 +14,11 @@ no cloud: [mindlab.py](mindlab.py).
 | `attention` | the induction heads that implement in-context learning | induction-head scan |
 | `report` | all five in one self-contained HTML page | — |
 
+Beyond replication, [`probes.py`](probes.py) runs measurements that haven't been done
+this way before — Splice's decision-geometry battery pointed at a real transformer,
+confidence-vs-fragility calibration, and cross-layer concept transport — with the
+findings and honest novelty framing written up in [NOVEL.md](NOVEL.md).
+
 ## Run it
 
 ```bash
