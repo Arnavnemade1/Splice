@@ -77,10 +77,33 @@ class Lab:
         self.n_head = cfg.n_head if hasattr(cfg, "n_head") else cfg.num_attention_heads
         self.d_model = cfg.n_embd if hasattr(cfg, "n_embd") else cfg.hidden_size
         self.head_dim = self.d_model // self.n_head
-        # GPT-2 family internals used by lens/patch/steer/ablation/knockout hooks.
-        self.blocks = self.model.transformer.h
-        self.ln_f = self.model.transformer.ln_f
         self.unembed = self.model.get_output_embeddings().weight  # [vocab, d]
+
+        # Internals differ by architecture. Two families are wired here; the
+        # transformer-block hooks (lens/patch/steer/ablation/knockout) go
+        # through the accessors below so the experiments stay architecture-blind.
+        if hasattr(self.model, "transformer"):          # GPT-2 family
+            self.arch = "gpt2"
+            self.blocks = self.model.transformer.h
+            self.ln_f = self.model.transformer.ln_f
+        elif hasattr(self.model, "gpt_neox"):           # GPTNeoX / Pythia
+            self.arch = "gptneox"
+            self.blocks = self.model.gpt_neox.layers
+            self.ln_f = self.model.gpt_neox.final_layer_norm
+        else:
+            raise SystemExit(f"Unsupported architecture for {model_name}: no transformer/gpt_neox block stack.")
+
+    def mlp_act(self, layer: int):
+        """The module whose OUTPUT is the MLP intermediate (post-activation)
+        neuron vector — the ablation target. Same attribute name in both
+        families (`.mlp.act`); kept as an accessor for clarity and safety."""
+        return self.blocks[layer].mlp.act
+
+    def attn_out_proj(self, layer: int):
+        """The attention OUTPUT projection, whose input is the concatenated
+        per-head outputs — the knockout site (zero a head_dim slice)."""
+        blk = self.blocks[layer]
+        return blk.attn.c_proj if self.arch == "gpt2" else blk.attention.dense
 
     def ids(self, prompt: str) -> torch.Tensor:
         return self.tok(prompt, return_tensors="pt").input_ids
@@ -449,7 +472,7 @@ def run_ablation(lab: Lab, prompt: str, layer: int, k: int = 10) -> AblationResu
         store["act"] = output
         return output
 
-    handle = lab.blocks[layer].mlp.act.register_forward_hook(capture)
+    handle = lab.mlp_act(layer).register_forward_hook(capture)
     logits = lab.model(ids).logits[0, -1]
     answer = int(logits.detach().argmax())
     lab.model.zero_grad(set_to_none=True)
@@ -471,7 +494,7 @@ def run_ablation(lab: Lab, prompt: str, layer: int, k: int = 10) -> AblationResu
         def zero(_m, _i, output, _n=idx):
             output[:, :, _n] = 0
             return output
-        hz = lab.blocks[layer].mlp.act.register_forward_hook(zero)
+        hz = lab.mlp_act(layer).register_forward_hook(zero)
         with torch.no_grad():
             la = lab.model(ids).logits[0, -1]
         hz.remove()
@@ -544,7 +567,7 @@ def run_knockout(lab: Lab, clean: str, answer: str, foil: str) -> KnockoutResult
                 x = args[0].clone()
                 x[:, :, _h * hd:(_h + 1) * hd] = 0
                 return (x,)
-            handle = lab.blocks[layer].attn.c_proj.register_forward_pre_hook(pre)
+            handle = lab.attn_out_proj(layer).register_forward_pre_hook(pre)
             with torch.no_grad():
                 d = logit_diff(lab.model(ids).logits)
             handle.remove()

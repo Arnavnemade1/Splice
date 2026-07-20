@@ -49,6 +49,12 @@ PARAM_COUNTS = {
     "gpt2-medium": 355_000_000,
     "gpt2-large": 774_000_000,
     "gpt2-xl": 1_558_000_000,
+    # Pythia — a deliberate single-architecture scale ladder (GPTNeoX).
+    "EleutherAI/pythia-70m": 70_000_000,
+    "EleutherAI/pythia-160m": 160_000_000,
+    "EleutherAI/pythia-410m": 410_000_000,
+    "EleutherAI/pythia-1b": 1_000_000_000,
+    "EleutherAI/pythia-1.4b": 1_400_000_000,
 }
 
 # 40 short completions with a reasonably clear continuation, mixed domains.

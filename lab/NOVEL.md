@@ -158,6 +158,44 @@ fractional superposition (§5). Scale changes the *answers*, not the *shape of h
 are held* — which is exactly why external, evidence-based verification (Splice's job)
 does not become unnecessary as models grow.
 
+## 6. Pythia replication — does the finding survive a *real* scale ladder?
+
+**Question.** §4–5 ran on the GPT-2 family, whose members differ in training data and
+recipe as well as size — a confound the write-ups flagged as the biggest weakness. The
+[Pythia suite](https://github.com/EleutherAI/pythia) exists precisely to remove it: one
+architecture (GPTNeoX), one training corpus, one recipe, checkpoints from 70M to 1.4B+.
+The lab's `Lab` class is now architecture-aware (GPT-2 *and* GPTNeoX), so the identical
+experiments run on Pythia unchanged.
+
+**Finding — the invariances replicate on the clean ladder.** Across Pythia 70M → 1B
+(a 14× range, single architecture):
+
+| model | params | mean confidence | fragile-top-conf | conf↔flip-dist (Spearman) |
+| --- | --- | --- | --- | --- |
+| pythia-70m | 70M | 0.149 | **1.00** | 0.78 |
+| pythia-160m | 160M | 0.164 | **1.00** | 0.50 |
+| pythia-410m | 410M | 0.277 | **1.00** | 0.55 |
+| pythia-1b | 1B | 0.316 | **1.00** | 0.68 |
+
+Mean confidence roughly doubles (0.149 → 0.316), and **every model's top-third-confident
+predictions are 100% fragile to single-token deletion** — including pythia-1b's. The
+confidence↔robustness correlation stays noisy with no clean scaling trend (0.78, 0.50,
+0.55, 0.68), exactly as on GPT-2. So the §4 result — *scale buys confidence, not
+robustness* — is not a GPT-2 training-recipe artifact: it holds on a purpose-built,
+single-architecture ladder too.
+
+The §5 **localization** result replicates as well
+([results/scaling-localization-pythia.json](results/scaling-localization-pythia.json)):
+the fact's depth profile is U-shaped at every Pythia size (70M–1B, all `u_shaped=True`),
+and the mean fraction of a layer carrying it stays in a ~20–29% band with no clean trend
+(19.6%, 23.1%, 29.1%, 22.2%) even as the models grow 14×. Universal U-shape, roughly
+scale-invariant fractional superposition — the same two signatures GPT-2 showed.
+
+This is the honest upgrade the earlier caveat asked for: two independent model families,
+one of them a controlled scale ladder, agree. It is still CPU-scale (≤1B, 40 prompts) —
+but "confidence outruns robustness, and scale does not fix it" now rests on more than one
+architecture. The case for Splice's external verification is correspondingly firmer.
+
 ---
 
 ## Relation to prior work

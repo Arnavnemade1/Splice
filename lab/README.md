@@ -50,7 +50,11 @@ python3 mindlab.py steer --concept "shouting" --layer 6 --alphas 0,6,12,20
 python3 mindlab.py patch   # classic John/Mary indirect-object task
 ```
 
-`--model` accepts any GPT-2-family checkpoint (`gpt2`, `distilgpt2`, `gpt2-medium`).
+`--model` accepts any **GPT-2** checkpoint (`gpt2`, `distilgpt2`, `gpt2-medium`, `gpt2-large`)
+or any **GPTNeoX / Pythia** checkpoint (`EleutherAI/pythia-70m` … `pythia-1.4b`) — the `Lab`
+class detects the architecture and routes every hook accordingly. Pythia is a deliberate
+single-architecture scale ladder, used in [NOVEL.md §6](NOVEL.md) to confirm the scaling
+findings hold beyond the GPT-2 family.
 
 ## Honest scope
 

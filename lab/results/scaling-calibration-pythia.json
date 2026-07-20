@@ -1,0 +1,1381 @@
+{
+  "question": "Does softmax confidence become better calibrated to decision geometry with scale?",
+  "protocol": "40 fixed prompts; per prompt: confidence, top1-vs-top2 margin, min per-token linearized flip distance, single-token-deletion flips. Correlations within model.",
+  "generated_at": "2026-07-20T18:39:21",
+  "trend": [
+    {
+      "model": "EleutherAI/pythia-70m",
+      "params": 70000000,
+      "pearson_conf_margin": 0.845,
+      "spearman_conf_margin": 0.731,
+      "spearman_conf_flipdist": 0.775,
+      "fragile_share_top_conf": 1.0
+    },
+    {
+      "model": "EleutherAI/pythia-160m",
+      "params": 160000000,
+      "pearson_conf_margin": 0.82,
+      "spearman_conf_margin": 0.502,
+      "spearman_conf_flipdist": 0.495,
+      "fragile_share_top_conf": 1.0
+    },
+    {
+      "model": "EleutherAI/pythia-410m",
+      "params": 410000000,
+      "pearson_conf_margin": 0.923,
+      "spearman_conf_margin": 0.792,
+      "spearman_conf_flipdist": 0.554,
+      "fragile_share_top_conf": 1.0
+    },
+    {
+      "model": "EleutherAI/pythia-1b",
+      "params": 1000000000,
+      "pearson_conf_margin": 0.92,
+      "spearman_conf_margin": 0.769,
+      "spearman_conf_flipdist": 0.678,
+      "fragile_share_top_conf": 1.0
+    }
+  ],
+  "models": [
+    {
+      "model": "EleutherAI/pythia-70m",
+      "params": 70000000,
+      "prompts": 40,
+      "pearson_conf_margin": 0.845,
+      "spearman_conf_margin": 0.731,
+      "pearson_conf_flipdist": 0.679,
+      "spearman_conf_flipdist": 0.775,
+      "mean_confidence": 0.1491,
+      "mean_margin": 0.621,
+      "fragile_share_top_conf": 1.0,
+      "runtime_s": 4.8,
+      "points": [
+        {
+          "prompt": "The Eiffel Tower is located in the city of",
+          "predicted": " the",
+          "confidence": 0.024,
+          "margin": 0.13,
+          "min_flip_distance": 0.0036,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "The capital of Japan is",
+          "predicted": " the",
+          "confidence": 0.1122,
+          "margin": 0.483,
+          "min_flip_distance": 0.0211,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "The capital of France is",
+          "predicted": " the",
+          "confidence": 0.1832,
+          "margin": 1.081,
+          "min_flip_distance": 0.0337,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The capital of Italy is",
+          "predicted": " the",
+          "confidence": 0.1607,
+          "margin": 0.772,
+          "min_flip_distance": 0.0281,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The chemical symbol for gold is",
+          "predicted": " the",
+          "confidence": 0.3083,
+          "margin": 0.868,
+          "min_flip_distance": 0.0368,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The chemical symbol for oxygen is",
+          "predicted": " the",
+          "confidence": 0.3311,
+          "margin": 0.899,
+          "min_flip_distance": 0.0371,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "Two plus two equals",
+          "predicted": " the",
+          "confidence": 0.1701,
+          "margin": 0.688,
+          "min_flip_distance": 0.0262,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "Ten minus three equals",
+          "predicted": " the",
+          "confidence": 0.1158,
+          "margin": 0.536,
+          "min_flip_distance": 0.0193,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The opposite of hot is",
+          "predicted": " the",
+          "confidence": 0.0576,
+          "margin": 0.611,
+          "min_flip_distance": 0.0059,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The opposite of dark is",
+          "predicted": " the",
+          "confidence": 0.2473,
+          "margin": 1.276,
+          "min_flip_distance": 0.0343,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The opposite of up is",
+          "predicted": " the",
+          "confidence": 0.2301,
+          "margin": 1.468,
+          "min_flip_distance": 0.0275,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The first president of the United States was",
+          "predicted": " the",
+          "confidence": 0.0827,
+          "margin": 0.244,
+          "min_flip_distance": 0.012,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "Water is made of hydrogen and",
+          "predicted": " water",
+          "confidence": 0.1481,
+          "margin": 0.25,
+          "min_flip_distance": 0.0069,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The largest planet in the solar system is",
+          "predicted": " the",
+          "confidence": 0.1775,
+          "margin": 1.078,
+          "min_flip_distance": 0.0305,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The closest planet to the sun is",
+          "predicted": " the",
+          "confidence": 0.3059,
+          "margin": 1.604,
+          "min_flip_distance": 0.0754,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "A group of lions is called a",
+          "predicted": " lion",
+          "confidence": 0.0915,
+          "margin": 0.029,
+          "min_flip_distance": 0.0007,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "A baby dog is called a",
+          "predicted": " \"",
+          "confidence": 0.0911,
+          "margin": 0.253,
+          "min_flip_distance": 0.0067,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The author of Romeo and Juliet is",
+          "predicted": " a",
+          "confidence": 0.2482,
+          "margin": 1.023,
+          "min_flip_distance": 0.0837,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The square root of sixty-four is",
+          "predicted": " the",
+          "confidence": 0.2618,
+          "margin": 1.722,
+          "min_flip_distance": 0.0606,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The color of a clear daytime sky is",
+          "predicted": " not",
+          "confidence": 0.0729,
+          "margin": 0.026,
+          "min_flip_distance": 0.0014,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "The color of grass is",
+          "predicted": " not",
+          "confidence": 0.0501,
+          "margin": 0.021,
+          "min_flip_distance": 0.0007,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "The freezing point of water in Celsius is",
+          "predicted": " about",
+          "confidence": 0.127,
+          "margin": 1.014,
+          "min_flip_distance": 0.0364,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The currency used in Japan is the",
+          "predicted": " same",
+          "confidence": 0.0645,
+          "margin": 0.276,
+          "min_flip_distance": 0.007,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The currency used in the United States is the",
+          "predicted": " same",
+          "confidence": 0.0559,
+          "margin": 0.005,
+          "min_flip_distance": 0.0001,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "The number of days in a week is",
+          "predicted": " the",
+          "confidence": 0.0495,
+          "margin": 0.146,
+          "min_flip_distance": 0.0074,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The number of legs on a spider is",
+          "predicted": " a",
+          "confidence": 0.0427,
+          "margin": 0.066,
+          "min_flip_distance": 0.0038,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "The largest ocean on Earth is the",
+          "predicted": " largest",
+          "confidence": 0.0521,
+          "margin": 0.438,
+          "min_flip_distance": 0.0123,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "The longest river in the world is the",
+          "predicted": " largest",
+          "confidence": 0.0337,
+          "margin": 0.835,
+          "min_flip_distance": 0.0194,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "Humans breathe in oxygen and breathe out carbon",
+          "predicted": " dioxide",
+          "confidence": 0.7426,
+          "margin": 2.968,
+          "min_flip_distance": 0.0526,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The sun rises in the east and sets in the",
+          "predicted": " west",
+          "confidence": 0.2014,
+          "margin": 0.833,
+          "min_flip_distance": 0.0565,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "A doctor works in a hospital and a teacher works in a",
+          "predicted": " hospital",
+          "confidence": 0.1375,
+          "margin": 0.838,
+          "min_flip_distance": 0.0231,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The past tense of run is",
+          "predicted": " the",
+          "confidence": 0.0731,
+          "margin": 0.022,
+          "min_flip_distance": 0.0012,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The plural of mouse is",
+          "predicted": " the",
+          "confidence": 0.0854,
+          "margin": 0.271,
+          "min_flip_distance": 0.0094,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "Ice is frozen",
+          "predicted": " in",
+          "confidence": 0.1807,
+          "margin": 0.632,
+          "min_flip_distance": 0.0189,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The moon orbits the",
+          "predicted": " stars",
+          "confidence": 0.0741,
+          "margin": 0.362,
+          "min_flip_distance": 0.0058,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "Lightning is followed by",
+          "predicted": " a",
+          "confidence": 0.34,
+          "margin": 0.472,
+          "min_flip_distance": 0.023,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The king lived in a large",
+          "predicted": ",",
+          "confidence": 0.0812,
+          "margin": 0.172,
+          "min_flip_distance": 0.0045,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "She poured the tea into a",
+          "predicted": " cup",
+          "confidence": 0.0942,
+          "margin": 0.014,
+          "min_flip_distance": 0.0009,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "He locked the door with a",
+          "predicted": " gun",
+          "confidence": 0.018,
+          "margin": 0.094,
+          "min_flip_distance": 0.0028,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The fastest land animal is the",
+          "predicted": " only",
+          "confidence": 0.0387,
+          "margin": 0.337,
+          "min_flip_distance": 0.015,
+          "deletion_flips": 5
+        }
+      ]
+    },
+    {
+      "model": "EleutherAI/pythia-160m",
+      "params": 160000000,
+      "prompts": 40,
+      "pearson_conf_margin": 0.82,
+      "spearman_conf_margin": 0.502,
+      "pearson_conf_flipdist": 0.325,
+      "spearman_conf_flipdist": 0.495,
+      "mean_confidence": 0.1644,
+      "mean_margin": 0.591,
+      "fragile_share_top_conf": 1.0,
+      "runtime_s": 20.3,
+      "points": [
+        {
+          "prompt": "The Eiffel Tower is located in the city of",
+          "predicted": " E",
+          "confidence": 0.0357,
+          "margin": 0.483,
+          "min_flip_distance": 0.0107,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "The capital of Japan is",
+          "predicted": " located",
+          "confidence": 0.0782,
+          "margin": 0.09,
+          "min_flip_distance": 0.0018,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The capital of France is",
+          "predicted": " located",
+          "confidence": 0.0985,
+          "margin": 0.405,
+          "min_flip_distance": 0.0093,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The capital of Italy is",
+          "predicted": " located",
+          "confidence": 0.0895,
+          "margin": 0.18,
+          "min_flip_distance": 0.0041,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The chemical symbol for gold is",
+          "predicted": " the",
+          "confidence": 0.1425,
+          "margin": 1.098,
+          "min_flip_distance": 0.0885,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The chemical symbol for oxygen is",
+          "predicted": " the",
+          "confidence": 0.1127,
+          "margin": 1.005,
+          "min_flip_distance": 0.0751,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "Two plus two equals",
+          "predicted": " to",
+          "confidence": 0.1204,
+          "margin": 0.11,
+          "min_flip_distance": 0.0018,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "Ten minus three equals",
+          "predicted": " to",
+          "confidence": 0.1156,
+          "margin": 0.044,
+          "min_flip_distance": 0.0006,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The opposite of hot is",
+          "predicted": " the",
+          "confidence": 0.3095,
+          "margin": 0.649,
+          "min_flip_distance": 0.0198,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The opposite of dark is",
+          "predicted": " the",
+          "confidence": 0.3046,
+          "margin": 0.327,
+          "min_flip_distance": 0.01,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The opposite of up is",
+          "predicted": " that",
+          "confidence": 0.2341,
+          "margin": 0.098,
+          "min_flip_distance": 0.0025,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The first president of the United States was",
+          "predicted": " President",
+          "confidence": 0.0748,
+          "margin": 0.263,
+          "min_flip_distance": 0.0122,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "Water is made of hydrogen and",
+          "predicted": " is",
+          "confidence": 0.0915,
+          "margin": 0.046,
+          "min_flip_distance": 0.001,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The largest planet in the solar system is",
+          "predicted": " the",
+          "confidence": 0.1845,
+          "margin": 1.186,
+          "min_flip_distance": 0.049,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The closest planet to the sun is",
+          "predicted": " the",
+          "confidence": 0.1298,
+          "margin": 1.022,
+          "min_flip_distance": 0.028,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "A group of lions is called a",
+          "predicted": " \"",
+          "confidence": 0.11,
+          "margin": 0.11,
+          "min_flip_distance": 0.0019,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "A baby dog is called a",
+          "predicted": " baby",
+          "confidence": 0.099,
+          "margin": 0.06,
+          "min_flip_distance": 0.0014,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "The author of Romeo and Juliet is",
+          "predicted": " a",
+          "confidence": 0.2366,
+          "margin": 1.135,
+          "min_flip_distance": 0.1144,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The square root of sixty-four is",
+          "predicted": " the",
+          "confidence": 0.1415,
+          "margin": 0.843,
+          "min_flip_distance": 0.0324,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The color of a clear daytime sky is",
+          "predicted": " the",
+          "confidence": 0.1298,
+          "margin": 0.349,
+          "min_flip_distance": 0.0251,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The color of grass is",
+          "predicted": " the",
+          "confidence": 0.0901,
+          "margin": 0.573,
+          "min_flip_distance": 0.0312,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The freezing point of water in Celsius is",
+          "predicted": " about",
+          "confidence": 0.0769,
+          "margin": 0.749,
+          "min_flip_distance": 0.033,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "The currency used in Japan is the",
+          "predicted": " Japanese",
+          "confidence": 0.1301,
+          "margin": 0.576,
+          "min_flip_distance": 0.0148,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The currency used in the United States is the",
+          "predicted": " dollar",
+          "confidence": 0.1007,
+          "margin": 0.64,
+          "min_flip_distance": 0.0217,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "The number of days in a week is",
+          "predicted": " a",
+          "confidence": 0.098,
+          "margin": 0.037,
+          "min_flip_distance": 0.0027,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The number of legs on a spider is",
+          "predicted": " a",
+          "confidence": 0.0706,
+          "margin": 0.1,
+          "min_flip_distance": 0.0056,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "The largest ocean on Earth is the",
+          "predicted": " ocean",
+          "confidence": 0.073,
+          "margin": 0.341,
+          "min_flip_distance": 0.0121,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "The longest river in the world is the",
+          "predicted": " Great",
+          "confidence": 0.0227,
+          "margin": 0.069,
+          "min_flip_distance": 0.004,
+          "deletion_flips": 7
+        },
+        {
+          "prompt": "Humans breathe in oxygen and breathe out carbon",
+          "predicted": " dioxide",
+          "confidence": 0.9221,
+          "margin": 3.983,
+          "min_flip_distance": 0.0339,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The sun rises in the east and sets in the",
+          "predicted": " west",
+          "confidence": 0.7315,
+          "margin": 1.765,
+          "min_flip_distance": 0.0532,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "A doctor works in a hospital and a teacher works in a",
+          "predicted": " school",
+          "confidence": 0.1247,
+          "margin": 0.52,
+          "min_flip_distance": 0.0237,
+          "deletion_flips": 8
+        },
+        {
+          "prompt": "The past tense of run is",
+          "predicted": " a",
+          "confidence": 0.086,
+          "margin": 0.242,
+          "min_flip_distance": 0.0113,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The plural of mouse is",
+          "predicted": " the",
+          "confidence": 0.1337,
+          "margin": 0.726,
+          "min_flip_distance": 0.0245,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "Ice is frozen",
+          "predicted": ",",
+          "confidence": 0.1593,
+          "margin": 0.212,
+          "min_flip_distance": 0.0197,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The moon orbits the",
+          "predicted": " Earth",
+          "confidence": 0.1632,
+          "margin": 0.105,
+          "min_flip_distance": 0.0052,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "Lightning is followed by",
+          "predicted": " a",
+          "confidence": 0.3492,
+          "margin": 1.019,
+          "min_flip_distance": 0.0941,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The king lived in a large",
+          "predicted": " house",
+          "confidence": 0.1687,
+          "margin": 0.767,
+          "min_flip_distance": 0.0503,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "She poured the tea into a",
+          "predicted": " glass",
+          "confidence": 0.147,
+          "margin": 0.701,
+          "min_flip_distance": 0.0388,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "He locked the door with a",
+          "predicted": " key",
+          "confidence": 0.0758,
+          "margin": 0.912,
+          "min_flip_distance": 0.0158,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The fastest land animal is the",
+          "predicted": " lion",
+          "confidence": 0.0135,
+          "margin": 0.106,
+          "min_flip_distance": 0.0048,
+          "deletion_flips": 6
+        }
+      ]
+    },
+    {
+      "model": "EleutherAI/pythia-410m",
+      "params": 410000000,
+      "prompts": 40,
+      "pearson_conf_margin": 0.923,
+      "spearman_conf_margin": 0.792,
+      "pearson_conf_flipdist": 0.663,
+      "spearman_conf_flipdist": 0.554,
+      "mean_confidence": 0.2772,
+      "mean_margin": 1.082,
+      "fragile_share_top_conf": 1.0,
+      "runtime_s": 59.3,
+      "points": [
+        {
+          "prompt": "The Eiffel Tower is located in the city of",
+          "predicted": " Paris",
+          "confidence": 0.3683,
+          "margin": 2.059,
+          "min_flip_distance": 0.0198,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "The capital of Japan is",
+          "predicted": " Tokyo",
+          "confidence": 0.1528,
+          "margin": 1.057,
+          "min_flip_distance": 0.0409,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The capital of France is",
+          "predicted": " Paris",
+          "confidence": 0.1507,
+          "margin": 0.887,
+          "min_flip_distance": 0.0298,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The capital of Italy is",
+          "predicted": " P",
+          "confidence": 0.0837,
+          "margin": 0.087,
+          "min_flip_distance": 0.0029,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The chemical symbol for gold is",
+          "predicted": " Au",
+          "confidence": 0.1511,
+          "margin": 0.498,
+          "min_flip_distance": 0.004,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "The chemical symbol for oxygen is",
+          "predicted": " O",
+          "confidence": 0.8232,
+          "margin": 3.503,
+          "min_flip_distance": 0.0271,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "Two plus two equals",
+          "predicted": " four",
+          "confidence": 0.2583,
+          "margin": 0.473,
+          "min_flip_distance": 0.0183,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "Ten minus three equals",
+          "predicted": " one",
+          "confidence": 0.1043,
+          "margin": 0.181,
+          "min_flip_distance": 0.0124,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The opposite of hot is",
+          "predicted": " cold",
+          "confidence": 0.6861,
+          "margin": 2.521,
+          "min_flip_distance": 0.1356,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The opposite of dark is",
+          "predicted": " light",
+          "confidence": 0.474,
+          "margin": 2.099,
+          "min_flip_distance": 0.13,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The opposite of up is",
+          "predicted": " down",
+          "confidence": 0.7035,
+          "margin": 3.25,
+          "min_flip_distance": 0.1694,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "The first president of the United States was",
+          "predicted": " Abraham",
+          "confidence": 0.1082,
+          "margin": 0.123,
+          "min_flip_distance": 0.0048,
+          "deletion_flips": 8
+        },
+        {
+          "prompt": "Water is made of hydrogen and",
+          "predicted": " oxygen",
+          "confidence": 0.4104,
+          "margin": 0.823,
+          "min_flip_distance": 0.0231,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The largest planet in the solar system is",
+          "predicted": " the",
+          "confidence": 0.1193,
+          "margin": 0.504,
+          "min_flip_distance": 0.0339,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The closest planet to the sun is",
+          "predicted": " the",
+          "confidence": 0.0902,
+          "margin": 0.512,
+          "min_flip_distance": 0.0198,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "A group of lions is called a",
+          "predicted": " _",
+          "confidence": 0.0774,
+          "margin": 0.006,
+          "min_flip_distance": 0.0004,
+          "deletion_flips": 7
+        },
+        {
+          "prompt": "A baby dog is called a",
+          "predicted": " \"",
+          "confidence": 0.0958,
+          "margin": 0.677,
+          "min_flip_distance": 0.0782,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The author of Romeo and Juliet is",
+          "predicted": " a",
+          "confidence": 0.15,
+          "margin": 0.844,
+          "min_flip_distance": 0.1091,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The square root of sixty-four is",
+          "predicted": " the",
+          "confidence": 0.0998,
+          "margin": 0.744,
+          "min_flip_distance": 0.0492,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The color of a clear daytime sky is",
+          "predicted": " a",
+          "confidence": 0.0719,
+          "margin": 0.405,
+          "min_flip_distance": 0.0126,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The color of grass is",
+          "predicted": " different",
+          "confidence": 0.0775,
+          "margin": 0.098,
+          "min_flip_distance": 0.0075,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The freezing point of water in Celsius is",
+          "predicted": " -",
+          "confidence": 0.0615,
+          "margin": 0.518,
+          "min_flip_distance": 0.0211,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "The currency used in Japan is the",
+          "predicted": " y",
+          "confidence": 0.6032,
+          "margin": 2.988,
+          "min_flip_distance": 0.1027,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "The currency used in the United States is the",
+          "predicted": " dollar",
+          "confidence": 0.4605,
+          "margin": 0.921,
+          "min_flip_distance": 0.0292,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The number of days in a week is",
+          "predicted": " the",
+          "confidence": 0.0768,
+          "margin": 0.497,
+          "min_flip_distance": 0.0499,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "The number of legs on a spider is",
+          "predicted": " determined",
+          "confidence": 0.0788,
+          "margin": 0.247,
+          "min_flip_distance": 0.0244,
+          "deletion_flips": 7
+        },
+        {
+          "prompt": "The largest ocean on Earth is the",
+          "predicted": " Pacific",
+          "confidence": 0.1333,
+          "margin": 0.74,
+          "min_flip_distance": 0.0238,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The longest river in the world is the",
+          "predicted": " Yang",
+          "confidence": 0.0394,
+          "margin": 0.038,
+          "min_flip_distance": 0.0011,
+          "deletion_flips": 8
+        },
+        {
+          "prompt": "Humans breathe in oxygen and breathe out carbon",
+          "predicted": " dioxide",
+          "confidence": 0.973,
+          "margin": 4.006,
+          "min_flip_distance": 0.0813,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The sun rises in the east and sets in the",
+          "predicted": " west",
+          "confidence": 0.9545,
+          "margin": 3.974,
+          "min_flip_distance": 0.1159,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "A doctor works in a hospital and a teacher works in a",
+          "predicted": " school",
+          "confidence": 0.7845,
+          "margin": 2.492,
+          "min_flip_distance": 0.147,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The past tense of run is",
+          "predicted": " used",
+          "confidence": 0.0638,
+          "margin": 0.358,
+          "min_flip_distance": 0.0131,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "The plural of mouse is",
+          "predicted": " mouse",
+          "confidence": 0.126,
+          "margin": 0.598,
+          "min_flip_distance": 0.008,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "Ice is frozen",
+          "predicted": ",",
+          "confidence": 0.1125,
+          "margin": 0.068,
+          "min_flip_distance": 0.0078,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The moon orbits the",
+          "predicted": " Earth",
+          "confidence": 0.4139,
+          "margin": 0.21,
+          "min_flip_distance": 0.0106,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "Lightning is followed by",
+          "predicted": " a",
+          "confidence": 0.3045,
+          "margin": 1.002,
+          "min_flip_distance": 0.0614,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The king lived in a large",
+          "predicted": " house",
+          "confidence": 0.2221,
+          "margin": 0.766,
+          "min_flip_distance": 0.0496,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "She poured the tea into a",
+          "predicted": " cup",
+          "confidence": 0.18,
+          "margin": 0.479,
+          "min_flip_distance": 0.0204,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "He locked the door with a",
+          "predicted": " key",
+          "confidence": 0.1926,
+          "margin": 1.613,
+          "min_flip_distance": 0.049,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The fastest land animal is the",
+          "predicted": " elephant",
+          "confidence": 0.0487,
+          "margin": 0.414,
+          "min_flip_distance": 0.0375,
+          "deletion_flips": 5
+        }
+      ]
+    },
+    {
+      "model": "EleutherAI/pythia-1b",
+      "params": 1000000000,
+      "prompts": 40,
+      "pearson_conf_margin": 0.92,
+      "spearman_conf_margin": 0.769,
+      "pearson_conf_flipdist": 0.911,
+      "spearman_conf_flipdist": 0.678,
+      "mean_confidence": 0.3164,
+      "mean_margin": 1.142,
+      "fragile_share_top_conf": 1.0,
+      "runtime_s": 135.2,
+      "points": [
+        {
+          "prompt": "The Eiffel Tower is located in the city of",
+          "predicted": " Paris",
+          "confidence": 0.5942,
+          "margin": 2.717,
+          "min_flip_distance": 0.0532,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The capital of Japan is",
+          "predicted": " Tokyo",
+          "confidence": 0.1424,
+          "margin": 0.392,
+          "min_flip_distance": 0.0084,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The capital of France is",
+          "predicted": " Paris",
+          "confidence": 0.1715,
+          "margin": 0.36,
+          "min_flip_distance": 0.0082,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The capital of Italy is",
+          "predicted": " the",
+          "confidence": 0.1098,
+          "margin": 0.194,
+          "min_flip_distance": 0.005,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "The chemical symbol for gold is",
+          "predicted": " Au",
+          "confidence": 0.3998,
+          "margin": 2.388,
+          "min_flip_distance": 0.0723,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "The chemical symbol for oxygen is",
+          "predicted": " O",
+          "confidence": 0.5773,
+          "margin": 2.7,
+          "min_flip_distance": 0.0625,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "Two plus two equals",
+          "predicted": " four",
+          "confidence": 0.3232,
+          "margin": 0.761,
+          "min_flip_distance": 0.021,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "Ten minus three equals",
+          "predicted": " five",
+          "confidence": 0.0936,
+          "margin": 0.289,
+          "min_flip_distance": 0.021,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The opposite of hot is",
+          "predicted": " cold",
+          "confidence": 0.8706,
+          "margin": 3.105,
+          "min_flip_distance": 0.1783,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The opposite of dark is",
+          "predicted": " light",
+          "confidence": 0.7888,
+          "margin": 3.094,
+          "min_flip_distance": 0.141,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The opposite of up is",
+          "predicted": " down",
+          "confidence": 0.9151,
+          "margin": 3.267,
+          "min_flip_distance": 0.158,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The first president of the United States was",
+          "predicted": " John",
+          "confidence": 0.0883,
+          "margin": 0.25,
+          "min_flip_distance": 0.0059,
+          "deletion_flips": 7
+        },
+        {
+          "prompt": "Water is made of hydrogen and",
+          "predicted": " oxygen",
+          "confidence": 0.5448,
+          "margin": 1.609,
+          "min_flip_distance": 0.0523,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The largest planet in the solar system is",
+          "predicted": " Jupiter",
+          "confidence": 0.1981,
+          "margin": 0.822,
+          "min_flip_distance": 0.032,
+          "deletion_flips": 7
+        },
+        {
+          "prompt": "The closest planet to the sun is",
+          "predicted": " Venus",
+          "confidence": 0.1132,
+          "margin": 0.01,
+          "min_flip_distance": 0.0004,
+          "deletion_flips": 7
+        },
+        {
+          "prompt": "A group of lions is called a",
+          "predicted": " pride",
+          "confidence": 0.1079,
+          "margin": 0.046,
+          "min_flip_distance": 0.0013,
+          "deletion_flips": 6
+        },
+        {
+          "prompt": "A baby dog is called a",
+          "predicted": " \"",
+          "confidence": 0.1082,
+          "margin": 0.546,
+          "min_flip_distance": 0.0529,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The author of Romeo and Juliet is",
+          "predicted": " a",
+          "confidence": 0.0928,
+          "margin": 0.418,
+          "min_flip_distance": 0.0232,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The square root of sixty-four is",
+          "predicted": " the",
+          "confidence": 0.0513,
+          "margin": 0.136,
+          "min_flip_distance": 0.0149,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The color of a clear daytime sky is",
+          "predicted": " a",
+          "confidence": 0.0855,
+          "margin": 0.653,
+          "min_flip_distance": 0.0144,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The color of grass is",
+          "predicted": " a",
+          "confidence": 0.0662,
+          "margin": 0.211,
+          "min_flip_distance": 0.0084,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The freezing point of water in Celsius is",
+          "predicted": " -",
+          "confidence": 0.1911,
+          "margin": 0.212,
+          "min_flip_distance": 0.0089,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The currency used in Japan is the",
+          "predicted": " y",
+          "confidence": 0.3631,
+          "margin": 0.473,
+          "min_flip_distance": 0.0159,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "The currency used in the United States is the",
+          "predicted": " US",
+          "confidence": 0.2209,
+          "margin": 0.118,
+          "min_flip_distance": 0.0024,
+          "deletion_flips": 7
+        },
+        {
+          "prompt": "The number of days in a week is",
+          "predicted": " a",
+          "confidence": 0.1012,
+          "margin": 0.205,
+          "min_flip_distance": 0.0222,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The number of legs on a spider is",
+          "predicted": " the",
+          "confidence": 0.0964,
+          "margin": 0.23,
+          "min_flip_distance": 0.0169,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "The largest ocean on Earth is the",
+          "predicted": " Pacific",
+          "confidence": 0.1788,
+          "margin": 0.128,
+          "min_flip_distance": 0.0047,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The longest river in the world is the",
+          "predicted": " Nile",
+          "confidence": 0.1231,
+          "margin": 0.336,
+          "min_flip_distance": 0.0101,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "Humans breathe in oxygen and breathe out carbon",
+          "predicted": " dioxide",
+          "confidence": 0.9948,
+          "margin": 5.869,
+          "min_flip_distance": 0.171,
+          "deletion_flips": 1
+        },
+        {
+          "prompt": "The sun rises in the east and sets in the",
+          "predicted": " west",
+          "confidence": 0.9735,
+          "margin": 4.459,
+          "min_flip_distance": 0.2153,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "A doctor works in a hospital and a teacher works in a",
+          "predicted": " school",
+          "confidence": 0.6811,
+          "margin": 1.807,
+          "min_flip_distance": 0.1144,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The past tense of run is",
+          "predicted": " \"",
+          "confidence": 0.0916,
+          "margin": 0.396,
+          "min_flip_distance": 0.0073,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "The plural of mouse is",
+          "predicted": " m",
+          "confidence": 0.3377,
+          "margin": 0.575,
+          "min_flip_distance": 0.0086,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "Ice is frozen",
+          "predicted": " solid",
+          "confidence": 0.1434,
+          "margin": 0.329,
+          "min_flip_distance": 0.0118,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The moon orbits the",
+          "predicted": " Earth",
+          "confidence": 0.4665,
+          "margin": 0.993,
+          "min_flip_distance": 0.038,
+          "deletion_flips": 4
+        },
+        {
+          "prompt": "Lightning is followed by",
+          "predicted": " a",
+          "confidence": 0.268,
+          "margin": 0.713,
+          "min_flip_distance": 0.0678,
+          "deletion_flips": 2
+        },
+        {
+          "prompt": "The king lived in a large",
+          "predicted": " palace",
+          "confidence": 0.3416,
+          "margin": 0.957,
+          "min_flip_distance": 0.0576,
+          "deletion_flips": 5
+        },
+        {
+          "prompt": "She poured the tea into a",
+          "predicted": " cup",
+          "confidence": 0.2451,
+          "margin": 1.202,
+          "min_flip_distance": 0.0666,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "He locked the door with a",
+          "predicted": " key",
+          "confidence": 0.3111,
+          "margin": 2.003,
+          "min_flip_distance": 0.0392,
+          "deletion_flips": 3
+        },
+        {
+          "prompt": "The fastest land animal is the",
+          "predicted": " fastest",
+          "confidence": 0.0842,
+          "margin": 0.706,
+          "min_flip_distance": 0.0202,
+          "deletion_flips": 6
+        }
+      ]
+    }
+  ]
+}
