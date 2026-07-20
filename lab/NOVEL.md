@@ -78,6 +78,47 @@ it; injected *downstream* it fades monotonically (KL 0.009 by L11). A concept
 direction is not one reusable handle — it is a depth-indexed family, and it works
 best *before* the machinery that consumes it.
 
+## 4. `scaling` — does scale fix the confidence–fragility gap?
+
+**Question.** Probe 2 found gpt2's confidence weakly related to its decision
+geometry. The obvious follow-up: does confidence become *calibrated to robustness*
+as models grow? Run the whole geometry battery across the GPT-2 family
+(distilgpt2 82M → gpt2 124M → gpt2-medium 355M → gpt2-large 774M) on a fixed
+40-prompt set. [`scaling.py`](scaling.py); data in
+[`results/scaling-calibration.json`](results/scaling-calibration.json).
+
+**Finding — scale buys confidence, not robustness.** Two things climb with scale and
+one does not:
+
+| model | params | mean confidence | mean margin | fully-robust prompts | mean deletion-flips |
+| --- | --- | --- | --- | --- | --- |
+| distilgpt2 | 82M | 0.165 | 0.65 | **0 / 40** | 3.6 |
+| gpt2 | 124M | 0.182 | 0.69 | **0 / 40** | 3.8 |
+| gpt2-medium | 355M | 0.296 | 1.21 | **0 / 40** | 4.3 |
+| gpt2-large | 774M | 0.333 | 1.28 | **0 / 40** | 3.6 |
+
+Mean confidence and top-1-vs-top-2 margin roughly **double** from 82M to 774M, yet
+**not one prediction at any size survives every single-token deletion**, and the
+average number of deletions that flip the answer stays flat (~3.6–4.3). Bigger
+models are more confident and separate their top candidate more decisively — and are
+exactly as fragile to dropping a word. Meanwhile predictions *do* change with scale
+(agreement with gpt2-large rises 32% → 42% → 70%), so scale is improving the answers;
+it just isn't improving their geometric robustness.
+
+The confidence↔flip-distance correlation shows **no clean scaling trend** either
+(Pearson 0.57, 0.07, 0.64, 0.59 across the four sizes — gpt2 an outlier, n=4 far too
+few for a law). The confidence↔margin correlation is high (~0.7–0.9) but that is
+**near-tautological** — both quantities are read off the same top-1/top-2 logit gap —
+so it is reported for completeness, not as a result.
+
+**Why it matters here.** This is the empirical case for Splice's whole premise: a
+model's confidence is not a proxy for how robust its decision is, and — in this range —
+scale does not close that gap. External verification of an action against real
+postconditions (what `compile_verified_action` does) is not a crutch that a bigger
+model removes. Same honest caveats, louder: one architecture family, 40 short prompts
+where single-token deletion is a large perturbation; the *invariance across scale* is
+the signal, not the absolute fragility rate.
+
 ---
 
 ## Relation to prior work
@@ -102,6 +143,7 @@ python3 probes.py geometry --prompt "your prompt here"
 python3 probes.py calibrate           # edit CALIBRATION_PROMPTS to scale up
 python3 probes.py transport --concept "shouting"
 python3 probes.py all --out probes.json
+python3 scaling.py --models distilgpt2,gpt2,gpt2-medium,gpt2-large   # the scaling study
 ```
 
 Obvious extensions: more prompts and a bigger model for `calibrate` (does the
