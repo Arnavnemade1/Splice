@@ -1,0 +1,237 @@
+<meta charset="utf-8">
+<title>Scale buys confidence, not robustness</title>
+<style>
+  :root {
+    --paper:#FBFBF9; --card:#FFFFFF; --ink:#1B1F23; --mut:#68707A; --line:#E7E5E0;
+    --teal:#0D9488; --indigo:#6D4AC4; --copper:#B45309; --focus:#0D9488;
+    --grid:#EEEDE9;
+    --serif:"Iowan Old Style","Palatino Nova",Palatino,Georgia,serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,monospace;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --paper:#16191C; --card:#1D2125; --ink:#E8EAEA; --mut:#99A1A8; --line:#2A2F34;
+    --teal:#2FA091; --indigo:#9B7FE8; --copper:#C97F2E; --grid:#23282C;
+  }}
+  :root[data-theme="dark"]{
+    --paper:#16191C; --card:#1D2125; --ink:#E8EAEA; --mut:#99A1A8; --line:#2A2F34;
+    --teal:#2FA091; --indigo:#9B7FE8; --copper:#C97F2E; --grid:#23282C;
+  }
+  :root[data-theme="light"]{
+    --paper:#FBFBF9; --card:#FFFFFF; --ink:#1B1F23; --mut:#68707A; --line:#E7E5E0;
+    --teal:#0D9488; --indigo:#6D4AC4; --copper:#B45309; --grid:#EEEDE9;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--paper);color:var(--ink);font:16px/1.65 var(--sans)}
+  main{max-width:880px;margin:0 auto;padding:44px 20px 80px}
+  .fig{font-family:var(--mono);font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--teal);font-weight:600}
+  h1{font-family:var(--serif);font-size:clamp(30px,5.5vw,46px);line-height:1.1;letter-spacing:-.015em;text-wrap:balance;font-weight:600;margin-top:12px}
+  .lede{color:var(--mut);max-width:60ch;margin-top:16px;font-size:17px}
+  .meta{display:flex;gap:14px;flex-wrap:wrap;margin-top:18px;color:var(--mut);font-family:var(--mono);font-size:12px}
+  .meta b{color:var(--ink);font-weight:600}
+  h2{font-family:var(--serif);font-size:25px;font-weight:600;letter-spacing:-.005em;text-wrap:balance}
+  section{margin-top:56px}
+  .what{color:var(--mut);font-size:14.5px;max-width:66ch;margin-top:8px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:22px;margin-top:18px}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:13px;margin-bottom:8px}
+  .lg{display:inline-flex;align-items:center;gap:7px}
+  .sw{width:12px;height:12px;border-radius:3px;flex:none}
+  .lg b{font-weight:600}
+  svg{display:block;width:100%;height:auto;overflow:visible}
+  svg text{font-family:var(--mono);fill:var(--mut)}
+  .axis{stroke:var(--line);stroke-width:1}
+  .grid{stroke:var(--grid);stroke-width:1}
+  .sm{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px}
+  @media(max-width:560px){.sm{grid-template-columns:1fr}}
+  .panel{border:1px solid var(--line);border-radius:10px;padding:12px 12px 6px}
+  .panel h3{font:600 13px var(--sans);margin:0}
+  .panel .pm{font-family:var(--mono);font-size:11px;color:var(--mut);margin-bottom:4px}
+  table{border-collapse:collapse;width:100%;font-size:13px;margin-top:8px;font-variant-numeric:tabular-nums}
+  th,td{padding:6px 10px;text-align:right;border-bottom:1px solid var(--line)}
+  th:first-child,td:first-child{text-align:left}
+  th{color:var(--mut);font-weight:600;font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em}
+  td.mono,.mono{font-family:var(--mono)}
+  .flat{color:var(--copper);font-weight:600}
+  .up{color:var(--teal);font-weight:600}
+  .callout{border-left:3px solid var(--copper);padding:6px 0 6px 16px;margin-top:16px;color:var(--ink);font-size:15px;max-width:64ch}
+  .caveat{background:var(--card);border:1px dashed var(--line);border-radius:10px;padding:16px 20px;margin-top:20px;color:var(--mut);font-size:13.5px}
+  .caveat b{color:var(--ink)}
+  .caveat ul{margin:8px 0 0;padding-left:20px}.caveat li{margin:4px 0}
+  #tip{position:fixed;z-index:20;pointer-events:none;background:var(--ink);color:var(--paper);font:12px/1.5 var(--mono);padding:6px 9px;border-radius:6px;opacity:0;transition:opacity .12s;max-width:300px}
+  footer{margin-top:64px;border-top:1px solid var(--line);padding-top:20px;color:var(--mut);font-size:13.5px;max-width:78ch}
+  .dot{transition:r .1s}
+  @media(prefers-reduced-motion:reduce){.dot{transition:none}}
+</style>
+
+<main>
+  <div class="fig">Splice · Model Mind Lab · lab/scaling.py</div>
+  <h1>Scale buys confidence, not robustness</h1>
+  <p class="lede">Across the GPT-2 family — 82M to 774M parameters — a model's certainty and its
+  decision margins roughly double. Its resistance to having one word deleted does not move at all.
+  Every number is measured from the weights; drag and hover to check them.</p>
+  <div class="meta"><span>models <b>distilgpt2 → gpt2-large</b></span><span>prompts <b>40, fixed</b></span>
+  <span>method <b>NOVEL.md §4</b></span><span>scope <b>one family, CPU</b></span></div>
+
+  <section>
+    <div class="fig">Fig. 1 · The scaling trend</div>
+    <h2>Two lines climb. One doesn't.</h2>
+    <p class="what">Each quantity indexed to distilgpt2 = 1.0, plotted against parameter count
+    (log scale). Mean confidence and mean top-1-vs-top-2 margin nearly double by 774M; the mean
+    number of single-token deletions that flip the answer stays pinned at 1×.</p>
+    <div class="card">
+      <div class="legend">
+        <span class="lg"><span class="sw" style="background:var(--teal)"></span><b>mean confidence</b> — climbs to 2.0×</span>
+        <span class="lg"><span class="sw" style="background:var(--indigo)"></span><b>mean margin</b> — climbs to 2.0×</span>
+        <span class="lg"><span class="sw" style="background:var(--copper)"></span><b>fragility (deletion-flips)</b> — flat at 1.0×</span>
+      </div>
+      <svg id="trend" viewBox="0 0 720 340" role="img" aria-label="Indexed confidence, margin, and fragility vs parameter count"></svg>
+    </div>
+  </section>
+
+  <section>
+    <div class="fig">Fig. 2 · Every model, every prompt</div>
+    <h2>Confidence rises rightward; fragility never falls</h2>
+    <p class="what">One dot per prompt: horizontal = the model's softmax confidence, vertical = how many
+    single-token deletions flip its answer. Across the four panels the cloud slides <em>right</em>
+    (more confident) but never <em>down</em> (never more robust). Hover any dot.</p>
+    <div class="sm" id="scatters"></div>
+  </section>
+
+  <section>
+    <div class="fig">Fig. 3 · The numbers</div>
+    <h2>What moved, what didn't</h2>
+    <div class="card">
+      <div style="overflow-x:auto">
+        <table id="tbl">
+          <thead><tr><th>model</th><th>params</th><th>mean conf.</th><th>mean margin</th>
+          <th>fully robust</th><th>mean flips</th><th>r(conf, flip-dist)</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="callout" id="callout"></p>
+    </div>
+    <div class="caveat">
+      <b>Read this before believing it.</b>
+      <ul>
+        <li><b>Four models, one family.</b> distilgpt2 → gpt2-large share an architecture and training era — this is a within-family probe, not a scaling law. n = 4 is far too few for a curve.</li>
+        <li><b>Confidence vs margin is near-tautological</b> (r ≈ 0.7–0.9): both are read off the same top-1/top-2 logit gap. The meaningful correlation is confidence vs <em>flip distance</em>, which folds in gradient sensitivity — and it shows no clean trend (0.57, 0.07, 0.64, 0.59).</li>
+        <li><b>40 short prompts.</b> Deleting a token from a 6–8 word prompt is a large perturbation, so high flip rates are expected. The finding is the <em>invariance across scale</em>, not the absolute rate.</li>
+        <li><b>Local weights only.</b> Nothing here probes a hosted model; reproduce with <span class="mono">python3 scaling.py</span>.</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    <b>Why it matters for Splice.</b> A model's confidence is not a proxy for how robust its decision
+    is, and — in this range — scale does not close that gap. That is the empirical case for verifying an
+    action against real postconditions instead of trusting the model's certainty: the need doesn't shrink
+    as models grow. Method &amp; sources: <span class="mono">lab/NOVEL.md §4</span>,
+    <span class="mono">lab/RESEARCH.md</span>.
+  </footer>
+</main>
+<div id="tip" role="status"></div>
+
+<script>
+const DATA = {"generated_at": "2026-07-19T10:35:09", "models": [{"model": "distilgpt2", "params": 82000000, "mean_confidence": 0.1645, "mean_margin": 0.653, "pearson_conf_margin": 0.905, "pearson_conf_flipdist": 0.565, "spearman_conf_flipdist": 0.572, "mean_flips": 3.62, "fully_robust": 0, "n": 40, "points": [{"c": 0.0769, "f": 3, "m": 0.791, "pred": "London", "prompt": "The Eiffel Tower is located in the city of"}, {"c": 0.1322, "f": 3, "m": 0.503, "pred": "the", "prompt": "The capital of Japan is"}, {"c": 0.1178, "f": 3, "m": 0.359, "pred": "the", "prompt": "The capital of France is"}, {"c": 0.1231, "f": 3, "m": 0.603, "pred": "the", "prompt": "The capital of Italy is"}, {"c": 0.1699, "f": 3, "m": 0.931, "pred": "the", "prompt": "The chemical symbol for gold is"}, {"c": 0.1403, "f": 3, "m": 0.624, "pred": "the", "prompt": "The chemical symbol for oxygen is"}, {"c": 0.1089, "f": 4, "m": 0.209, "pred": "a", "prompt": "Two plus two equals"}, {"c": 0.0921, "f": 3, "m": 0.022, "pred": "a", "prompt": "Ten minus three equals"}, {"c": 0.155, "f": 2, "m": 1.057, "pred": "the", "prompt": "The opposite of hot is"}, {"c": 0.1154, "f": 4, "m": 0.569, "pred": "the", "prompt": "The opposite of dark is"}, {"c": 0.1061, "f": 5, "m": 0.325, "pred": "the", "prompt": "The opposite of up is"}, {"c": 0.0676, "f": 3, "m": 0.199, "pred": "a", "prompt": "The first president of the United States was"}, {"c": 0.3033, "f": 2, "m": 0.928, "pred": "oxygen", "prompt": "Water is made of hydrogen and"}, {"c": 0.0926, "f": 4, "m": 0.164, "pred": "the", "prompt": "The largest planet in the solar system is"}, {"c": 0.1496, "f": 4, "m": 0.995, "pred": "the", "prompt": "The closest planet to the sun is"}, {"c": 0.233, "f": 2, "m": 0.666, "pred": "\ufffd", "prompt": "A group of lions is called a"}, {"c": 0.1108, "f": 3, "m": 0.324, "pred": "\"", "prompt": "A baby dog is called a"}, {"c": 0.2791, "f": 1, "m": 0.695, "pred": "a", "prompt": "The author of Romeo and Juliet is"}, {"c": 0.1875, "f": 1, "m": 0.914, "pred": "the", "prompt": "The square root of sixty-four is"}, {"c": 0.0997, "f": 2, "m": 0.203, "pred": "a", "prompt": "The color of a clear daytime sky is"}, {"c": 0.0805, "f": 4, "m": 0.014, "pred": "the", "prompt": "The color of grass is"}, {"c": 0.0722, "f": 4, "m": 0.561, "pred": "the", "prompt": "The freezing point of water in Celsius is"}, {"c": 0.1645, "f": 7, "m": 0.94, "pred": "yen", "prompt": "The currency used in Japan is the"}, {"c": 0.0806, "f": 9, "m": 0.2, "pred": "U", "prompt": "The currency used in the United States is the"}, {"c": 0.0351, "f": 4, "m": 0.075, "pred": "a", "prompt": "The number of days in a week is"}, {"c": 0.0468, "f": 6, "m": 0.479, "pred": "about", "prompt": "The number of legs on a spider is"}, {"c": 0.0558, "f": 4, "m": 0.31, "pred": "largest", "prompt": "The largest ocean on Earth is the"}, {"c": 0.0209, "f": 6, "m": 0.427, "pred": "Great", "prompt": "The longest river in the world is the"}, {"c": 0.9349, "f": 1, "m": 4.378, "pred": "dioxide", "prompt": "Humans breathe in oxygen and breathe out carbon"}, {"c": 0.7912, "f": 3, "m": 2.601, "pred": "west", "prompt": "The sun rises in the east and sets in the"}, {"c": 0.2493, "f": 3, "m": 1.815, "pred": "hospital", "prompt": "A doctor works in a hospital and a teacher works in a"}, {"c": 0.0874, "f": 4, "m": 0.163, "pred": "a", "prompt": "The past tense of run is"}, {"c": 0.1527, "f": 5, "m": 0.768, "pred": "the", "prompt": "The plural of mouse is"}, {"c": 0.2225, "f": 2, "m": 0.241, "pred": "in", "prompt": "Ice is frozen"}, {"c": 0.2633, "f": 3, "m": 0.417, "pred": "sun", "prompt": "The moon orbits the"}, {"c": 0.2213, "f": 2, "m": 0.842, "pred": "a", "prompt": "Lightning is followed by"}, {"c": 0.0694, "f": 4, "m": 0.293, "pred": "house", "prompt": "The king lived in a large"}, {"c": 0.1303, "f": 4, "m": 0.13, "pred": "cup", "prompt": "She poured the tea into a"}, {"c": 0.0167, "f": 6, "m": 0.038, "pred": "large", "prompt": "He locked the door with a"}, {"c": 0.023, "f": 6, "m": 0.335, "pred": "largest", "prompt": "The fastest land animal is the"}], "idx_confidence": 1.0, "idx_margin": 1.0, "idx_flips": 1.0}, {"model": "gpt2", "params": 124000000, "mean_confidence": 0.1817, "mean_margin": 0.692, "pearson_conf_margin": 0.725, "pearson_conf_flipdist": 0.068, "spearman_conf_flipdist": 0.408, "mean_flips": 3.77, "fully_robust": 0, "n": 40, "points": [{"c": 0.0638, "f": 7, "m": 0.324, "pred": "Paris", "prompt": "The Eiffel Tower is located in the city of"}, {"c": 0.094, "f": 4, "m": 0.335, "pred": "the", "prompt": "The capital of Japan is"}, {"c": 0.0846, "f": 3, "m": 0.568, "pred": "the", "prompt": "The capital of France is"}, {"c": 0.1573, "f": 5, "m": 0.766, "pred": "Rome", "prompt": "The capital of Italy is"}, {"c": 0.2202, "f": 3, "m": 0.987, "pred": "the", "prompt": "The chemical symbol for gold is"}, {"c": 0.1563, "f": 3, "m": 0.521, "pred": "the", "prompt": "The chemical symbol for oxygen is"}, {"c": 0.3304, "f": 1, "m": 1.12, "pred": "one", "prompt": "Two plus two equals"}, {"c": 0.1395, "f": 2, "m": 0.602, "pred": "one", "prompt": "Ten minus three equals"}, {"c": 0.1627, "f": 5, "m": 0.683, "pred": "cold", "prompt": "The opposite of hot is"}, {"c": 0.0971, "f": 1, "m": 0.248, "pred": "the", "prompt": "The opposite of dark is"}, {"c": 0.1488, "f": 5, "m": 0.414, "pred": "down", "prompt": "The opposite of up is"}, {"c": 0.1328, "f": 8, "m": 0.381, "pred": "born", "prompt": "The first president of the United States was"}, {"c": 0.4641, "f": 3, "m": 0.508, "pred": "oxygen", "prompt": "Water is made of hydrogen and"}, {"c": 0.0823, "f": 8, "m": 0.215, "pred": "about", "prompt": "The largest planet in the solar system is"}, {"c": 0.092, "f": 4, "m": 0.287, "pred": "the", "prompt": "The closest planet to the sun is"}, {"c": 0.1403, "f": 2, "m": 1.405, "pred": "\"", "prompt": "A group of lions is called a"}, {"c": 0.1912, "f": 3, "m": 1.548, "pred": "\"", "prompt": "A baby dog is called a"}, {"c": 0.1747, "f": 2, "m": 1.262, "pred": "a", "prompt": "The author of Romeo and Juliet is"}, {"c": 0.1603, "f": 1, "m": 1.342, "pred": "the", "prompt": "The square root of sixty-four is"}, {"c": 0.0751, "f": 3, "m": 0.239, "pred": "a", "prompt": "The color of a clear daytime sky is"}, {"c": 0.0705, "f": 3, "m": 0.227, "pred": "a", "prompt": "The color of grass is"}, {"c": 0.1734, "f": 4, "m": 1.256, "pred": "about", "prompt": "The freezing point of water in Celsius is"}, {"c": 0.373, "f": 4, "m": 0.432, "pred": "yen", "prompt": "The currency used in Japan is the"}, {"c": 0.1859, "f": 5, "m": 0.701, "pred": "dollar", "prompt": "The currency used in the United States is the"}, {"c": 0.0602, "f": 3, "m": 0.158, "pred": "a", "prompt": "The number of days in a week is"}, {"c": 0.0444, "f": 8, "m": 0.03, "pred": "determined", "prompt": "The number of legs on a spider is"}, {"c": 0.0454, "f": 5, "m": 0.303, "pred": "largest", "prompt": "The largest ocean on Earth is the"}, {"c": 0.0242, "f": 6, "m": 0.31, "pred": "Great", "prompt": "The longest river in the world is the"}, {"c": 0.8635, "f": 1, "m": 3.011, "pred": "dioxide", "prompt": "Humans breathe in oxygen and breathe out carbon"}, {"c": 0.8133, "f": 3, "m": 2.106, "pred": "west", "prompt": "The sun rises in the east and sets in the"}, {"c": 0.14, "f": 4, "m": 0.774, "pred": "hospital", "prompt": "A doctor works in a hospital and a teacher works in a"}, {"c": 0.0729, "f": 1, "m": 0.359, "pred": "a", "prompt": "The past tense of run is"}, {"c": 0.0717, "f": 5, "m": 0.026, "pred": "the", "prompt": "The plural of mouse is"}, {"c": 0.1419, "f": 2, "m": 0.065, "pred": ".", "prompt": "Ice is frozen"}, {"c": 0.4739, "f": 3, "m": 0.721, "pred": "sun", "prompt": "The moon orbits the"}, {"c": 0.1626, "f": 2, "m": 0.673, "pred": "a", "prompt": "Lightning is followed by"}, {"c": 0.2193, "f": 4, "m": 1.177, "pred": "house", "prompt": "The king lived in a large"}, {"c": 0.0934, "f": 5, "m": 0.04, "pred": "bowl", "prompt": "She poured the tea into a"}, {"c": 0.0582, "f": 4, "m": 1.344, "pred": "loud", "prompt": "He locked the door with a"}, {"c": 0.0132, "f": 6, "m": 0.208, "pred": "largest", "prompt": "The fastest land animal is the"}], "idx_confidence": 1.105, "idx_margin": 1.06, "idx_flips": 1.041}, {"model": "gpt2-medium", "params": 355000000, "mean_confidence": 0.2959, "mean_margin": 1.206, "pearson_conf_margin": 0.89, "pearson_conf_flipdist": 0.671, "spearman_conf_flipdist": 0.639, "mean_flips": 4.3, "fully_robust": 0, "n": 40, "points": [{"c": 0.691, "f": 2, "m": 2.139, "pred": "Paris", "prompt": "The Eiffel Tower is located in the city of"}, {"c": 0.2467, "f": 5, "m": 1.398, "pred": "Tokyo", "prompt": "The capital of Japan is"}, {"c": 0.1741, "f": 5, "m": 1.161, "pred": "Paris", "prompt": "The capital of France is"}, {"c": 0.3771, "f": 5, "m": 1.31, "pred": "Rome", "prompt": "The capital of Italy is"}, {"c": 0.0768, "f": 6, "m": 0.157, "pred": "G", "prompt": "The chemical symbol for gold is"}, {"c": 0.3591, "f": 6, "m": 2.391, "pred": "O", "prompt": "The chemical symbol for oxygen is"}, {"c": 0.3687, "f": 1, "m": 0.333, "pred": "four", "prompt": "Two plus two equals"}, {"c": 0.182, "f": 4, "m": 0.21, "pred": "five", "prompt": "Ten minus three equals"}, {"c": 0.7398, "f": 4, "m": 2.413, "pred": "cold", "prompt": "The opposite of hot is"}, {"c": 0.6957, "f": 4, "m": 2.656, "pred": "light", "prompt": "The opposite of dark is"}, {"c": 0.8818, "f": 4, "m": 4.737, "pred": "down", "prompt": "The opposite of up is"}, {"c": 0.1269, "f": 5, "m": 0.315, "pred": "a", "prompt": "The first president of the United States was"}, {"c": 0.6321, "f": 2, "m": 1.613, "pred": "oxygen", "prompt": "Water is made of hydrogen and"}, {"c": 0.0712, "f": 4, "m": 0.659, "pred": "the", "prompt": "The largest planet in the solar system is"}, {"c": 0.1146, "f": 7, "m": 0.408, "pred": "Mercury", "prompt": "The closest planet to the sun is"}, {"c": 0.1501, "f": 3, "m": 0.591, "pred": "\"", "prompt": "A group of lions is called a"}, {"c": 0.1517, "f": 4, "m": 1.259, "pred": "\"", "prompt": "A baby dog is called a"}, {"c": 0.112, "f": 2, "m": 0.924, "pred": "a", "prompt": "The author of Romeo and Juliet is"}, {"c": 0.0615, "f": 7, "m": 0.09, "pred": "equal", "prompt": "The square root of sixty-four is"}, {"c": 0.0688, "f": 3, "m": 0.18, "pred": "a", "prompt": "The color of a clear daytime sky is"}, {"c": 0.0653, "f": 1, "m": 0.06, "pred": "a", "prompt": "The color of grass is"}, {"c": 0.1058, "f": 6, "m": 0.448, "pred": "-", "prompt": "The freezing point of water in Celsius is"}, {"c": 0.6061, "f": 4, "m": 2.269, "pred": "yen", "prompt": "The currency used in Japan is the"}, {"c": 0.2436, "f": 6, "m": 0.223, "pred": "dollar", "prompt": "The currency used in the United States is the"}, {"c": 0.082, "f": 5, "m": 0.459, "pred": "the", "prompt": "The number of days in a week is"}, {"c": 0.0703, "f": 8, "m": 0.344, "pred": "determined", "prompt": "The number of legs on a spider is"}, {"c": 0.15, "f": 6, "m": 0.178, "pred": "Great", "prompt": "The largest ocean on Earth is the"}, {"c": 0.0661, "f": 6, "m": 0.272, "pred": "Nile", "prompt": "The longest river in the world is the"}, {"c": 0.9903, "f": 1, "m": 5.75, "pred": "dioxide", "prompt": "Humans breathe in oxygen and breathe out carbon"}, {"c": 0.9902, "f": 3, "m": 5.603, "pred": "west", "prompt": "The sun rises in the east and sets in the"}, {"c": 0.5633, "f": 5, "m": 1.831, "pred": "school", "prompt": "A doctor works in a hospital and a teacher works in a"}, {"c": 0.1848, "f": 4, "m": 1.391, "pred": "used", "prompt": "The past tense of run is"}, {"c": 0.1971, "f": 5, "m": 1.321, "pred": "mouse", "prompt": "The plural of mouse is"}, {"c": 0.1205, "f": 2, "m": 0.092, "pred": "in", "prompt": "Ice is frozen"}, {"c": 0.4963, "f": 4, "m": 0.518, "pred": "Earth", "prompt": "The moon orbits the"}, {"c": 0.1772, "f": 2, "m": 1.077, "pred": "a", "prompt": "Lightning is followed by"}, {"c": 0.1337, "f": 6, "m": 0.018, "pred": "mansion", "prompt": "The king lived in a large"}, {"c": 0.1928, "f": 3, "m": 0.802, "pred": "cup", "prompt": "She poured the tea into a"}, {"c": 0.0474, "f": 6, "m": 0.077, "pred": "loud", "prompt": "He locked the door with a"}, {"c": 0.073, "f": 6, "m": 0.556, "pred": "horse", "prompt": "The fastest land animal is the"}], "idx_confidence": 1.799, "idx_margin": 1.847, "idx_flips": 1.188}, {"model": "gpt2-large", "params": 774000000, "mean_confidence": 0.333, "mean_margin": 1.276, "pearson_conf_margin": 0.894, "pearson_conf_flipdist": 0.589, "spearman_conf_flipdist": 0.554, "mean_flips": 3.6, "fully_robust": 0, "n": 40, "points": [{"c": 0.5968, "f": 5, "m": 2.525, "pred": "Paris", "prompt": "The Eiffel Tower is located in the city of"}, {"c": 0.4132, "f": 5, "m": 2.04, "pred": "Tokyo", "prompt": "The capital of Japan is"}, {"c": 0.097, "f": 3, "m": 0.298, "pred": "the", "prompt": "The capital of France is"}, {"c": 0.2589, "f": 5, "m": 1.133, "pred": "Rome", "prompt": "The capital of Italy is"}, {"c": 0.2572, "f": 5, "m": 2.084, "pred": "Au", "prompt": "The chemical symbol for gold is"}, {"c": 0.7285, "f": 5, "m": 2.84, "pred": "O", "prompt": "The chemical symbol for oxygen is"}, {"c": 0.358, "f": 2, "m": 0.475, "pred": "four", "prompt": "Two plus two equals"}, {"c": 0.0857, "f": 4, "m": 0.271, "pred": "seven", "prompt": "Ten minus three equals"}, {"c": 0.7914, "f": 4, "m": 2.808, "pred": "cold", "prompt": "The opposite of hot is"}, {"c": 0.5715, "f": 4, "m": 2.191, "pred": "light", "prompt": "The opposite of dark is"}, {"c": 0.8409, "f": 3, "m": 3.875, "pred": "down", "prompt": "The opposite of up is"}, {"c": 0.2019, "f": 4, "m": 0.561, "pred": "a", "prompt": "The first president of the United States was"}, {"c": 0.8394, "f": 2, "m": 2.669, "pred": "oxygen", "prompt": "Water is made of hydrogen and"}, {"c": 0.1056, "f": 6, "m": 0.167, "pred": "the", "prompt": "The largest planet in the solar system is"}, {"c": 0.1193, "f": 6, "m": 0.278, "pred": "Mercury", "prompt": "The closest planet to the sun is"}, {"c": 0.188, "f": 2, "m": 0.611, "pred": "\"", "prompt": "A group of lions is called a"}, {"c": 0.1577, "f": 2, "m": 0.766, "pred": "\"", "prompt": "A baby dog is called a"}, {"c": 0.1257, "f": 1, "m": 1.026, "pred": "a", "prompt": "The author of Romeo and Juliet is"}, {"c": 0.064, "f": 2, "m": 0.315, "pred": "the", "prompt": "The square root of sixty-four is"}, {"c": 0.0792, "f": 3, "m": 0.501, "pred": "a", "prompt": "The color of a clear daytime sky is"}, {"c": 0.1067, "f": 1, "m": 0.707, "pred": "a", "prompt": "The color of grass is"}, {"c": 0.5167, "f": 3, "m": 2.185, "pred": "-", "prompt": "The freezing point of water in Celsius is"}, {"c": 0.409, "f": 4, "m": 0.953, "pred": "yen", "prompt": "The currency used in Japan is the"}, {"c": 0.2471, "f": 5, "m": 0.137, "pred": "dollar", "prompt": "The currency used in the United States is the"}, {"c": 0.0892, "f": 3, "m": 0.132, "pred": "the", "prompt": "The number of days in a week is"}, {"c": 0.0842, "f": 5, "m": 0.172, "pred": "a", "prompt": "The number of legs on a spider is"}, {"c": 0.2183, "f": 4, "m": 0.701, "pred": "Pacific", "prompt": "The largest ocean on Earth is the"}, {"c": 0.126, "f": 5, "m": 0.536, "pred": "Nile", "prompt": "The longest river in the world is the"}, {"c": 0.9896, "f": 1, "m": 5.693, "pred": "dioxide", "prompt": "Humans breathe in oxygen and breathe out carbon"}, {"c": 0.9835, "f": 2, "m": 5.22, "pred": "west", "prompt": "The sun rises in the east and sets in the"}, {"c": 0.5507, "f": 2, "m": 1.856, "pred": "school", "prompt": "A doctor works in a hospital and a teacher works in a"}, {"c": 0.1081, "f": 6, "m": 0.404, "pred": "also", "prompt": "The past tense of run is"}, {"c": 0.5109, "f": 5, "m": 0.813, "pred": "mice", "prompt": "The plural of mouse is"}, {"c": 0.1188, "f": 3, "m": 0.146, "pred": ",", "prompt": "Ice is frozen"}, {"c": 0.4988, "f": 4, "m": 0.279, "pred": "Earth", "prompt": "The moon orbits the"}, {"c": 0.3055, "f": 2, "m": 0.943, "pred": "a", "prompt": "Lightning is followed by"}, {"c": 0.2036, "f": 5, "m": 0.436, "pred": "palace", "prompt": "The king lived in a large"}, {"c": 0.2052, "f": 3, "m": 1.047, "pred": "cup", "prompt": "She poured the tea into a"}, {"c": 0.0553, "f": 4, "m": 0.449, "pred": "key", "prompt": "He locked the door with a"}, {"c": 0.1146, "f": 4, "m": 0.81, "pred": "elephant", "prompt": "The fastest land animal is the"}], "idx_confidence": 2.024, "idx_margin": 1.954, "idx_flips": 0.994}]};
+const $ = (s) => document.querySelector(s);
+const tip = $("#tip");
+const esc = (s) => { const d = document.createElement("i"); d.textContent = s; return d.innerHTML; };
+function showTip(e, t){ tip.innerHTML = t; tip.style.opacity = 1;
+  const w = tip.offsetWidth; tip.style.left = Math.min(innerWidth-w-8, e.clientX+14)+"px"; tip.style.top = (e.clientY+14)+"px"; }
+function hideTip(){ tip.style.opacity = 0; }
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const shortName = (m) => m.replace("gpt2","GPT-2").replace("distilGPT-2","distilGPT-2");
+const pM = (p) => (p/1e6 >= 1000 ? (p/1e9).toFixed(1)+"B" : Math.round(p/1e6)+"M");
+
+// ─── Fig 1: indexed trend line chart ───
+function drawTrend(){
+  const W=720,H=340,l=52,r=96,t=20,b=44;
+  const M = DATA.models, xs = M.map(m => Math.log10(m.params));
+  const xmin = Math.min(...xs)-0.05, xmax = Math.max(...xs)+0.05;
+  const ymin = 0.8, ymax = 2.15;
+  const X = (v) => l + (W-l-r)*(v-xmin)/(xmax-xmin);
+  const Y = (v) => H-b - (H-b-t)*(v-ymin)/(ymax-ymin);
+  let s = "";
+  // gridlines + y labels (index units)
+  for(const g of [1.0,1.5,2.0]){
+    s += `<line class="grid" x1="${l}" x2="${W-r}" y1="${Y(g)}" y2="${Y(g)}"/>`;
+    s += `<text x="${l-8}" y="${Y(g)+4}" text-anchor="end" font-size="11">${g.toFixed(1)}×</text>`;
+  }
+  // 1.0 baseline emphasised
+  s += `<line class="axis" x1="${l}" x2="${W-r}" y1="${Y(1.0)}" y2="${Y(1.0)}" stroke-dasharray="2 3"/>`;
+  // x labels
+  M.forEach((m,i)=>{ s += `<text x="${X(xs[i])}" y="${H-b+18}" text-anchor="middle" font-size="11">${esc(shortName(m.model))}</text>
+    <text x="${X(xs[i])}" y="${H-b+31}" text-anchor="middle" font-size="9.5" opacity="0.7">${pM(m.params)}</text>`; });
+  const series = [
+    {key:"idx_confidence", color:"--teal", label:"confidence"},
+    {key:"idx_margin", color:"--indigo", label:"margin"},
+    {key:"idx_flips", color:"--copper", label:"fragility"},
+  ];
+  for(const ser of series){
+    const col = css(ser.color);
+    const pts = M.map((m,i)=>[X(xs[i]), Y(m[ser.key])]);
+    s += `<polyline fill="none" stroke="${col}" stroke-width="2.5" points="${pts.map(p=>p.join(",")).join(" ")}"/>`;
+    pts.forEach((p,i)=>{ s += `<circle cx="${p[0]}" cy="${p[1]}" r="4.5" fill="${col}" stroke="var(--card)" stroke-width="2">
+      <title>${esc(shortName(M[i].model))}: ${ser.label} ${M[i][ser.key]}×</title></circle>`; });
+    const last = pts[pts.length-1];
+    s += `<text x="${last[0]+10}" y="${last[1]+4}" fill="${col}" font-size="11.5" font-weight="600">${M[M.length-1][ser.key].toFixed(2)}×</text>`;
+  }
+  $("#trend").innerHTML = s;
+}
+
+// ─── Fig 2: per-model scatter small multiples ───
+function drawScatters(){
+  const maxF = Math.max(...DATA.models.flatMap(m=>m.points.map(p=>p.f)));
+  const xMax = 0.7;
+  const wrap = $("#scatters"); wrap.innerHTML = "";
+  DATA.models.forEach(m=>{
+    const div = document.createElement("div");
+    div.className = "panel";
+    const W=320,H=180,l=30,r=12,t=10,b=26;
+    const X = (c) => l + (W-l-r)*Math.min(c,xMax)/xMax;
+    const Y = (f) => H-b - (H-b-t)*f/maxF;
+    let s = "";
+    for(let f=0; f<=maxF; f+=3){ s += `<line class="grid" x1="${l}" x2="${W-r}" y1="${Y(f)}" y2="${Y(f)}"/>
+      <text x="${l-6}" y="${Y(f)+3}" text-anchor="end" font-size="9">${f}</text>`; }
+    // mean-confidence marker
+    const mc = m.mean_confidence;
+    s += `<line x1="${X(mc)}" x2="${X(mc)}" y1="${t}" y2="${H-b}" stroke="var(--teal)" stroke-width="1" stroke-dasharray="3 3" opacity="0.6"/>`;
+    // jittered dots
+    m.points.forEach((p,i)=>{
+      const jit = ((i*53)%11-5)*0.9;
+      s += `<circle class="dot" cx="${X(p.c)}" cy="${Y(p.f)+jit}" r="3" fill="var(--copper)" fill-opacity="0.55"
+        data-t="${esc(p.prompt)} → ${esc(p.pred)} · conf ${p.c.toFixed(3)} · ${p.f} flips"></circle>`;
+    });
+    s += `<text x="${l}" y="${H-8}" font-size="9">conf 0</text><text x="${W-r}" y="${H-8}" text-anchor="end" font-size="9">${xMax}</text>`;
+    div.innerHTML = `<h3>${esc(shortName(m.model))}</h3>
+      <div class="pm">${pM(m.params)} · mean conf ${m.mean_confidence.toFixed(3)} · ${m.fully_robust}/${m.n} robust</div>
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(m.model)} confidence vs deletion flips">${s}</svg>`;
+    wrap.appendChild(div);
+  });
+  wrap.querySelectorAll("circle.dot").forEach(c=>{
+    c.addEventListener("mousemove",(e)=>{ c.setAttribute("r","5"); showTip(e, c.dataset.t); });
+    c.addEventListener("mouseleave",()=>{ c.setAttribute("r","3"); hideTip(); });
+  });
+}
+
+// ─── Fig 3: table + callout ───
+function drawTable(){
+  const tb = $("#tbl tbody");
+  tb.innerHTML = DATA.models.map(m=>`<tr>
+    <td>${esc(shortName(m.model))}</td><td class="mono">${pM(m.params)}</td>
+    <td class="mono up">${m.mean_confidence.toFixed(3)}</td>
+    <td class="mono up">${m.mean_margin.toFixed(2)}</td>
+    <td class="mono flat">${m.fully_robust}/${m.n}</td>
+    <td class="mono flat">${m.mean_flips.toFixed(1)}</td>
+    <td class="mono">${m.pearson_conf_flipdist.toFixed(2)}</td></tr>`).join("");
+  const a = DATA.models[0], z = DATA.models[DATA.models.length-1];
+  $("#callout").innerHTML = `From ${esc(shortName(a.model))} to ${esc(shortName(z.model))}, mean confidence rose
+    <span class="up">${(z.mean_confidence/a.mean_confidence).toFixed(1)}×</span> and mean margin
+    <span class="up">${(z.mean_margin/a.mean_margin).toFixed(1)}×</span> — while
+    <span class="flat">not one of ${z.n} predictions</span> at any size survived every single-token deletion.`;
+}
+
+function render(){ drawTrend(); drawScatters(); drawTable(); }
+render();
+new MutationObserver(render).observe(document.documentElement,{attributes:true,attributeFilter:["data-theme"]});
+</script>

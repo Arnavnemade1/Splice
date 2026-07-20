@@ -17,7 +17,8 @@ no cloud: [mindlab.py](mindlab.py).
 Beyond replication, [`probes.py`](probes.py) runs measurements that haven't been done
 this way before — Splice's decision-geometry battery pointed at a real transformer,
 confidence-vs-fragility calibration, and cross-layer concept transport — with the
-findings and honest novelty framing written up in [NOVEL.md](NOVEL.md).
+findings and honest novelty framing written up in [NOVEL.md](NOVEL.md). The scaling study (§4) is also recorded as a
+self-contained interactive page: [results/scaling-report.html](results/scaling-report.html).
 
 ## Run it
 
