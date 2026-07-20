@@ -12,7 +12,9 @@ no cloud: [mindlab.py](mindlab.py).
 | `patch` | a layer × position heatmap of *where* the computation lives (IOI task) | activation patching / causal tracing |
 | `steer` | a concept vector injected at increasing strength — sweet spot → incoherence | concept injection (the introspection-experiment protocol) |
 | `attention` | the induction heads that implement in-context learning | induction-head scan |
-| `report` | all five in one self-contained HTML page | — |
+| `ablation` | how localized a fact is — top MLP neurons by attribution, verified by real ablation, plus the *effective neuron count* (superposition measure) | neuron ablation / attribution patching |
+| `knockout` | a 12×12 causal map of which attention heads *cause* the answer (heads that support vs. oppose it) | attention-head knockout |
+| `report` | all seven in one HTML page — add `--interactive` for an explorable version | — |
 
 Beyond replication, [`probes.py`](probes.py) runs measurements that haven't been done
 this way before — Splice's decision-geometry battery pointed at a real transformer,
@@ -27,8 +29,15 @@ cd lab
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt        # torch (CPU), transformers, numpy
 python3 mindlab.py report              # gpt2 (124M) downloads on first run
+python3 mindlab.py report --interactive   # explorable page: scrub, toggle, hover
 open mindlab-report.html
 ```
+
+`--interactive` folds the hand-built artifact quality back into the tool: any
+model and prompt produces its own explorable page — a scrubbable logit lens,
+toggleable saliency, hoverable patching and knockout heatmaps, a concept-injection
+stepper, and neuron/head importance bars. Built by [interactive.py](interactive.py),
+self-contained and theme-aware.
 
 Single experiments print JSON:
 

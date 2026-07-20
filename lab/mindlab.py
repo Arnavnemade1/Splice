@@ -75,7 +75,9 @@ class Lab:
         cfg = self.model.config
         self.n_layer = cfg.n_layer if hasattr(cfg, "n_layer") else cfg.num_hidden_layers
         self.n_head = cfg.n_head if hasattr(cfg, "n_head") else cfg.num_attention_heads
-        # GPT-2 family internals used by lens/patch/steer hooks.
+        self.d_model = cfg.n_embd if hasattr(cfg, "n_embd") else cfg.hidden_size
+        self.head_dim = self.d_model // self.n_head
+        # GPT-2 family internals used by lens/patch/steer/ablation/knockout hooks.
         self.blocks = self.model.transformer.h
         self.ln_f = self.model.transformer.ln_f
         self.unembed = self.model.get_output_embeddings().weight  # [vocab, d]
@@ -413,6 +415,161 @@ def run_attention(lab: Lab, period: int = 25) -> AttentionResult:
     )
 
 
+# ─── 6. Neuron ablation / superposition ─────────────────────────────────────
+
+
+@dataclass
+class AblationResult:
+    prompt: str
+    predicted: str
+    layer: int
+    n_neurons: int
+    #: participation ratio of |attribution| — the effective number of MLP
+    #: neurons carrying this prediction (few = localized, many = superposed).
+    effective_neurons: float
+    concentration: float  # effective_neurons / n_neurons (0 = one neuron, 1 = spread evenly)
+    #: top neurons by act×grad attribution, each verified by real ablation.
+    top_neurons: list[dict[str, Any]]
+    interpretation: list[str]
+    note: str = (
+        "Attribution = activation × gradient of logit(answer) w.r.t. each MLP "
+        "neuron (one backward pass gives all of them); the top few are then "
+        "confirmed by actually zeroing them and re-running. 'Effective neurons' "
+        "is the participation ratio of |attribution| — a superposition measure: "
+        "is a fact localized to a handful of neurons or smeared across thousands?"
+    )
+
+
+def run_ablation(lab: Lab, prompt: str, layer: int, k: int = 10) -> AblationResult:
+    ids = lab.ids(prompt)
+    store: dict[str, torch.Tensor] = {}
+
+    def capture(_m, _i, output):
+        output.retain_grad()
+        store["act"] = output
+        return output
+
+    handle = lab.blocks[layer].mlp.act.register_forward_hook(capture)
+    logits = lab.model(ids).logits[0, -1]
+    answer = int(logits.detach().argmax())
+    lab.model.zero_grad(set_to_none=True)
+    logits[answer].backward()
+    handle.remove()
+
+    act = store["act"][0, -1].detach()          # [4d] intermediate activations
+    grad = store["act"].grad[0, -1].detach()     # [4d] d logit(answer) / d act
+    attribution = act * grad
+    absattr = attribution.abs()
+    n = absattr.numel()
+    total = float(absattr.sum())
+    effective = float((total ** 2) / float((absattr ** 2).sum())) if total > 1e-9 else 0.0
+
+    base = float(logits[answer].detach())
+    top = torch.topk(absattr, k)
+    top_neurons: list[dict[str, Any]] = []
+    for idx in top.indices.tolist():
+        def zero(_m, _i, output, _n=idx):
+            output[:, :, _n] = 0
+            return output
+        hz = lab.blocks[layer].mlp.act.register_forward_hook(zero)
+        with torch.no_grad():
+            la = lab.model(ids).logits[0, -1]
+        hz.remove()
+        top_neurons.append({
+            "neuron": idx,
+            "attribution": round(float(attribution[idx]), 3),
+            "ablation_delta_logit": round(float(la[answer] - base), 3),
+        })
+
+    predicted = lab.tok.decode([answer])
+    interp = [
+        f'Predicting {predicted!r} from the layer-{layer} MLP ({n} neurons).',
+        f"Effectively {round(effective, 1)} neurons carry it (participation ratio) — "
+        f"{'highly localized' if effective < 20 else 'moderately localized' if effective < 100 else 'broadly superposed'}.",
+        f"Top neuron #{top_neurons[0]['neuron']}: attribution {top_neurons[0]['attribution']}, "
+        f"and zeroing it alone shifts logit({predicted.strip()!r}) by "
+        f"{top_neurons[0]['ablation_delta_logit']} (sign confirms direction).",
+    ]
+    return AblationResult(
+        prompt=prompt, predicted=predicted, layer=layer, n_neurons=n,
+        effective_neurons=round(effective, 2),
+        concentration=round(effective / n, 4) if n else 0.0,
+        top_neurons=top_neurons, interpretation=interp,
+    )
+
+
+# ─── 7. Attention-head knockout (causal head importance) ────────────────────
+
+
+@dataclass
+class KnockoutResult:
+    clean: str
+    answer: str
+    foil: str
+    baseline_logit_diff: float
+    n_layer: int
+    n_head: int
+    #: importance[layer][head] = drop in logit(answer)−logit(foil) when that
+    #: head is knocked out (zeroed). Positive = the head supports the answer.
+    importance: list[list[float]]
+    top_heads: list[dict[str, Any]]
+    interpretation: list[str]
+    note: str = (
+        "Each attention head is zeroed one at a time (its slice of the merged "
+        "head outputs, before the output projection) and the indirect-object "
+        "logit difference is re-measured — the causal complement to the "
+        "correlational induction-head scan. Positive importance = removing the "
+        "head hurts the correct answer, so the head was doing that work."
+    )
+
+
+def run_knockout(lab: Lab, clean: str, answer: str, foil: str) -> KnockoutResult:
+    ids = lab.ids(clean)
+    a_id = lab.tok.encode(answer)[0]
+    f_id = lab.tok.encode(foil)[0]
+
+    def logit_diff(logits: torch.Tensor) -> float:
+        return float(logits[0, -1, a_id] - logits[0, -1, f_id])
+
+    with torch.no_grad():
+        base = logit_diff(lab.model(ids).logits)
+
+    hd = lab.head_dim
+    importance: list[list[float]] = []
+    flat: list[tuple[float, int, int]] = []
+    for layer in range(lab.n_layer):
+        row: list[float] = []
+        for head in range(lab.n_head):
+            def pre(_m, args, _h=head):
+                x = args[0].clone()
+                x[:, :, _h * hd:(_h + 1) * hd] = 0
+                return (x,)
+            handle = lab.blocks[layer].attn.c_proj.register_forward_pre_hook(pre)
+            with torch.no_grad():
+                d = logit_diff(lab.model(ids).logits)
+            handle.remove()
+            drop = round(base - d, 3)  # how much the head contributes to the answer
+            row.append(drop)
+            flat.append((drop, layer, head))
+        importance.append(row)
+
+    flat.sort(reverse=True)
+    top_heads = [{"head": f"L{l}.H{h}", "importance": round(v, 3)} for v, l, h in flat[:6]]
+    interp = [
+        f"Baseline logit({answer.strip()!r}) − logit({foil.strip()!r}) = {round(base, 2)} on the "
+        f"indirect-object task.",
+        f"The most causally important head is {top_heads[0]['head']} — knocking it out drops the "
+        f"answer's lead by {top_heads[0]['importance']}.",
+        f"{sum(1 for v, _, _ in flat if v > 0.1)} of {lab.n_layer * lab.n_head} heads measurably "
+        f"support the answer; {sum(1 for v, _, _ in flat if v < -0.1)} actively oppose it.",
+    ]
+    return KnockoutResult(
+        clean=clean, answer=answer, foil=foil, baseline_logit_diff=round(base, 3),
+        n_layer=lab.n_layer, n_head=lab.n_head, importance=importance,
+        top_heads=top_heads, interpretation=interp,
+    )
+
+
 # ─── HTML report ────────────────────────────────────────────────────────────
 
 
@@ -540,7 +697,8 @@ IOI_CORRUPT = "When John and Mary went to the store, Mary gave a drink to"
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("experiment", choices=["report", "jacobian", "lens", "patch", "steer", "attention"])
+    ap.add_argument("experiment", choices=["report", "jacobian", "lens", "patch", "steer",
+                                            "attention", "ablation", "knockout"])
     ap.add_argument("--model", default="gpt2")
     ap.add_argument("--prompt", default=DEFAULT_PROMPT)
     ap.add_argument("--clean", default=IOI_CLEAN)
@@ -548,8 +706,10 @@ def main() -> None:
     ap.add_argument("--answer", default=" Mary")
     ap.add_argument("--foil", default=" John")
     ap.add_argument("--concept", default="the ocean")
-    ap.add_argument("--layer", type=int, default=None, help="steering layer (default n_layer//2)")
+    ap.add_argument("--layer", type=int, default=None, help="steering/ablation layer (default n_layer//2)")
     ap.add_argument("--alphas", default="0,6,10,16,26")
+    ap.add_argument("--interactive", action="store_true",
+                    help="emit an explorable interactive HTML report instead of the static one")
     ap.add_argument("--out", default="mindlab-report.html")
     args = ap.parse_args()
 
@@ -560,24 +720,31 @@ def main() -> None:
     alphas = [float(a) for a in args.alphas.split(",")]
 
     if args.experiment == "report":
-        sys.stderr.write("[mindlab] 1/5 jacobian…\n")
-        jac = run_jacobian(lab, args.prompt)
-        sys.stderr.write("[mindlab] 2/5 logit lens…\n")
-        lens = run_lens(lab, args.prompt)
-        sys.stderr.write("[mindlab] 3/5 activation patching…\n")
-        patch = run_patch(lab, args.clean, args.corrupt, args.answer, args.foil)
-        sys.stderr.write("[mindlab] 4/5 concept injection…\n")
-        steer = run_steer(lab, args.concept, layer, alphas)
-        sys.stderr.write("[mindlab] 5/5 induction heads…\n")
-        attn = run_attention(lab)
-        html_text = render_html(args.model, jac, lens, patch, steer, attn, time.time() - t0)
+        steps = ["jacobian", "logit lens", "activation patching", "concept injection",
+                 "induction heads", "neuron ablation", "attention knockout"]
+        def step(i):
+            sys.stderr.write(f"[mindlab] {i}/7 {steps[i - 1]}…\n")
+        step(1); jac = run_jacobian(lab, args.prompt)
+        step(2); lens = run_lens(lab, args.prompt)
+        step(3); patch = run_patch(lab, args.clean, args.corrupt, args.answer, args.foil)
+        step(4); steer = run_steer(lab, args.concept, layer, alphas)
+        step(5); attn = run_attention(lab)
+        step(6); abl = run_ablation(lab, args.prompt, layer)
+        step(7); ko = run_knockout(lab, args.clean, args.answer, args.foil)
+        results = {"model": args.model, "jacobian": asdict(jac), "lens": asdict(lens),
+                   "patch": asdict(patch), "steer": asdict(steer), "attention": asdict(attn),
+                   "ablation": asdict(abl), "knockout": asdict(ko)}
+        if args.interactive:
+            from interactive import render_interactive
+            html_text = render_interactive(args.model, results, time.time() - t0)
+        else:
+            html_text = render_html(args.model, jac, lens, patch, steer, attn, time.time() - t0)
         with open(args.out, "w") as f:
             f.write(html_text)
         with open(args.out.replace(".html", ".json"), "w") as f:
-            json.dump({"model": args.model, "jacobian": asdict(jac), "lens": asdict(lens),
-                       "patch": asdict(patch), "steer": asdict(steer), "attention": asdict(attn)},
-                      f, indent=2)
-        sys.stderr.write(f"[mindlab] report → {args.out} (+ .json) in {time.time() - t0:.1f}s\n")
+            json.dump(results, f, indent=2)
+        kind = "interactive report" if args.interactive else "report"
+        sys.stderr.write(f"[mindlab] {kind} → {args.out} (+ .json) in {time.time() - t0:.1f}s\n")
         return
 
     result: Any
@@ -589,6 +756,10 @@ def main() -> None:
         result = run_patch(lab, args.clean, args.corrupt, args.answer, args.foil)
     elif args.experiment == "steer":
         result = run_steer(lab, args.concept, layer, alphas)
+    elif args.experiment == "ablation":
+        result = run_ablation(lab, args.prompt, layer)
+    elif args.experiment == "knockout":
+        result = run_knockout(lab, args.clean, args.answer, args.foil)
     else:
         result = run_attention(lab)
     json.dump(asdict(result), sys.stdout, indent=2)

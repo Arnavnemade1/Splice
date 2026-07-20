@@ -24,4 +24,6 @@ python/splice_mcp/__pycache__/
 lab/.venv/
 lab/mindlab-report.html
 lab/mindlab-report.json
+lab/mindlab-interactive.html
+lab/mindlab-interactive.json
 probes.json

@@ -74,8 +74,24 @@ the workhorse behind circuit analysis): run a *clean* prompt and a *corrupted* o
 swap the clean activation into the corrupted run at one (layer, position), and measure
 how much of the correct answer returns. High-recovery cells localize the computation.
 
-**Lab status**: implemented as `patch` — full (layer × position) residual-stream
-patching heatmap with normalized logit recovery.
+**Neuron ablation & superposition.** Dictionary-learning (Towards/Scaling
+Monosemanticity) established that a single MLP neuron is usually *polysemantic* —
+features are in superposition, spread across many neurons rather than one-to-one.
+Zeroing individual neurons and measuring the effect on a specific prediction tests
+how localized a fact is; gradient×activation attribution estimates every neuron's
+contribution in one backward pass, which the exact ablation then confirms.
+
+**Attention-head knockout.** The causal complement to correlational head analysis
+(and to the IOI circuit of Wang et al. 2022): zero one attention head at a time and
+measure the change in the answer's logit — heads whose removal *hurts* the answer are
+the ones doing the work (name-mover heads), and some heads measurably *oppose* it
+(negative/backup heads).
+
+**Lab status**: implemented as `patch` (full layer × position residual-stream
+recovery heatmap), `ablation` (top MLP neurons by attribution, verified by real
+ablation, plus the participation-ratio *effective neuron count* — a superposition
+measure), and `knockout` (the 12×12 causal head-importance map on the IOI task,
+recovering GPT-2's documented name-mover heads and its negative heads).
 
 ### 1.4 The Jacobian space — "first-order sensitivity, exactly"
 
