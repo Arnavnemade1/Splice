@@ -33,11 +33,18 @@ decision, plus one open question that battery lets us ask."
              one layer's vector at every layer and measure the KL shift it
              causes on a neutral prompt.
 
+  localization  Where in the network does a fact live? The 'load-bearing'
+             question Splice asks of its own decision, asked of the model's
+             guts: the effective-neuron count (participation ratio of act×grad
+             attribution) at every layer, plus the causally important attention
+             heads (from knockout). Reuses mindlab's ablation + knockout.
+
 Usage:
   python3 probes.py geometry  --prompt "The Eiffel Tower is located in the city of"
   python3 probes.py calibrate
   python3 probes.py transport --concept "the ocean"
-  python3 probes.py all --out probes.json
+  python3 probes.py localization
+  python3 probes.py all --interactive --out probes.json
 """
 
 from __future__ import annotations
@@ -56,7 +63,9 @@ except ImportError as exc:  # pragma: no cover
     sys.stderr.write(f"Missing dependency: {exc.name}. Install: pip install -r requirements.txt\n")
     sys.exit(2)
 
-from mindlab import Lab, concept_vector, CONCEPT_CONTRASTS  # reuse the loaded-model plumbing
+from mindlab import (  # reuse the loaded-model plumbing + causal experiments
+    Lab, concept_vector, CONCEPT_CONTRASTS, run_ablation, run_knockout,
+)
 
 torch.manual_seed(0)
 
@@ -364,15 +373,91 @@ def run_transport(lab: Lab, concept: str = "the ocean",
     )
 
 
+# ─── 4. Localization — how concentrated is a fact, in neurons and heads ──────
+
+
+@dataclass
+class LocalizationResult:
+    prompt: str
+    predicted: str
+    n_neurons_per_layer: int
+    #: effective-neuron count (participation ratio) of the fact at each layer —
+    #: the neuron-space analog of Splice's effectiveDimension. Low = a handful
+    #: of neurons carry it; high = it is smeared across the layer (superposition).
+    per_layer: list[dict[str, Any]]
+    most_localized_layer: dict[str, Any]
+    #: causal attention heads for the answer on the IOI task (from knockout).
+    top_causal_heads: list[dict[str, Any]]
+    heads_supporting: int
+    heads_opposing: int
+    interpretation: list[str]
+    note: str = (
+        "The 'load-bearing token' question Splice asks of its own decision, asked "
+        "of a real model's guts: which NEURONS and which HEADS carry a fact. Neuron "
+        "localization = participation ratio of act×grad attribution per layer; head "
+        "importance = causal knockout on the indirect-object task. Novel synthesis, "
+        "standard ingredients."
+    )
+
+
+def run_localization(lab: Lab, prompt: str,
+                     clean: str = "When John and Mary went to the store, John gave a drink to",
+                     answer: str = " Mary", foil: str = " John") -> LocalizationResult:
+    per_layer: list[dict[str, Any]] = []
+    predicted = ""
+    for layer in range(lab.n_layer):
+        abl = run_ablation(lab, prompt, layer, k=3)
+        predicted = abl.predicted
+        per_layer.append({
+            "layer": layer,
+            "effective_neurons": abl.effective_neurons,
+            "concentration": abl.concentration,
+            "top_neuron": abl.top_neurons[0]["neuron"],
+            "top_attribution": abl.top_neurons[0]["attribution"],
+        })
+    most = min(per_layer, key=lambda x: x["effective_neurons"])
+
+    ko = run_knockout(lab, clean, answer, foil)
+    supporting = sum(1 for row in ko.importance for v in row if v > 0.1)
+    opposing = sum(1 for row in ko.importance for v in row if v < -0.1)
+
+    effs = [p["effective_neurons"] for p in per_layer]
+    L = lab.n_layer
+    edge = float(np.mean([effs[0], effs[-1]]))
+    middle = float(np.mean(effs[L // 4: 3 * L // 4])) if L >= 4 else float(np.mean(effs))
+    u_shaped = edge < middle * 0.6
+    interp = [
+        f'Predicting {predicted!r}: the fact is carried by {round(min(effs))}–{round(max(effs))} '
+        f'effective neurons depending on layer (of {lab.d_model * 4}).',
+        (f"Localization is U-shaped across depth — concentrated near the edges "
+         f"(≈{round(edge)} effective neurons at the input/output layers) but broadly superposed "
+         f"through the middle (≈{round(middle)}). The fact sharpens where it enters and where it is read out."
+         if u_shaped else
+         f"The fact stays broadly superposed across depth (≈{round(float(np.mean(effs)))} effective "
+         f"neurons on average, min {round(min(effs))} at layer {most['layer']})."),
+        f"On the indirect-object task, the most causal head is {ko.top_heads[0]['head']} "
+        f"({ko.top_heads[0]['importance']}); {supporting} heads support the answer and "
+        f"{opposing} oppose it — the circuit both promotes and suppresses.",
+    ]
+    return LocalizationResult(
+        prompt=prompt, predicted=predicted, n_neurons_per_layer=lab.d_model * 4,
+        per_layer=per_layer, most_localized_layer=most,
+        top_causal_heads=ko.top_heads, heads_supporting=supporting,
+        heads_opposing=opposing, interpretation=interp,
+    )
+
+
 # ─── CLI ────────────────────────────────────────────────────────────────────
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("probe", choices=["geometry", "calibrate", "transport", "all"])
+    ap.add_argument("probe", choices=["geometry", "calibrate", "transport", "localization", "all"])
     ap.add_argument("--model", default="gpt2")
     ap.add_argument("--prompt", default="The Eiffel Tower is located in the city of")
     ap.add_argument("--concept", default="the ocean")
+    ap.add_argument("--interactive", action="store_true",
+                    help="with `all`: also write an explorable HTML report next to the JSON")
     ap.add_argument("--out", default="probes.json")
     args = ap.parse_args()
 
@@ -381,26 +466,41 @@ def main() -> None:
     lab = Lab(args.model)
 
     if args.probe == "all":
-        sys.stderr.write("[probes] 1/3 geometry...\n")
+        sys.stderr.write("[probes] 1/4 geometry...\n")
         geo = run_geometry(lab, args.prompt)
-        sys.stderr.write("[probes] 2/3 calibrate...\n")
+        sys.stderr.write("[probes] 2/4 calibrate...\n")
         cal = run_calibrate(lab)
-        sys.stderr.write("[probes] 3/3 transport...\n")
+        sys.stderr.write("[probes] 3/4 transport...\n")
         tr = run_transport(lab, args.concept)
-        payload = {"model": args.model, "geometry": asdict(geo),
-                   "calibrate": asdict(cal), "transport": asdict(tr)}
+        sys.stderr.write("[probes] 4/4 localization...\n")
+        loc = run_localization(lab, args.prompt)
+        payload = {"model": args.model, "geometry": asdict(geo), "calibrate": asdict(cal),
+                   "transport": asdict(tr), "localization": asdict(loc)}
         with open(args.out, "w") as f:
             json.dump(payload, f, indent=2)
         sys.stderr.write(f"[probes] wrote {args.out} in {time.time() - t0:.1f}s\n")
-        for name, res in [("GEOMETRY", geo), ("CALIBRATE", cal), ("TRANSPORT", tr)]:
+        if args.interactive:
+            from interactive import render_probes_interactive
+            html_path = args.out.replace(".json", ".html")
+            if html_path == args.out:
+                html_path += ".html"
+            with open(html_path, "w") as f:
+                f.write(render_probes_interactive(args.model, payload, time.time() - t0))
+            sys.stderr.write(f"[probes] interactive report → {html_path}\n")
+        for name, res in [("GEOMETRY", geo), ("CALIBRATE", cal), ("TRANSPORT", tr), ("LOCALIZATION", loc)]:
             sys.stderr.write(f"\n=== {name} ===\n")
             for line in res.interpretation:
                 sys.stderr.write(f"  - {line}\n")
         return
 
-    res = {"geometry": run_geometry, "calibrate": run_calibrate, "transport": run_transport}[args.probe]
-    out = res(lab, args.prompt) if args.probe == "geometry" else (
-        res(lab, args.concept) if args.probe == "transport" else res(lab))
+    fn = {"geometry": run_geometry, "calibrate": run_calibrate,
+          "transport": run_transport, "localization": run_localization}[args.probe]
+    if args.probe == "geometry" or args.probe == "localization":
+        out = fn(lab, args.prompt)
+    elif args.probe == "transport":
+        out = fn(lab, args.concept)
+    else:
+        out = fn(lab)
     json.dump(asdict(out), sys.stdout, indent=2)
     sys.stdout.write("\n")
 

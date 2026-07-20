@@ -168,11 +168,70 @@ def run_model(name: str) -> dict:
     return summary
 
 
+def run_localization_scaling(name: str, prompt: str) -> dict:
+    """Effective-neuron count for one fixed fact across a model's layers —
+    does a fact localize or superpose more as models scale?"""
+    from probes import run_localization
+    t0 = time.time()
+    sys.stderr.write(f"[scaling-loc] {name}: loading…\n")
+    lab = Lab(name)
+    loc = run_localization(lab, prompt)
+    effs = [p["effective_neurons"] for p in loc.per_layer]
+    n = loc.n_neurons_per_layer
+    L = lab.n_layer
+    edge = float(np.mean([effs[0], effs[-1]]))
+    middle = float(np.mean(effs[L // 4: 3 * L // 4])) if L >= 4 else float(np.mean(effs))
+    summary = {
+        "model": name, "params": PARAM_COUNTS.get(name), "neurons_per_layer": n, "layers": L,
+        "predicted": loc.predicted,
+        "min_effective": round(min(effs), 1), "max_effective": round(max(effs), 1),
+        "mean_effective": round(float(np.mean(effs)), 1),
+        # scale-invariant: what FRACTION of the layer carries the fact?
+        "min_fraction": round(min(effs) / n, 4), "mean_fraction": round(float(np.mean(effs)) / n, 4),
+        "edge_effective": round(edge, 1), "middle_effective": round(middle, 1),
+        "u_shaped": bool(edge < middle * 0.6),
+        "per_layer_effective": [round(e, 1) for e in effs],
+        "runtime_s": round(time.time() - t0, 1),
+    }
+    sys.stderr.write(
+        f"[scaling-loc] {name}: min {summary['min_effective']} "
+        f"({summary['min_fraction']*100:.1f}% of layer) mean-frac {summary['mean_fraction']*100:.1f}% "
+        f"u-shaped={summary['u_shaped']} ({summary['runtime_s']}s)\n")
+    del lab
+    return summary
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--models", default="distilgpt2,gpt2,gpt2-medium,gpt2-large")
-    ap.add_argument("--out", default="results/scaling-calibration.json")
+    ap.add_argument("--study", choices=["calibration", "localization"], default="calibration",
+                    help="calibration: confidence vs geometry; localization: effective-neuron count vs scale")
+    ap.add_argument("--prompt", default="The Eiffel Tower is located in the city of")
+    ap.add_argument("--out", default=None)
     args = ap.parse_args()
+
+    if args.study == "localization":
+        models = [m.strip() for m in args.models.split(",") if m.strip()]
+        results = [run_localization_scaling(m, args.prompt) for m in models]
+        payload = {
+            "question": "Does a fact localize or superpose more as models scale? "
+                        "(effective-neuron count, and its fraction of the layer)",
+            "protocol": "For one fixed fact, effective-neuron count (participation ratio of act×grad "
+                        "attribution) at every layer, per model. Fraction-of-layer is the scale-comparable "
+                        "measure since neuron counts differ across sizes.",
+            "prompt": args.prompt, "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "models": results,
+        }
+        out = args.out or "results/scaling-localization.json"
+        os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+        with open(out, "w") as f:
+            json.dump(payload, f, indent=2)
+        sys.stderr.write(f"[scaling-loc] wrote {out}\n\n=== TREND (fact localization vs scale) ===\n")
+        for r in results:
+            sys.stderr.write(f"  {r['model']:<12} {str(r['params']):<12} "
+                             f"min {r['min_effective']:<8} ({r['min_fraction']*100:>4.1f}% of layer)  "
+                             f"mean-frac {r['mean_fraction']*100:>4.1f}%  u-shaped={r['u_shaped']}\n")
+        return
 
     models = [m.strip() for m in args.models.split(",") if m.strip()]
     results = [run_model(m) for m in models]
@@ -191,10 +250,11 @@ def main() -> None:
         "trend": trend,
         "models": results,
     }
-    os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
-    with open(args.out, "w") as f:
+    out = args.out or "results/scaling-calibration.json"
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    with open(out, "w") as f:
         json.dump(payload, f, indent=2)
-    sys.stderr.write(f"[scaling] wrote {args.out}\n\n=== TREND ===\n")
+    sys.stderr.write(f"[scaling] wrote {out}\n\n=== TREND ===\n")
     for t in trend:
         sys.stderr.write(f"  {t['model']:<12} {str(t['params']):<12} "
                          f"pearson {t['pearson_conf_margin']:<7} spearman {t['spearman_conf_margin']:<7} "

@@ -18,9 +18,12 @@ no cloud: [mindlab.py](mindlab.py).
 
 Beyond replication, [`probes.py`](probes.py) runs measurements that haven't been done
 this way before — Splice's decision-geometry battery pointed at a real transformer,
-confidence-vs-fragility calibration, and cross-layer concept transport — with the
-findings and honest novelty framing written up in [NOVEL.md](NOVEL.md). The scaling study (§4) is also recorded as a
-self-contained interactive page: [results/scaling-report.html](results/scaling-report.html).
+confidence-vs-fragility calibration, cross-layer concept transport, and fact
+**localization** (how many neurons and which heads carry a prediction) — with the
+findings and honest novelty framing written up in [NOVEL.md](NOVEL.md). Run
+`python3 probes.py all --interactive` for an explorable HTML report of all four. Two
+scaling studies (§4–5) are recorded too: the calibration one as a self-contained
+interactive page ([results/scaling-report.html](results/scaling-report.html)).
 
 ## Run it
 

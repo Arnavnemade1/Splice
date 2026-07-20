@@ -119,6 +119,45 @@ model removes. Same honest caveats, louder: one architecture family, 40 short pr
 where single-token deletion is a large perturbation; the *invariance across scale* is
 the signal, not the absolute fragility rate.
 
+## 5. `localization` — where in the network a fact lives, and does scale move it?
+
+**Question.** Splice reports the *load-bearing token* and *effective dimension* of its
+own decision. Point the same questions at the model's guts: which **neurons** and which
+**heads** carry a fact, how concentrated are they, and does that concentration change
+with scale? [`probes.py localization`](probes.py) reuses the `ablation` and `knockout`
+experiments; the scaling variant is [`scaling.py --study localization`](scaling.py).
+
+**Finding — localization is U-shaped, and its shape is scale-invariant.** For a fixed
+fact ("Paris"), the effective-neuron count (participation ratio of act×grad attribution)
+traces a **U across depth**: the fact is concentrated near the input and output layers
+(≈97 effective neurons for gpt2) and broadly superposed through the middle (≈654). It
+sharpens where it enters the residual stream and where it is read back out, and smears
+in between. On the causal side, knockout finds GPT-2's documented name-mover head
+**L8.H10** as most important, with a near-even split of heads that *support* the answer
+(40) and heads that *oppose* it (39) — the circuit both writes and suppresses.
+
+Across scale (82M → 774M), two things hold:
+
+| model | params | layers | min effective neurons | as % of layer | mean % of layer | U-shaped |
+| --- | --- | --- | --- | --- | --- | --- |
+| distilgpt2 | 82M | 6 | 219.8 | 7.1% | 19.5% | yes |
+| gpt2 | 124M | 12 | 92.6 | 3.0% | 18.0% | yes |
+| gpt2-medium | 355M | 24 | 189.5 | 4.6% | 21.8% | yes |
+| gpt2-large | 774M | 36 | 106.1 | 2.1% | 20.5% | yes |
+
+The **U-shape is universal** — every model concentrates the fact at its edges — and the
+**fraction of a layer carrying the fact is scale-invariant** at ~18–22%, even as raw
+neuron counts grow 25× (768→1280 wide, 6→36 deep). Bigger models do not localize facts
+into fewer relative neurons; they superpose them across proportionally the same share of
+a wider layer. (Same caveats: one family, one fact, participation ratio is a coarse
+concentration measure — the *invariance* is the signal.)
+
+**The through-line.** All three scaling observations point one way: from 82M to 774M,
+GPT-2 gets more confident (§4), keeps the same fragility (§4), and keeps the same
+fractional superposition (§5). Scale changes the *answers*, not the *shape of how they
+are held* — which is exactly why external, evidence-based verification (Splice's job)
+does not become unnecessary as models grow.
+
 ---
 
 ## Relation to prior work

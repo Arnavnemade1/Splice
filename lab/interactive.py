@@ -318,3 +318,190 @@ def render_interactive(model_name: str, results: dict[str, Any], elapsed_s: floa
             .replace("__DATA__", payload)
             .replace("__MODEL__", model_name)
             .replace("__ELAPSED__", f"{elapsed_s:.2f}"))
+
+
+# ─── probes.py interactive report ────────────────────────────────────────────
+
+PROBES_TEMPLATE = r"""<!doctype html><meta charset="utf-8">
+<title>Model Mind Lab — probes — __MODEL__</title>
+<style>
+  :root{
+    --paper:#FBFBF9;--card:#FFFFFF;--ink:#1B1F23;--mut:#68707A;--line:#E7E5E0;--grid:#EEEDE9;
+    --teal:#0D9488;--indigo:#6D4AC4;--copper:#B45309;--focus:#0D9488;
+    --heatLo:230,244,241;--heatHi:11,93,84;
+    --serif:"Iowan Old Style","Palatino Nova",Palatino,Georgia,serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,monospace;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --paper:#16191C;--card:#1D2125;--ink:#E8EAEA;--mut:#99A1A8;--line:#2A2F34;--grid:#23282C;
+    --teal:#2FA091;--indigo:#9B7FE8;--copper:#C97F2E;--heatLo:29,41,40;--heatHi:92,213,196;}}
+  :root[data-theme="dark"]{--paper:#16191C;--card:#1D2125;--ink:#E8EAEA;--mut:#99A1A8;--line:#2A2F34;--grid:#23282C;--teal:#2FA091;--indigo:#9B7FE8;--copper:#C97F2E;--heatLo:29,41,40;--heatHi:92,213,196;}
+  :root[data-theme="light"]{--paper:#FBFBF9;--card:#FFFFFF;--ink:#1B1F23;--mut:#68707A;--line:#E7E5E0;--grid:#EEEDE9;--teal:#0D9488;--indigo:#6D4AC4;--copper:#B45309;--heatLo:230,244,241;--heatHi:11,93,84;}
+  *{box-sizing:border-box;margin:0}body{background:var(--paper);color:var(--ink);font:16px/1.62 var(--sans)}
+  main{max-width:900px;margin:0 auto;padding:44px 20px 80px}
+  .kicker{font-family:var(--mono);font-size:11.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--teal);font-weight:600}
+  h1{font-family:var(--serif);font-size:clamp(28px,5vw,42px);line-height:1.12;letter-spacing:-.015em;text-wrap:balance;font-weight:600;margin-top:10px}
+  .meta{display:flex;gap:14px;flex-wrap:wrap;margin-top:16px;color:var(--mut);font-family:var(--mono);font-size:12px}.meta b{color:var(--ink);font-weight:600}
+  nav{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--paper) 88%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);margin:30px -20px 0;padding:9px 20px;display:flex;gap:5px;overflow-x:auto}
+  nav a{color:var(--mut);text-decoration:none;font-size:12.5px;padding:5px 10px;border-radius:999px;white-space:nowrap}
+  nav a:hover,nav a:focus-visible{color:var(--ink);background:var(--card);outline:2px solid transparent}
+  section{margin-top:52px;scroll-margin-top:60px}
+  .fig{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--teal);font-weight:600}
+  h2{font-family:var(--serif);font-size:24px;font-weight:600;margin-top:5px;letter-spacing:-.005em;text-wrap:balance}
+  .what{color:var(--mut);font-size:14.5px;max-width:70ch;margin-top:7px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-top:16px}
+  .sub{color:var(--mut);font-size:13.5px}
+  .bars{display:grid;grid-template-columns:minmax(90px,auto) 1fr minmax(64px,auto);gap:6px 12px;align-items:center;margin-top:12px;font-variant-numeric:tabular-nums}
+  .rowlbl{font-family:var(--mono);font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .track{height:12px;background:color-mix(in srgb,var(--line) 55%,transparent);border-radius:4px;position:relative}
+  .fill{position:absolute;inset:0 auto 0 0;border-radius:4px;background:var(--teal);min-width:2px}.fill.neg{background:var(--copper)}
+  .val{font-family:var(--mono);font-size:12px;color:var(--mut);text-align:right}
+  .note{color:var(--mut);font-size:13px;margin-top:12px;max-width:72ch}.annot{color:var(--teal);font-weight:600}
+  svg{display:block;width:100%;height:auto;overflow:visible}svg text{font-family:var(--mono);fill:var(--mut)}
+  .gridline{stroke:var(--grid);stroke-width:1}
+  .heat{display:grid;gap:2px;margin-top:12px}.cell{aspect-ratio:1;border-radius:2px;min-width:0}.cell:hover{outline:2px solid var(--ink);outline-offset:-1px}
+  .ylab{font-family:var(--mono);font-size:10px;color:var(--mut);align-self:center;text-align:right;padding-right:5px}
+  .pill{display:inline-block;font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:999px;border:1px solid var(--line);color:var(--mut)}
+  .pill.warn{color:var(--copper);border-color:var(--copper)}.pill.ok{color:var(--teal);border-color:var(--teal)}
+  table{border-collapse:collapse;font-size:12.5px;margin-top:8px;font-variant-numeric:tabular-nums;width:100%}
+  th,td{text-align:right;padding:4px 9px;border-bottom:1px solid var(--line)}th:first-child,td:first-child{text-align:left}
+  th{color:var(--mut);font-weight:600;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.04em}.mono{font-family:var(--mono)}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mut);margin-top:10px}.lg{display:inline-flex;align-items:center;gap:6px}.sw{width:11px;height:11px;border-radius:3px}
+  #tip{position:fixed;z-index:20;pointer-events:none;background:var(--ink);color:var(--paper);font:12px/1.5 var(--mono);padding:6px 9px;border-radius:6px;opacity:0;transition:opacity .12s;max-width:320px}
+  footer{margin-top:64px;border-top:1px solid var(--line);padding-top:18px;color:var(--mut);font-size:13px;max-width:80ch}
+</style>
+<main>
+  <div class="kicker">Splice · Model Mind Lab · probes.py all --interactive</div>
+  <h1 id="headline"></h1>
+  <div class="meta" id="meta"></div>
+  <nav aria-label="Probes"><a href="#p1">1 · Decision geometry</a><a href="#p2">2 · Calibration</a>
+    <a href="#p3">3 · Concept transport</a><a href="#p4">4 · Localization</a></nav>
+
+  <section id="p1"><div class="fig">Probe 1 · Decision geometry</div>
+    <h2>Splice's instrument, pointed at the model</h2>
+    <p class="what">The battery Splice runs over its own action scorer, computed for the model's next-token
+    decision: per-token flip distance (embedding-space margin to the boundary) and which deletions flip the
+    answer. Hover the tokens.</p>
+    <div class="card"><div class="sub" id="g-sub"></div><div id="g-chips" class="legend" style="margin-top:10px"></div>
+      <div class="bars" id="g-bars"></div><p class="note" id="g-note"></p></div></section>
+
+  <section id="p2"><div class="fig">Probe 2 · Confidence vs fragility</div>
+    <h2>Is the model calibrated to its own fragility?</h2>
+    <p class="what">Each dot is a prompt: confidence (x) vs how many single-token deletions flip the answer (y).
+    A relationship would mean confidence tracks robustness. Hover any dot.</p>
+    <div class="card"><div class="sub" id="c-sub"></div><svg id="c-svg" viewBox="0 0 640 300" role="img" aria-label="confidence vs deletion flips"></svg>
+      <p class="note" id="c-note"></p></div></section>
+
+  <section id="p3"><div class="fig">Probe 3 · Concept transport</div>
+    <h2>Is a concept one direction, or twelve?</h2>
+    <p class="what">The concept vector built at every layer, then compared across layers (cosine). A band-diagonal
+    matrix means the direction rotates smoothly with depth. Hover any cell.</p>
+    <div class="card"><div class="sub" id="t-sub"></div><div style="overflow-x:auto"><div class="heat" id="t-heat"></div></div>
+      <p class="note" id="t-note"></p></div></section>
+
+  <section id="p4"><div class="fig">Probe 4 · Localization</div>
+    <h2>Where in the network the fact lives</h2>
+    <p class="what">Effective-neuron count (participation ratio) of the prediction at each layer — low = a handful
+    of neurons carry it, high = smeared across the layer. Plus the causally important attention heads.</p>
+    <div class="card"><div class="sub" id="l-sub"></div>
+      <svg id="l-svg" viewBox="0 0 640 240" role="img" aria-label="effective neurons by layer"></svg>
+      <p class="note" id="l-note"></p>
+      <div class="sub" style="margin-top:14px">most causal attention heads (knockout on the indirect-object task)</div>
+      <div class="bars" id="l-heads"></div>
+      <div class="legend"><span class="lg"><span class="sw" style="background:var(--teal)"></span>supports the answer</span>
+        <span class="lg"><span class="sw" style="background:var(--copper)"></span>opposes it</span></div></div></section>
+
+  <footer id="foot"></footer>
+</main>
+<div id="tip" role="status"></div>
+<script>
+const DATA = __DATA__, MODEL = "__MODEL__", ELAPSED = __ELAPSED__;
+const $ = (s)=>document.querySelector(s);
+const esc = (s)=>{const d=document.createElement("i");d.textContent=String(s);return d.innerHTML;};
+const tip = $("#tip");
+function showTip(e,t){tip.innerHTML=t;tip.style.opacity=1;const w=tip.offsetWidth;tip.style.left=Math.min(innerWidth-w-8,e.clientX+14)+"px";tip.style.top=(e.clientY+14)+"px";}
+function hideTip(){tip.style.opacity=0;}
+const css=(v)=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function heat(t){const lo=css("--heatLo").split(",").map(Number),hi=css("--heatHi").split(",").map(Number);t=Math.max(0,Math.min(1,t));const c=lo.map((l,i)=>Math.round(l+(hi[i]-l)*t));return `rgb(${c[0]},${c[1]},${c[2]})`;}
+
+$("#headline").textContent = `Probing how ${MODEL} decides`;
+$("#meta").innerHTML = `<span>model <b>${esc(MODEL)}</b></span><span>runtime <b>${ELAPSED.toFixed(1)}s, CPU</b></span><span>method <b>NOVEL.md</b></span><span>scope <b>local weights only</b></span>`;
+$("#foot").innerHTML = `<b>Honest scope.</b> Novel syntheses of standard ingredients on locally held weights (${esc(MODEL)}), not new interpretability primitives. Reproduce: <span class="mono">python3 probes.py all --interactive</span>.`;
+
+// Probe 1: geometry
+const G=DATA.geometry;
+$("#g-sub").innerHTML = `“${esc(G.prompt)}” → <b class="annot">${esc(G.predicted)}</b> over ${esc(G.runner_up)} · margin ${G.margin} · effective dimension ${G.effective_dimension} · ${G.robust_to_deletion?'<span class="pill ok">robust</span>':'<span class="pill warn">fragile</span>'}`;
+$("#g-chips").innerHTML = G.per_token.map(t=>{
+  const flips=t.deletion_flips, fd=t.flip_distance;
+  const bg = flips?`color-mix(in srgb,var(--copper) 55%,var(--card))`:heat(fd!=null?Math.max(0,1-Math.min(1,fd)):0.1);
+  return `<span class="pill" style="border-color:transparent;background:${bg}" title="flip distance ${fd}; ${flips?'deleting flips to '+esc(t.deletion_new_top):'deletion keeps the answer'}">${esc(t.token)}</span>`;}).join("");
+const withFd = G.per_token.filter(t=>t.flip_distance!=null).sort((a,b)=>a.flip_distance-b.flip_distance).slice(0,6);
+const fdHi = Math.max(...withFd.map(t=>t.flip_distance))||1;
+$("#g-bars").innerHTML = withFd.map(t=>`<span class="rowlbl">${esc(t.token)}</span>
+  <div class="track"><div class="fill ${t.deletion_flips?'neg':''}" style="width:${(t.flip_distance/fdHi*100).toFixed(1)}%"></div></div>
+  <span class="val">${t.flip_distance}</span>`).join("");
+$("#g-note").innerHTML = G.interpretation.map(esc).join(" ");
+
+// Probe 2: calibration scatter
+const C=DATA.calibrate, pts=C.points, maxF=Math.max(...pts.map(p=>p.deletion_flips),1), xMax=Math.max(...pts.map(p=>p.confidence),0.1)*1.05;
+$("#c-sub").innerHTML = `${C.prompts} prompts · confidence↔margin r = <b>${C.confidence_vs_margin_r}</b> · confidence↔flip-distance r = <b>${C.confidence_vs_flipdist_r}</b>`;
+function scatter(){const W=640,H=300,l=46,r=16,t=14,b=40;
+  const X=c=>l+(W-l-r)*c/xMax, Y=f=>H-b-(H-b-t)*f/maxF;let s="";
+  for(let f=0;f<=maxF;f+=Math.ceil(maxF/5)){s+=`<line class="gridline" x1="${l}" x2="${W-r}" y1="${Y(f)}" y2="${Y(f)}"/><text x="${l-6}" y="${Y(f)+3}" text-anchor="end">${f}</text>`;}
+  s+=`<text x="${l}" y="${H-8}">conf 0</text><text x="${W-r}" y="${H-8}" text-anchor="end">${xMax.toFixed(2)}</text>`;
+  s+=`<text x="14" y="${t+6}" transform="rotate(-90 14 ${H/2})" text-anchor="middle">deletion flips</text>`;
+  pts.forEach((p,i)=>{const jit=((i*53)%9-4)*1.1;
+    s+=`<circle cx="${X(p.confidence)}" cy="${Y(p.deletion_flips)+jit}" r="4" fill="var(--copper)" fill-opacity="0.55" data-t="${esc(p.prompt)} → ${esc(p.predicted)} · conf ${p.confidence} · ${p.deletion_flips} flips"></circle>`;});
+  return s;}
+function drawScatter(){$("#c-svg").innerHTML=scatter();
+  $("#c-svg").querySelectorAll("circle").forEach(c=>{c.onmousemove=(e)=>showTip(e,c.dataset.t);c.onmouseleave=hideTip;});}
+$("#c-note").innerHTML = C.interpretation.map(esc).join(" ");
+
+// Probe 3: transport alignment matrix
+const T=DATA.transport, AL=T.alignment, nL=AL.length;
+$("#t-sub").innerHTML = `concept <b class="annot">${esc(T.concept)}</b> · mean adjacent-layer cosine ${T.mean_adjacent_alignment} · promotes: ${esc((T.concept_tokens||[]).slice(0,5).join(", "))}`;
+const th=$("#t-heat");th.style.gridTemplateColumns=`30px repeat(${nL},minmax(15px,1fr))`;
+th.innerHTML=`<div></div>`+AL.map((_,j)=>`<div class="ylab" style="writing-mode:vertical-rl;transform:rotate(180deg);text-align:left">L${j}</div>`).join("")+
+  AL.map((row,i)=>`<div class="ylab">L${i}</div>`+row.map((v,j)=>`<div class="cell" data-i="${i}" data-j="${j}" style="background:${heat(Math.max(0,v))}"></div>`).join("")).join("");
+th.addEventListener("mousemove",e=>{const c=e.target.closest(".cell");if(!c)return hideTip();showTip(e,`cos(v_L${c.dataset.i}, v_L${c.dataset.j}) = ${AL[+c.dataset.i][+c.dataset.j]}`);});
+th.addEventListener("mouseleave",hideTip);
+$("#t-note").innerHTML = T.interpretation.map(esc).join(" ");
+
+// Probe 4: localization profile + heads
+const Lz=DATA.localization, eff=Lz.per_layer.map(p=>p.effective_neurons), nLz=eff.length, maxE=Math.max(...eff);
+$("#l-sub").innerHTML = `predicting <b class="annot">${esc(Lz.predicted)}</b> · ${Lz.n_neurons_per_layer} neurons/layer · most localized at layer ${Lz.most_localized_layer.layer} (${Lz.most_localized_layer.effective_neurons} effective)`;
+function locSvg(){const W=640,H=240,l=46,r=14,t=14,b=32;
+  const X=i=>l+(W-l-r)*i/(nLz-1),Y=v=>H-b-(H-b-t)*v/(maxE*1.05);let s="";
+  for(const g of [0,Math.round(maxE/2),Math.round(maxE)]) s+=`<line class="gridline" x1="${l}" x2="${W-r}" y1="${Y(g)}" y2="${Y(g)}"/><text x="${l-6}" y="${Y(g)+3}" text-anchor="end">${g}</text>`;
+  s+=`<polyline fill="none" stroke="var(--teal)" stroke-width="2.5" points="${eff.map((v,i)=>X(i)+","+Y(v)).join(" ")}"/>`;
+  eff.forEach((v,i)=>s+=`<circle cx="${X(i)}" cy="${Y(v)}" r="3.5" fill="var(--teal)" data-t="layer ${i}: ${v} effective neurons"></circle>`);
+  s+=`<text x="${l}" y="${H-8}">L0 (input)</text><text x="${W-r}" y="${H-8}" text-anchor="end">L${nLz-1} (output)</text>`;
+  s+=`<text x="14" y="${t+6}" transform="rotate(-90 14 ${H/2})" text-anchor="middle">effective neurons</text>`;return s;}
+function drawLoc(){$("#l-svg").innerHTML=locSvg();
+  $("#l-svg").querySelectorAll("circle").forEach(c=>{c.onmousemove=(e)=>showTip(e,c.dataset.t);c.onmouseleave=hideTip;});}
+const hHi=Math.max(...Lz.top_causal_heads.map(h=>Math.abs(h.importance)))||1;
+$("#l-heads").innerHTML=Lz.top_causal_heads.map(h=>`<span class="rowlbl">${h.head}</span>
+  <div class="track"><div class="fill ${h.importance<0?'neg':''}" style="width:${(Math.abs(h.importance)/hHi*100).toFixed(1)}%"></div></div>
+  <span class="val">${h.importance>=0?'+':''}${h.importance}</span>`).join("");
+$("#l-note").innerHTML = Lz.interpretation.map(esc).join(" ");
+
+function render(){drawScatter();drawLoc();
+  $("#t-heat").querySelectorAll(".cell").forEach(c=>c.style.background=heat(Math.max(0,AL[+c.dataset.i][+c.dataset.j])));
+  // g-chips + heat re-tint on theme change
+  $("#g-chips").innerHTML=$("#g-chips").innerHTML;}
+render();
+new MutationObserver(()=>{drawScatter();drawLoc();$("#t-heat").querySelectorAll(".cell").forEach(c=>c.style.background=heat(Math.max(0,AL[+c.dataset.i][+c.dataset.j])));
+  $("#g-chips").querySelectorAll(".pill").forEach((p,idx)=>{const t=G.per_token[idx];p.style.background=t.deletion_flips?`color-mix(in srgb,var(--copper) 55%,var(--card))`:heat(t.flip_distance!=null?Math.max(0,1-Math.min(1,t.flip_distance)):0.1);});
+}).observe(document.documentElement,{attributes:true,attributeFilter:["data-theme"]});
+</script>
+"""
+
+
+def render_probes_interactive(model_name: str, results: dict[str, Any], elapsed_s: float) -> str:
+    """One `probes.py all` run -> a self-contained, explorable HTML page."""
+    payload = json.dumps(results).replace("</", "<\\/")
+    return (PROBES_TEMPLATE
+            .replace("__DATA__", payload)
+            .replace("__MODEL__", model_name)
+            .replace("__ELAPSED__", f"{elapsed_s:.2f}"))
