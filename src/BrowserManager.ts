@@ -188,6 +188,15 @@ export class BrowserManager {
   public sessions!: SessionStore;
   /** Cryptographic bot identity for cooperative (Web Bot Auth) origins. */
   public webBotAuth!: WebBotAuth;
+  /**
+   * Web Bot Auth policy. Signing is OFF by default and scoped to an explicit
+   * origin allowlist — the agent only announces itself as a verified bot to
+   * origins the operator opted in, never blanket-signs every request. This is
+   * the honest-identification path, not stealth: it proves which bot we are.
+   */
+  private webBotAuthEnabled = false;
+  private webBotAuthOrigins: Set<string> = new Set();
+  private signedRequestCount = 0;
   /** Live fingerprint per branch — feeds get_stealth_profile and diagnostics. */
   private fingerprints: Map<string, StealthFingerprint> = new Map();
 
@@ -209,6 +218,16 @@ export class BrowserManager {
     this.recoveryMemory = new RecoveryMemory(this.spliceDir);
     this.sessions = new SessionStore(this.spliceDir);
     this.webBotAuth = new WebBotAuth(this.spliceDir);
+
+    // Web Bot Auth from env: enable signing and scope it to an origin
+    // allowlist. Both must be present to sign anything — enabling without
+    // origins signs nothing, by design.
+    const wbaEnabled = ['1', 'true'].includes((process.env.SPLICE_WEB_BOT_AUTH ?? '').trim().toLowerCase());
+    const wbaOrigins = (process.env.SPLICE_WEB_BOT_AUTH_ORIGINS ?? '')
+      .split(',').map((o) => o.trim().toLowerCase()).filter(Boolean);
+    if (wbaEnabled || wbaOrigins.length > 0) {
+      this.configureWebBotAuth({ enabled: wbaEnabled, origins: wbaOrigins });
+    }
 
     // Watch mode from config/env: launch with a visible Chromium window.
     if (process.env.SPLICE_WATCH_MODE === '1') this.headless = false;
@@ -506,12 +525,30 @@ export class BrowserManager {
       if (this.resourceBlocking) {
         const isAd = url.includes('adsense') || url.includes('doubleclick') || url.includes('analytics') || url.includes('tracker');
         const isMedia = ['image', 'media', 'font', 'video'].includes(type);
-        
+
         if (isAd || (isMedia && !url.includes('icon'))) {
           return route.abort();
         }
       }
-      
+
+      // 3. Web Bot Auth: for opted-in origins, attach RFC 9421 signed headers
+      // so the origin can verify which bot we are and grant access without a
+      // CAPTCHA. Honest identification, never impersonation; scoped to the
+      // allowlist, off unless the operator enabled it.
+      if (this.webBotAuthEnabled && this.webBotAuthOrigins.size > 0) {
+        try {
+          const host = new URL(request.url()).host.toLowerCase();
+          if (this.webBotAuthMatches(host)) {
+            const signed = this.webBotAuth.signRequest(request.url(), method);
+            this.signedRequestCount++;
+            if (this.signedRequestCount === 1 || this.signedRequestCount % 25 === 0) {
+              this.pushLiveFeed('web_bot_auth', `Signed request to ${host} (${this.signedRequestCount} total)`);
+            }
+            return route.continue({ headers: { ...request.headers(), ...signed } });
+          }
+        } catch { /* signing must never break a navigation */ }
+      }
+
       return route.continue();
     });
 
@@ -3446,8 +3483,77 @@ export class BrowserManager {
         keyId: this.webBotAuth.keyId(),
         signatureAgentUrl: this.webBotAuth.signatureAgentUrl,
         directory: this.webBotAuth.getDirectory(),
+        enabled: this.webBotAuthEnabled,
+        origins: [...this.webBotAuthOrigins],
+        signedRequests: this.signedRequestCount,
       },
     };
+  }
+
+  /** Host allowlist match: exact host or a parent-domain suffix (so
+   *  "example.com" also covers "www.example.com" and "api.example.com"). */
+  private webBotAuthMatches(host: string): boolean {
+    if (this.webBotAuthOrigins.has(host)) return true;
+    for (const allowed of this.webBotAuthOrigins) {
+      if (host === allowed || host.endsWith(`.${allowed}`)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Turn Web Bot Auth signing on/off, set the origin allowlist, and/or set the
+   * Signature-Agent directory URL — applied live to all existing branches (the
+   * route handlers read this state on every request, so nothing to re-install).
+   * Origins are normalized to bare hosts. Returns the resulting status.
+   */
+  configureWebBotAuth(opts: { enabled?: boolean; origins?: string[]; signatureAgentUrl?: string | null }) {
+    if (typeof opts.enabled === 'boolean') this.webBotAuthEnabled = opts.enabled;
+    if (opts.origins) {
+      this.webBotAuthOrigins = new Set(
+        opts.origins
+          .map((o) => {
+            const t = o.trim().toLowerCase();
+            if (!t) return '';
+            try { return new URL(t.includes('://') ? t : `https://${t}`).host; } catch { return t; }
+          })
+          .filter(Boolean)
+      );
+    }
+    if (opts.signatureAgentUrl !== undefined) this.webBotAuth.signatureAgentUrl = opts.signatureAgentUrl;
+    this.pushLiveFeed('web_bot_auth', `${this.webBotAuthEnabled ? 'enabled' : 'disabled'}; origins: ${[...this.webBotAuthOrigins].join(', ') || 'none'}`);
+    return this.getWebBotAuthStatus();
+  }
+
+  /**
+   * Full Web Bot Auth status: whether signing is live, which origins it covers,
+   * the public identity (keyId + directory), a live self-verification proving
+   * the signature round-trips, and the exact hosting instruction an operator
+   * follows so cooperating origins can verify the agent.
+   */
+  getWebBotAuthStatus() {
+    const selfTest = this.webBotAuth.selfTest(
+      this.webBotAuth.signatureAgentUrl || 'https://example.com/'
+    );
+    const dirUrl = this.webBotAuth.signatureAgentUrl;
+    return {
+      enabled: this.webBotAuthEnabled,
+      origins: [...this.webBotAuthOrigins],
+      signedRequests: this.signedRequestCount,
+      keyId: this.webBotAuth.keyId(),
+      signatureAgentUrl: dirUrl,
+      directory: this.webBotAuth.getDirectory(),
+      selfVerified: selfTest.verified,
+      sampleSignedHeaders: selfTest.signed,
+      hosting: dirUrl
+        ? `Publish the directory JSON (get_web_bot_auth → directory) at ${dirUrl} so cooperating origins can fetch and trust key ${this.webBotAuth.keyId().slice(0, 12)}…`
+        : 'Set a Signature-Agent directory URL (configure_web_bot_auth signatureAgentUrl) and host the directory JSON there; origins fetch it to verify the agent.',
+      scope: 'Honest bot identification via RFC 9421 signatures — proves which bot Splice is so cooperating origins can grant access without a CAPTCHA. Never impersonates a human; only signs the opted-in origin allowlist.',
+    };
+  }
+
+  /** Write the public JWK-Set directory to a file for the operator to host. */
+  publishWebBotAuthDirectory(filePath?: string): string {
+    return this.webBotAuth.writeDirectory(filePath || path.join(this.spliceDir, 'webbotauth-directory.json'));
   }
 
   /**

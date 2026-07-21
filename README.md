@@ -56,7 +56,7 @@ See [AGENT_INSTALL.md](AGENT_INSTALL.md) for the deterministic, machine-checkabl
 
 ## Tool Reference
 
-Splice exposes **67 MCP tools** over stdio, grouped below by what they're for. Full JSON schemas live in [src/index.ts](src/index.ts); this table is the map.
+Splice exposes **69 MCP tools** over stdio, grouped below by what they're for. Full JSON schemas live in [src/index.ts](src/index.ts); this table is the map.
 
 ### Navigate & Observe
 | Tool | What it does |
@@ -85,6 +85,7 @@ Splice exposes **67 MCP tools** over stdio, grouped below by what they're for. F
 | --- | --- |
 | `create_session` / `switch_session` / `list_sessions` / `save_session` / `destroy_session` | Isolated, named browser identities — separate cookies, storage, and fingerprint per account, saved logins restored automatically. |
 | `get_stealth_profile` | Returns the active fingerprint plus a Web Bot Auth (Ed25519) directory so cooperative sites can verify signed requests. |
+| `get_web_bot_auth` / `configure_web_bot_auth` | **The honest, CAPTCHA-free access path.** Sign outbound requests (RFC 9421 HTTP Message Signatures, Ed25519) for an operator-set origin allowlist, so cooperating sites can verify *which* bot is calling and grant access without a challenge — identification, not evasion. Enable/scope it, publish the JWK-Set directory, and self-verify the signature round-trips. Off by default. |
 | `save_snapshot` / `load_snapshot` | Serialize or restore full session state (cookies, auth) instantly. |
 | `fork_state` / `speculative_fork` / `commit_branch` | Clone browser state into background branches for shadow-testing risky actions or pre-loading URLs. |
 
@@ -193,10 +194,10 @@ Want to ask these questions of a **real model's internals**? [`lab/`](lab/) is t
 npm install
 npm run build
 npm start           # starts the MCP server (stdio)
-npm test            # 49-step local validation against a synthetic web app
+npm test            # 50-step local validation against a synthetic web app
 npm run test:regression     # known failure patterns: menus, validation, overlays, a11y
 npm run test:introspection  # browser-free unit tests for the introspection stack
-npm run test:all            # everything: 17 + 49 + 29 = 95 checks
+npm run test:all            # everything: 17 + 50 + 29 = 96 checks
 ```
 
 ### CLI commands
@@ -291,6 +292,7 @@ Splice is designed for autonomous agents operating in real browser environments:
 - **Output safety** — non-GET requests are inspected for secret patterns and blocked if unsafe; `scan_local_secrets` checks the local workspace too.
 - **Session isolation** — each named session gets its own cookies, storage, and stable fingerprint, never shared across accounts.
 - **Recovery transparency** — every crash, recovery, and coordination conflict is logged to the Run Journal and exportable for audit.
+- **Honest access, not evasion** — Splice deliberately ships no CAPTCHA-solver or proxy-rotation stack. When a page challenges the agent it *detects* the block and hands off to a human (`request_human_intervention`); for sites that support it, **Web Bot Auth** (`configure_web_bot_auth`) proves the agent's identity with signed requests so access can be granted without a CAPTCHA. The goal is verifiable identification, never defeating bot-detection.
 
 > Splice is not a sandbox replacement. It is a browser cognition and safety layer that helps agents act with evidence and accountability.
 

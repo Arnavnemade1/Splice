@@ -133,8 +133,10 @@ function fixtureHtml(): string {
 </html>`;
 }
 
-function startFixtureServer(): Promise<{ url: string; close: () => Promise<void> }> {
+function startFixtureServer(): Promise<{ url: string; close: () => Promise<void>; requests: Array<{ method: string; url: string; headers: Record<string, string | string[] | undefined> }> }> {
+  const requests: Array<{ method: string; url: string; headers: Record<string, string | string[] | undefined> }> = [];
   const server = http.createServer((req, res) => {
+    requests.push({ method: req.method || 'GET', url: `http://${req.headers.host}${req.url || '/'}`, headers: req.headers });
     const requestUrl = new URL(req.url || '/', 'http://127.0.0.1');
     if (requestUrl.pathname === '/collect' && req.method === 'POST') {
       res.writeHead(204).end();
@@ -162,6 +164,7 @@ function startFixtureServer(): Promise<{ url: string; close: () => Promise<void>
       resolve({
         url: `http://127.0.0.1:${address.port}`,
         close: () => new Promise<void>((done) => server.close(() => done())),
+        requests,
       });
     });
   });
@@ -970,6 +973,42 @@ async function main() {
       await browser.destroySession('probe', { purge: true });
       browser.activeBranch = 'main';
       return `fingerprint=${profile.fingerprint.platform}; kid=${profile.webBotAuth.keyId.slice(0, 12)}…`;
+    });
+
+    await step('Web Bot Auth signs outbound requests and they verify', async () => {
+      const host = new URL(fixture.url).host; // 127.0.0.1:PORT
+      const dirUrl = `${fixture.url}/.well-known/http-message-signatures-directory`;
+      const status = browser.configureWebBotAuth({ enabled: true, origins: [host], signatureAgentUrl: dirUrl });
+      if (!status.enabled || !status.origins.includes(host)) throw new Error('Web Bot Auth did not enable for the fixture origin');
+      if (!status.selfVerified) throw new Error('Self-verification failed before any request');
+
+      const before = fixture.requests.length;
+      await browser.navigate(`${fixture.url}/webbotauth-probe`);
+
+      // Find a captured request that actually carried the signature headers.
+      const signed = fixture.requests.slice(before).find((r) => r.headers['signature-input'] && r.headers['signature']);
+      if (!signed) throw new Error('No outbound request carried Web Bot Auth signature headers');
+      const headers = {
+        'signature-input': String(signed.headers['signature-input']),
+        signature: String(signed.headers['signature']),
+        'signature-agent': signed.headers['signature-agent'] ? String(signed.headers['signature-agent']) : undefined,
+      };
+      if (!headers['signature-agent'] || !headers['signature-agent'].includes(dirUrl)) {
+        throw new Error('Signature-Agent header missing or wrong directory URL');
+      }
+      // The origin's own verification: reconstruct and check the Ed25519 signature.
+      if (!browser.webBotAuth.verify(signed.url, signed.method, headers)) {
+        throw new Error('Signature did not verify against the published key');
+      }
+      // Tamper check: a different method must fail verification.
+      if (browser.webBotAuth.verify(signed.url, 'DELETE', headers)) {
+        throw new Error('Verification passed on a tampered method — signature not binding');
+      }
+
+      // Teardown: signing off + allowlist cleared so later steps are unaffected.
+      const off = browser.configureWebBotAuth({ enabled: false, origins: [], signatureAgentUrl: null });
+      if (off.enabled) throw new Error('Web Bot Auth did not disable');
+      return `signed + verified request to ${host}; Signature-Agent published; tamper rejected`;
     });
 
     await step('Agent tracker profiles per-agent performance', async () => {

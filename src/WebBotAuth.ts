@@ -96,6 +96,27 @@ export class WebBotAuth {
     return { keys: [this.getPublicJwk()] };
   }
 
+  /**
+   * Write the public directory (JWK Set) to a file the operator can host at
+   * the Signature-Agent URL so cooperating origins can fetch and trust the
+   * key. Public material only — never the private key. Returns the path.
+   */
+  writeDirectory(filePath: string): string {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, JSON.stringify(this.getDirectory(), null, 2), { mode: 0o644 });
+    return filePath;
+  }
+
+  /**
+   * Prove the identity round-trips: sign a sample request and verify it with
+   * this same key. A verifying origin performs the mirror of this check, so a
+   * passing self-test means a correctly-configured origin will accept us.
+   */
+  selfTest(sampleUrl = 'https://example.com/'): { signed: SignedHeaders; verified: boolean } {
+    const signed = this.signRequest(sampleUrl, 'GET');
+    return { signed, verified: this.verify(sampleUrl, 'GET', signed) };
+  }
+
   /** RFC 7638 JWK thumbprint (SHA-256, base64url) — stable key identifier. */
   keyId(): string {
     if (this.cachedKid) return this.cachedKid;

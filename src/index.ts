@@ -636,6 +636,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: { type: "object", properties: {} },
       },
       {
+        name: "get_web_bot_auth",
+        description: "Web Bot Auth status — the honest, CAPTCHA-free access path. Web Bot Auth (IETF draft) has the agent SIGN outbound requests with an Ed25519 key using RFC 9421 HTTP Message Signatures; a cooperating origin that trusts the published key can verify the signature and grant access WITHOUT a CAPTCHA, because it can now prove *which* bot is calling. This is identification, not evasion: Splice never impersonates a human, and only signs origins the operator explicitly allowlisted. Returns whether signing is live, the covered origins, the public identity (keyId + JWK-Set directory), a live self-verification proving the signature round-trips, a sample signed header set, and the exact hosting instruction. Use configure_web_bot_auth to enable it and set the allowlist.",
+        annotations: { title: "Web Bot Auth Status", readOnlyHint: true },
+        inputSchema: { type: "object", properties: {} },
+      },
+      {
+        name: "configure_web_bot_auth",
+        description: "Enable/disable Web Bot Auth request signing and scope it. Signing is OFF by default and covers only the origin allowlist you set here — Splice signs a request only when its host matches (exact or parent-domain suffix, so \"example.com\" also covers \"api.example.com\"). Set signatureAgentUrl to the URL where you host the public directory (get_web_bot_auth → directory); cooperating origins fetch it there to verify the agent. Applied live to all branches. This replaces CAPTCHA-solving/proxy evasion with a standards-based, verifiable bot identity for sites that support it.",
+        annotations: { title: "Configure Web Bot Auth" },
+        inputSchema: {
+          type: "object",
+          properties: {
+            enabled: { type: "boolean", description: "Turn request signing on or off." },
+            origins: { type: "array", items: { type: "string" }, description: "Origin allowlist (hosts or URLs) whose requests get signed. Replaces the current list." },
+            signatureAgentUrl: { type: "string", description: "URL where the public JWK-Set directory is hosted (published in the Signature-Agent header). Pass empty string to clear." },
+            publishDirectory: { type: "boolean", description: "Also write the public directory JSON to .splice/webbotauth-directory.json for hosting." },
+          },
+        },
+      },
+      {
         name: "save_snapshot",
         description: "Serialize the active session (cookies, auth) to the local machine so it can be resumed instantly.",
         inputSchema: {
@@ -1274,6 +1294,22 @@ async function dispatchTool(request: { params: { name: string; arguments?: Recor
 
     if (request.params.name === "get_stealth_profile") {
       return { content: [{ type: "text", text: JSON.stringify(browser.getStealthProfile(), null, 2) }] };
+    }
+
+    if (request.params.name === "get_web_bot_auth") {
+      return { content: [{ type: "text", text: JSON.stringify(browser.getWebBotAuthStatus(), null, 2) }] };
+    }
+
+    if (request.params.name === "configure_web_bot_auth") {
+      const { enabled, origins, signatureAgentUrl, publishDirectory } = (request.params.arguments as any) || {};
+      const status = browser.configureWebBotAuth({
+        ...(typeof enabled === 'boolean' ? { enabled } : {}),
+        ...(Array.isArray(origins) ? { origins: origins.filter((o: unknown): o is string => typeof o === 'string') } : {}),
+        ...(typeof signatureAgentUrl === 'string' ? { signatureAgentUrl: signatureAgentUrl || null } : {}),
+      });
+      let published: string | undefined;
+      if (publishDirectory === true) published = browser.publishWebBotAuthDirectory();
+      return { content: [{ type: "text", text: JSON.stringify({ ...status, ...(published ? { directoryWrittenTo: published } : {}) }, null, 2) }] };
     }
 
     if (request.params.name === "save_snapshot") {

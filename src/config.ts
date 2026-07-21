@@ -50,6 +50,12 @@ export interface SpliceConfigValues {
    * plan.intentOptimization with the original preserved.
    */
   promptOptimization: boolean;
+  /** Enable Web Bot Auth request signing (RFC 9421) for the opted-in origins. */
+  webBotAuth: boolean;
+  /** Signature-Agent directory URL where the public JWK Set is hosted. */
+  webBotAuthDirectory?: string;
+  /** Comma-separated origin allowlist that Web Bot Auth signatures cover. */
+  webBotAuthOrigins?: string;
 }
 
 export type ConfigSource = 'default' | 'file' | 'env';
@@ -78,6 +84,9 @@ export const CONFIG_KEYS: Record<keyof SpliceConfigValues, KeySpec> = {
   visionByDefault: { env: 'SPLICE_VISION_BY_DEFAULT', kind: 'boolean', default: true },
   visionBudget: { env: 'SPLICE_VISION_BUDGET', kind: 'number', default: 20 },
   promptOptimization: { env: 'SPLICE_PROMPT_OPTIMIZATION', kind: 'boolean', default: false },
+  webBotAuth: { env: 'SPLICE_WEB_BOT_AUTH', kind: 'boolean', default: false },
+  webBotAuthDirectory: { env: 'SPLICE_WEB_BOT_AUTH_DIRECTORY', kind: 'string', default: undefined },
+  webBotAuthOrigins: { env: 'SPLICE_WEB_BOT_AUTH_ORIGINS', kind: 'string', default: undefined },
 };
 
 /** Locate the active config file, if any. */
