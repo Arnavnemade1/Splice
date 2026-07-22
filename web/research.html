@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Research — Splice</title>
+  <meta name="description" content="The Model Mind Lab: interpretability experiments run from scratch on real open-weights models. Watch a model think — saliency, the logit lens, activation patching, concept injection, neuron ablation, attention knockout, and multi-hop reasoning — plus what changes with scale.">
+  <link rel="icon" type="image/svg+xml" href="../assets/logo-mark.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    /* Research page — inherits the cinematic-dark system; adds data-viz on the same palette. */
+    :root {
+      --s-teal: var(--accent);       /* #67e8c3 */
+      --s-sky: var(--accent-2);      /* #7dd3fc */
+      --s-amber: #f4b06a;            /* warm counter-accent — fragility / opposition */
+      --s-violet: #b3a4f0;
+      --heat-0: rgba(103, 232, 195, 0.045);
+      --heat-1: rgba(103, 232, 195, 0.92);
+    }
+    .rlede { max-width: 60ch; }
+
+    /* Models lineup */
+    .models-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 40px 56px; margin-top: 26px; }
+    @media (max-width: 760px) { .models-grid { grid-template-columns: 1fr; gap: 32px; } }
+    .fam-label { font-family: var(--mono); font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--ink-3); margin-bottom: 16px; display: flex; justify-content: space-between; }
+    .modelrow { display: grid; grid-template-columns: 108px 1fr 52px; align-items: center; gap: 14px;
+      padding: 9px 0; border-top: 1px solid var(--line); }
+    .modelrow:first-of-type { border-top: 0; }
+    .modelrow .mname { font-family: var(--mono); font-size: 13px; color: var(--ink); }
+    .modelrow .mbar { height: 6px; border-radius: 99px; background: var(--panel-2); overflow: hidden; }
+    .modelrow .mbar > i { display: block; height: 100%; border-radius: 99px;
+      background: linear-gradient(90deg, var(--s-sky), var(--s-teal)); }
+    .modelrow .mval { font-family: var(--mono); font-size: 12px; color: var(--ink-2); text-align: right;
+      font-variant-numeric: tabular-nums; }
+
+    /* Tabbed gallery */
+    .lab { margin-top: 26px; border: 1px solid var(--line); border-radius: var(--radius);
+      background: rgba(255,255,255,0.015); overflow: hidden; }
+    .tabs { display: flex; gap: 2px; overflow-x: auto; padding: 8px; border-bottom: 1px solid var(--line);
+      scrollbar-width: none; }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tab { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 9px;
+      border: 0; background: transparent; color: var(--ink-2); font: 500 13px var(--font); cursor: pointer;
+      white-space: nowrap; transition: background 0.2s, color 0.2s; }
+    .tab:hover { color: #fff; }
+    .tab[aria-selected="true"] { background: var(--panel-2); color: #fff; }
+    .tab .tnum { font-family: var(--mono); font-size: 11px; color: var(--accent); }
+    .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .figstage { padding: 26px 26px 30px; }
+    @media (max-width: 560px) { .figstage { padding: 20px 16px 24px; } }
+    .figtitle { font-size: 19px; font-weight: 600; letter-spacing: -0.015em; color: #fff; }
+    .figwhat { color: var(--ink-2); font-size: 14px; margin-top: 6px; max-width: 68ch; line-height: 1.55; }
+    .fignote { color: var(--ink-3); font-size: 12.5px; margin-top: 16px; max-width: 74ch; line-height: 1.5;
+      border-top: 1px solid var(--line); padding-top: 12px; }
+    .figbody { margin-top: 18px; }
+
+    /* shared viz atoms */
+    .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+    .chip { font-family: var(--mono); font-size: 13px; padding: 5px 8px; border-radius: 7px;
+      border: 1px solid var(--line); white-space: pre; color: var(--ink); }
+    .pred-chip { color: #05221b; background: var(--s-teal); border-color: var(--s-teal); font-weight: 600; }
+    .bars { display: grid; grid-template-columns: minmax(84px,auto) 1fr minmax(58px,auto); gap: 7px 14px;
+      align-items: center; margin-top: 16px; font-variant-numeric: tabular-nums; }
+    .rowlbl { font-family: var(--mono); font-size: 12.5px; color: var(--ink); overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; }
+    .track { height: 11px; background: var(--panel-2); border-radius: 4px; position: relative; }
+    .fill { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--s-teal); min-width: 2px; }
+    .fill.amber { background: var(--s-amber); } .fill.sky { background: var(--s-sky); }
+    .val { font-family: var(--mono); font-size: 12px; color: var(--ink-2); text-align: right; }
+    .vlegend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; color: var(--ink-2); margin-top: 14px; }
+    .lg { display: inline-flex; align-items: center; gap: 7px; }
+    .sw { width: 11px; height: 11px; border-radius: 3px; }
+    .subline { color: var(--ink-2); font-size: 13.5px; line-height: 1.5; }
+    .tag { display: inline-block; font-family: var(--mono); font-size: 11px; padding: 2px 8px; border-radius: 999px;
+      border: 1px solid var(--line); color: var(--ink-2); }
+    .tag.ok { color: var(--s-teal); border-color: rgba(103,232,195,0.4); }
+    .tag.warn { color: var(--s-amber); border-color: rgba(244,176,106,0.4); }
+    svg { display: block; width: 100%; height: auto; overflow: visible; }
+    svg text { font-family: var(--mono); fill: var(--ink-3); }
+    .gl { stroke: var(--line); stroke-width: 1; }
+
+    /* heatmaps */
+    .heat { display: grid; gap: 2px; margin-top: 16px; }
+    .cell { aspect-ratio: 1; border-radius: 2px; min-width: 0; }
+    .cell:hover { outline: 1.5px solid #fff; outline-offset: -1px; }
+    .xlab { font-family: var(--mono); font-size: 9px; color: var(--ink-3); writing-mode: vertical-rl;
+      transform: rotate(180deg); justify-self: center; max-height: 70px; overflow: hidden; }
+    .ylab { font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); align-self: center;
+      text-align: right; padding-right: 4px; }
+    canvas { width: 100%; max-width: 340px; border-radius: 8px; image-rendering: pixelated;
+      border: 1px solid var(--line); }
+    .duo { display: grid; gap: 22px; grid-template-columns: 1fr; }
+    @media (min-width: 640px) { .duo { grid-template-columns: 1fr 1fr; } }
+
+    /* steering stepper */
+    .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+    .seg button { font: 600 12.5px var(--font); padding: 7px 13px; border: 0; background: transparent;
+      color: var(--ink-2); cursor: pointer; }
+    .seg button[aria-pressed="true"] { background: var(--s-teal); color: #05221b; }
+    .steer-quote { font-size: 16px; line-height: 1.7; margin-top: 16px; min-height: 4.6em; color: var(--ink);
+      max-width: 66ch; } .steer-quote .lead { color: var(--ink-3); }
+    .gauge { height: 12px; border-radius: 99px; background: var(--panel-2); overflow: hidden; margin-top: 8px; }
+    .gauge > i { display: block; height: 100%; border-radius: 99px;
+      background: linear-gradient(90deg, var(--s-teal), var(--s-sky)); }
+
+    /* findings */
+    .findings { display: grid; gap: 30px; margin-top: 26px; }
+    .finding { border: 1px solid var(--line); border-radius: var(--radius); padding: 26px;
+      background: rgba(255,255,255,0.015); }
+    .finding h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.015em; color: #fff; }
+    .finding .lead-in { color: var(--ink-2); font-size: 14.5px; margin-top: 8px; max-width: 70ch; line-height: 1.55; }
+    .fam-toggle { margin: 18px 0 4px; }
+    .findtable { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 14px;
+      font-variant-numeric: tabular-nums; }
+    .findtable th, .findtable td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+    .findtable th:first-child, .findtable td:first-child { text-align: left; }
+    .findtable th { color: var(--ink-3); font-family: var(--mono); font-size: 10px; text-transform: uppercase;
+      letter-spacing: 0.05em; font-weight: 600; }
+    .findtable .up { color: var(--s-teal); } .findtable .flat { color: var(--s-amber); }
+    .keyline { border-left: 2px solid var(--s-amber); padding: 4px 0 4px 16px; margin-top: 16px;
+      color: var(--ink); font-size: 14.5px; max-width: 64ch; }
+
+    /* caveats + reproduce */
+    .caveat-panel { border: 1px dashed var(--line); border-radius: var(--radius); padding: 24px 26px;
+      background: rgba(255,255,255,0.012); }
+    .caveat-panel ul { margin: 12px 0 0; padding-left: 20px; }
+    .caveat-panel li { margin: 8px 0; color: var(--ink-2); font-size: 14px; line-height: 1.55; }
+    .caveat-panel li b { color: var(--ink); }
+    .repro { position: relative; margin-top: 20px; font-family: var(--mono); font-size: 12.5px; line-height: 1.85;
+      color: var(--code-ink); background: rgba(255,255,255,0.022); border: 1px solid var(--line);
+      border-left: 2px solid rgba(103,232,195,0.45); border-radius: 0 10px 10px 0; padding: 18px 20px; overflow-x: auto; }
+    .repro .cmt { color: var(--ink-3); }
+    .repro .copy-btn { position: absolute; top: 10px; right: 10px; font: 500 11px var(--font);
+      color: var(--ink-2); background: var(--panel-2); border: 1px solid var(--line); border-radius: 7px;
+      padding: 4px 10px; cursor: pointer; }
+    .repro .copy-btn:hover { color: #fff; } .repro .copy-btn.copied { color: var(--s-teal); }
+
+    #rtip { position: fixed; z-index: 40; pointer-events: none; background: #0c0f18; color: var(--ink);
+      border: 1px solid var(--line-2); font: 12px/1.5 var(--mono); padding: 6px 9px; border-radius: 8px;
+      opacity: 0; transition: opacity 0.12s; max-width: 320px; box-shadow: 0 8px 30px rgba(0,0,0,0.5); }
+  </style>
+</head>
+<body>
+
+  <nav class="nav">
+    <div class="nav-inner">
+      <a href="index.html" class="brand" aria-label="Splice home">
+        <svg width="22" height="22" viewBox="0 0 120 120" fill="none" aria-hidden="true">
+          <path d="M 22 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 98 90" stroke="currentColor" stroke-width="13" stroke-linecap="round"/>
+          <path d="M 98 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 22 90" stroke="currentColor" stroke-width="13" stroke-linecap="round" opacity="0.45"/>
+        </svg>
+        <span>Splice</span>
+      </a>
+      <div class="nav-links">
+        <a href="features.html">Features</a>
+        <a href="how.html">How it works</a>
+        <a href="research.html" aria-current="page">Research</a>
+        <a href="agents.html">For agents</a>
+        <a href="https://github.com/Arnavnemade1/Splice" target="_blank" rel="noopener">GitHub</a>
+      </div>
+      <a href="start.html" class="btn btn-primary btn-sm">Get started</a>
+    </div>
+  </nav>
+
+  <main>
+    <header class="pagehead">
+      <div class="media" aria-hidden="true">
+        <video autoplay muted loop playsinline preload="auto"
+          poster="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='9'%3E%3Crect width='16' height='9' fill='%2305070d'/%3E%3C/svg%3E">
+          <source src="https://videos.pexels.com/video-files/852435/852435-hd_1920_1080_30fps.mp4" type="video/mp4">
+        </video>
+        <div class="media-scrim"></div>
+      </div>
+      <div class="container">
+        <p class="pill"><span class="pill-dot"></span>The Model Mind Lab</p>
+        <h1>Watching models think.</h1>
+        <p class="lede rlede">Interpretability experiments run from scratch on real open weights — every number computed from the model itself, on a CPU, no API keys.</p>
+      </div>
+    </header>
+
+    <!-- Intro + honest scope -->
+    <section class="section-tight">
+      <div class="container">
+        <div class="section-head" data-reveal>
+          <span class="kicker">Why this exists</span>
+          <p class="section-lede" style="max-width:660px">Splice's introspection layer maps the agent's own decisions. The lab asks the same questions — <em>which inputs matter, where a fact lives, when a decision forms, how a thought unfolds</em> — of a real transformer whose weights you hold. Eight experiments, four Splice-bridge probes, and what each one does as models scale.</p>
+        </div>
+        <div class="stats" data-reveal style="margin-top:34px">
+          <div class="stat"><strong>8</strong><span>interpretability experiments</span></div>
+          <div class="stat"><strong>8</strong><span>models, 70M → 1B</span></div>
+          <div class="stat"><strong>0</strong><span>API calls — local weights</span></div>
+          <div class="stat"><strong>2</strong><span>architectures replicated</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Models studied -->
+    <section class="section-tight">
+      <div class="container">
+        <div class="section-head" data-reveal>
+          <span class="kicker">The subjects</span>
+          <h2 style="font-size:clamp(24px,3vw,32px)">Models studied</h2>
+          <p class="section-lede">Two deliberate scale ladders — the GPT-2 family and EleutherAI's Pythia suite — so a finding can be checked across size <em>and</em> across architecture.</p>
+        </div>
+        <div class="models-grid" id="models" data-reveal></div>
+      </div>
+    </section>
+
+    <!-- The lab -->
+    <section class="section">
+      <div class="container">
+        <div class="section-head" data-reveal>
+          <span class="kicker">Watch it think · gpt2-large</span>
+          <h2>Eight ways to look inside</h2>
+          <p class="section-lede">Each tab is a real experiment on the same model. Numbers are live from the weights; hover, drag, and step through them.</p>
+        </div>
+        <div class="lab" data-reveal>
+          <div class="tabs" id="tabs" role="tablist" aria-label="Experiments"></div>
+          <div class="figstage">
+            <div class="figtitle" id="figtitle"></div>
+            <div class="figwhat" id="figwhat"></div>
+            <div class="figbody" id="figbody"></div>
+            <div class="fignote" id="fignote"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Findings -->
+    <section class="section" style="padding-top:0">
+      <div class="container">
+        <div class="section-head" data-reveal>
+          <span class="kicker">What changes with scale</span>
+          <h2>Three findings</h2>
+          <p class="section-lede">The lab's headline results — each measured across a real scale ladder, each stated with its caveats.</p>
+        </div>
+        <div class="findings" id="findings" data-reveal></div>
+      </div>
+    </section>
+
+    <!-- Caveats + reproduce -->
+    <section class="section" style="padding-top:0">
+      <div class="container">
+        <div class="section-head" data-reveal>
+          <span class="kicker">Read before believing</span>
+          <h2 style="font-size:clamp(24px,3vw,32px)">Honest scope</h2>
+        </div>
+        <div class="caveat-panel" data-reveal>
+          <ul>
+            <li><b>CPU-scale.</b> Models up to 1B parameters, ~40 prompts per study. These are probes and replications, not frontier claims — the value is that every run is trivially checkable.</li>
+            <li><b>Local weights only.</b> Nothing here probes a hosted or frontier model's internals. Splice-the-server still makes no claim about the calling model's activations; the lab studies weights you hold.</li>
+            <li><b>Novel syntheses, not novel primitives.</b> Every experiment is built from standard ingredients — gradients, ablations, the logit lens. The contribution is the packaging and the cross-scale, cross-architecture measurement.</li>
+            <li><b>The internal trace is richer than the output.</b> A small model can compute an intermediate step it never says out loud — which is the whole reason to look inside.</li>
+          </ul>
+          <div class="repro" data-copy>
+            <button class="copy-btn">Copy</button>
+<code><span class="cmt"># from the repo — every figure on this page, reproducible</span>
+cd lab
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+python3 mindlab.py report --interactive --model gpt2-large
+python3 probes.py all --interactive
+python3 scaling.py --study calibration --models distilgpt2,gpt2,gpt2-medium,gpt2-large</code>
+          </div>
+          <p class="subline" style="margin-top:16px">Full method &amp; sources in <code class="inline">lab/RESEARCH.md</code> and <code class="inline">lab/NOVEL.md</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="section" style="padding-top:0">
+      <div class="container">
+        <div class="callout" data-reveal>
+          <h2>See the agent's mind, too.</h2>
+          <p class="section-lede" style="margin:14px auto 30px">The same instrument, pointed at your agent's own decisions.</p>
+          <div class="hero-actions" style="margin-top:0">
+            <a href="features.html" class="btn btn-primary">Explore features</a>
+            <a href="https://github.com/Arnavnemade1/Splice/tree/main/lab" target="_blank" rel="noopener" class="btn btn-glass"><span class="btn-arrow">The lab on GitHub</span></a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <a href="index.html" class="brand" aria-label="Splice home">
+        <svg width="18" height="18" viewBox="0 0 120 120" fill="none" aria-hidden="true">
+          <path d="M 22 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 98 90" stroke="currentColor" stroke-width="13" stroke-linecap="round"/>
+          <path d="M 98 30 C 60 30, 60 60, 60 60 C 60 60, 60 90, 22 90" stroke="currentColor" stroke-width="13" stroke-linecap="round" opacity="0.45"/>
+        </svg>
+        <span>Splice</span>
+      </a>
+      <div class="footer-links">
+        <a href="features.html">Features</a>
+        <a href="how.html">How it works</a>
+        <a href="research.html">Research</a>
+        <a href="agents.html">For agents</a>
+        <a href="https://github.com/Arnavnemade1/Splice" target="_blank" rel="noopener">GitHub</a>
+      </div>
+      <p class="footer-copy">Browser cognition for autonomous agents · MIT licensed.</p>
+    </div>
+  </footer>
+
+  <div id="rtip" role="status"></div>
+  <script type="application/json" id="rdata">{"mlab":{"model":"gpt2-large","jacobian":{"tokens":["The"," E","iff","el"," Tower"," is"," located"," in"," the"," city"," of"],"saliency":[1.0779,0.8347,1.3916,0.6972,1.0366,0.5108,1.1879,0.4135,0.3493,1.1398,0.35],"input_x_grad":[0.0371,-0.0359,-0.1079,-0.1163,-0.1334,-0.1252,0.0047,-0.0498,-0.0161,0.0338,0.0513],"predicted":" Paris","predicted_prob":0.5968},"lens":{"answer":" Paris","crystallized_at":26,"layers":[{"layer":0,"answer_prob":0.0},{"layer":1,"answer_prob":0.0},{"layer":2,"answer_prob":0.0001},{"layer":3,"answer_prob":0.0001},{"layer":4,"answer_prob":0.0002},{"layer":5,"answer_prob":0.0002},{"layer":6,"answer_prob":0.0002},{"layer":7,"answer_prob":0.0003},{"layer":8,"answer_prob":0.0003},{"layer":9,"answer_prob":0.0004},{"layer":10,"answer_prob":0.0003},{"layer":11,"answer_prob":0.0005},{"layer":12,"answer_prob":0.0007},{"layer":13,"answer_prob":0.0006},{"layer":14,"answer_prob":0.001},{"layer":15,"answer_prob":0.001},{"layer":16,"answer_prob":0.0018},{"layer":17,"answer_prob":0.0015},{"layer":18,"answer_prob":0.0018},{"layer":19,"answer_prob":0.0013},{"layer":20,"answer_prob":0.0035},{"layer":21,"answer_prob":0.0081},{"layer":22,"answer_prob":0.0311},{"layer":23,"answer_prob":0.0517},{"layer":24,"answer_prob":0.074},{"layer":25,"answer_prob":0.1367},{"layer":26,"answer_prob":0.7006},{"layer":27,"answer_prob":0.9439},{"layer":28,"answer_prob":0.9732},{"layer":29,"answer_prob":0.9894},{"layer":30,"answer_prob":0.9905},{"layer":31,"answer_prob":0.9975},{"layer":32,"answer_prob":0.9982},{"layer":33,"answer_prob":0.9973},{"layer":34,"answer_prob":0.9671},{"layer":35,"answer_prob":0.7899},{"layer":36,"answer_prob":0.5968}],"top":[[{"token":" of","prob":1.0},{"token":" Of","prob":0.0},{"token":" in","prob":0.0}],[{"token":" the","prob":0.14},{"token":" exit","prob":0.0349},{"token":" Pittsburgh","prob":0.0222}],[{"token":" the","prob":0.0434},{"token":" all","prob":0.0122},{"token":" \"","prob":0.0085}],[{"token":" the","prob":0.0277},{"token":" a","prob":0.007},{"token":" all","prob":0.0061}],[{"token":" the","prob":0.022},{"token":" a","prob":0.0062},{"token":" \"","prob":0.005}],[{"token":" the","prob":0.0208},{"token":" course","prob":0.0054},{"token":" a","prob":0.0053}],[{"token":" the","prob":0.0201},{"token":" course","prob":0.0076},{"token":" a","prob":0.005}],[{"token":" the","prob":0.0209},{"token":" course","prob":0.0128},{"token":" San","prob":0.0073}],[{"token":" the","prob":0.0174},{"token":" course","prob":0.0114},{"token":" North","prob":0.0102}],[{"token":" West","prob":0.0149},{"token":" San","prob":0.0143},{"token":" North","prob":0.0116}],[{"token":" San","prob":0.0302},{"token":" King","prob":0.0171},{"token":" West","prob":0.0131}],[{"token":" San","prob":0.0542},{"token":" King","prob":0.0172},{"token":" the","prob":0.0133}],[{"token":" San","prob":0.0411},{"token":" King","prob":0.0282},{"token":" St","prob":0.0112}],[{"token":" San","prob":0.044},{"token":" St","prob":0.019},{"token":" King","prob":0.0183}],[{"token":" San","prob":0.0628},{"token":" North","prob":0.0357},{"token":" South","prob":0.0265}],[{"token":" San","prob":0.0917},{"token":" North","prob":0.0556},{"token":" St","prob":0.0232}],[{"token":" San","prob":0.1175},{"token":" North","prob":0.0685},{"token":" Manchester","prob":0.0288}],[{"token":" San","prob":0.13},{"token":" North","prob":0.0784},{"token":" South","prob":0.0509}],[{"token":" North","prob":0.0877},{"token":" San","prob":0.0798},{"token":" Manchester","prob":0.0442}],[{"token":" San","prob":0.1154},{"token":" North","prob":0.0755},{"token":" Chicago","prob":0.043}],[{"token":" San","prob":0.1095},{"token":" North","prob":0.1067},{"token":" Chicago","prob":0.0417}],[{"token":" San","prob":0.1222},{"token":" North","prob":0.1018},{"token":" Manchester","prob":0.0463}],[{"token":" San","prob":0.0778},{"token":" North","prob":0.0777},{"token":" Chicago","prob":0.033}],[{"token":" San","prob":0.0823},{"token":" Amsterdam","prob":0.0666},{"token":" North","prob":0.0552}],[{"token":" Amsterdam","prob":0.0801},{"token":" San","prob":0.0768},{"token":" Paris","prob":0.074}],[{"token":" Amsterdam","prob":0.1451},{"token":" Paris","prob":0.1367},{"token":" London","prob":0.0708}],[{"token":" Paris","prob":0.7006},{"token":" Montreal","prob":0.0552},{"token":" Amsterdam","prob":0.0479}],[{"token":" Paris","prob":0.9439},{"token":" France","prob":0.0289},{"token":" Montreal","prob":0.0106}],[{"token":" Paris","prob":0.9732},{"token":" France","prob":0.0156},{"token":" Montreal","prob":0.0036}],[{"token":" Paris","prob":0.9894},{"token":" France","prob":0.0058},{"token":" Montreal","prob":0.0017}],[{"token":" Paris","prob":0.9905},{"token":" France","prob":0.0043},{"token":" Montreal","prob":0.0024}],[{"token":" Paris","prob":0.9975},{"token":" France","prob":0.0012},{"token":" Montreal","prob":0.0005}],[{"token":" Paris","prob":0.9982},{"token":" France","prob":0.0008},{"token":" Montreal","prob":0.0002}],[{"token":" Paris","prob":0.9973},{"token":" France","prob":0.0008},{"token":" Lyon","prob":0.0005}],[{"token":" Paris","prob":0.9671},{"token":" Lyon","prob":0.0106},{"token":" France","prob":0.002}],[{"token":" Paris","prob":0.7899},{"token":" Lyon","prob":0.027},{"token":" Vers","prob":0.0147}],[{"token":" Paris","prob":0.5968},{"token":" E","prob":0.0478},{"token":" Lyon","prob":0.0439}]]},"patch":{"tokens":["When"," John"," and"," Mary"," went"," to"," the"," store",","," John"," gave"," a"," drink"," to"],"recovery":[[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.001,-0.001,-0.004,-0.0,-0.003],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.999,-0.001,-0.003,0.0,-0.006],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.0,-0.002,-0.001,-0.001,-0.007],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.999,-0.003,-0.001,-0.001,-0.007],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.999,-0.001,-0.002,-0.001,-0.01],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.998,-0.003,-0.001,-0.002,-0.012],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.003,-0.004,-0.002,-0.001,-0.013],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.005,-0.004,-0.002,-0.001,-0.014],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.007,-0.001,-0.001,-0.001,-0.017],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.006,-0.003,-0.001,-0.003,-0.016],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.004,-0.0,-0.001,-0.005,-0.018],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.998,-0.0,-0.001,-0.007,-0.019],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.997,-0.002,0.0,-0.006,-0.018],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.982,0.001,-0.001,-0.005,-0.015],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.941,-0.022,-0.002,-0.008,-0.009],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.888,-0.002,-0.004,-0.005,-0.089],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.89,0.037,-0.002,-0.004,-0.123],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.792,0.067,-0.001,-0.001,-0.043],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.591,0.111,-0.001,0.001,0.155],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.545,0.132,-0.002,-0.002,0.199],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.171,0.148,-0.007,-0.013,0.675],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.137,0.081,-0.006,-0.008,0.727],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.116,0.076,-0.006,-0.007,0.766],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.144,0.076,-0.006,-0.005,0.756],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.114,0.081,-0.004,-0.007,0.769],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.128,0.084,-0.004,-0.006,0.781],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.125,0.09,-0.003,-0.004,0.797],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.115,0.085,-0.004,-0.007,0.856],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.122,0.083,-0.004,-0.004,0.834],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.153,0.083,-0.004,-0.005,0.828],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-0.003,0.096,-0.003,-0.004,0.911],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-0.003,0.092,-0.002,-0.001,0.909],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.017,0.07,-0.002,-0.002,0.92],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.007,0.033,-0.002,-0.002,0.958],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,-0.0,0.007,-0.001,-0.001,0.996],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,1.345]],"best":{"layer":35,"position":13,"token":" to","recovery":1.345},"answer":" Mary","foil":" John","clean":"When John and Mary went to the store, John gave a drink to"},"steer":{"concept":"the ocean","baseline_prompt":"I woke up this morning and","sweep":[{"alpha":0.0,"text":"found a note.\"   \"It's all mine.\" She laughed.   \"I know. It's hard to let go. But I guess it's a good thing"},{"alpha":6.0,"text":"found a note.\"   \"It's all mine.\" She laughed.   \"I know. It's hard to let go. But I guess it's a good thing"},{"alpha":10.0,"text":"found a note.\"   \"It's all mine.\" She laughed.   \"I know. It's hard to let go. But I guess it's a good thing"},{"alpha":16.0,"text":"found a new blog post, a message from another blog and a text from them telling me that they'd heard something that I'd been saying for a while, that a friend had"},{"alpha":26.0,"text":"found a small boy in the yard.  When I called out to them and started to run, they stopped their car and looked at me.  They were so very"}],"vector_norm":46.3},"attention":{"best_head":"L16.H0 (score 0.987)","top_heads":[{"head":"L16.H0","induction_score":0.987},{"head":"L19.H4","induction_score":0.944},{"head":"L16.H9","induction_score":0.93},{"head":"L18.H7","induction_score":0.867},{"head":"L15.H4","induction_score":0.86}],"best_head_grid":[[1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.976,0.024,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.999,0.0,0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.998,0.0,0.0,0.002,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.993,0.0,0.0,0.0,0.007,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.994,0.0,0.0,0.0,0.0,0.006,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.864,0.0,0.0,0.0,0.0,0.0,0.135,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.997,0.0,0.0,0.0,0.0,0.0,0.0,0.003,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.996,0.0,0.0,0.0,0.0,0.003,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.99,0.0,0.001,0.0,0.0,0.003,0.001,0.0,0.0,0.004,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.992,0.0,0.0,0.0,0.0,0.007,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.981,0.0,0.0,0.0,0.001,0.013,0.0,0.0,0.0,0.0,0.0,0.003,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[1.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.992,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.007,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.992,0.0,0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.002,0.0,0.0,0.005,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.992,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.002,0.0,0.004,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.989,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.002,0.007,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.998,0.0,0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.99,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.01,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.994,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.005,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.964,0.018,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.002,0.0,0.001,0.013,0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.995,0.002,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.002,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.996,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.004,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.993,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.001,0.0,0.0,0.0,0.0,0.006,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.908,0.0,0.0,0.0,0.0,0.0,0.0,0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.001,0.0,0.0,0.0,0.0,0.0,0.021,0.067,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.024,0.97,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.005,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.003,0.0,0.997,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.095,0.0,0.001,0.904,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.005,0.0,0.0,0.0,0.994,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.006,0.0,0.0,0.0,0.002,0.983,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.007,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.001,0.0,0.0,0.0,0.0,0.0,0.998,0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.003,0.0,0.0,0.0,0.0,0.0,0.052,0.916,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.029,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.003,0.0,0.0,0.0,0.0,0.0,0.0,0.001,0.994,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.002,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.999,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.001,0.997,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.999,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.997,0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.999,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.009,0.981,0.003,0.0,0.004,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.002,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.002,0.993,0.0,0.003,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.996,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.002,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.001,0.997,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.002,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.997,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.002,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.003,0.995,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.001,0.0,0.0,0.0,0.0,0.0,0.0],[0.002,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.009,0.985,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.004,0.0,0.0,0.0,0.0,0.0],[0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.998,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.999,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.002,0.998,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.003,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.001,0.994,0.002,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0],[0.001,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.002,0.991,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.005]]},"ablation":{"predicted":" Paris","n_neurons":5120,"effective_neurons":1811.94,"concentration":0.3539,"top_neurons":[{"neuron":240,"attribution":-0.041,"ablation_delta_logit":0.04},{"neuron":1031,"attribution":0.035,"ablation_delta_logit":-0.036},{"neuron":3618,"attribution":0.033,"ablation_delta_logit":-0.044},{"neuron":333,"attribution":0.03,"ablation_delta_logit":-0.029},{"neuron":3740,"attribution":0.027,"ablation_delta_logit":-0.028},{"neuron":2032,"attribution":0.026,"ablation_delta_logit":-0.033},{"neuron":4857,"attribution":-0.025,"ablation_delta_logit":0.023},{"neuron":1463,"attribution":0.024,"ablation_delta_logit":-0.027},{"neuron":1709,"attribution":-0.022,"ablation_delta_logit":0.019},{"neuron":214,"attribution":0.021,"ablation_delta_logit":-0.021}],"layer":18},"knockout":{"answer":" Mary","foil":" John","baseline_logit_diff":3.682,"importance":[[-0.007,0.124,0.173,-0.247,0.154,0.043,0.072,-0.041,-0.07,0.028,0.013,-0.002,0.013,-0.108,0.251,-0.036,-0.081,0.024,0.043,-0.107],[0.03,-0.041,0.046,-0.064,0.123,-0.041,-0.008,0.015,-0.073,0.252,0.063,-0.048,0.055,-0.007,0.035,0.011,-0.011,0.003,-0.069,-0.0],[-0.066,0.241,0.006,-0.039,0.119,0.027,-0.032,0.015,-0.08,0.009,0.011,-0.037,-0.118,0.093,-0.036,0.008,0.002,-0.005,0.08,-0.001],[0.02,-0.014,-0.006,0.049,0.021,-0.002,0.062,-0.063,0.01,-0.005,0.084,-0.004,-0.025,0.009,0.033,0.021,-0.092,-0.054,0.019,0.033],[0.038,-0.052,-0.09,0.011,0.034,-0.02,-0.028,-0.036,-0.007,0.036,0.036,0.051,0.014,-0.02,0.005,-0.01,0.101,0.114,-0.013,-0.103],[-0.029,-0.058,0.041,-0.062,0.077,0.081,-0.134,-0.023,-0.026,-0.032,-0.038,0.013,-0.038,0.01,-0.071,-0.03,-0.036,0.113,0.012,0.061],[0.005,-0.029,-0.044,-0.01,-0.041,0.169,0.011,0.075,-0.047,-0.066,0.028,0.031,0.036,-0.013,-0.026,-0.094,-0.092,-0.003,0.041,-0.019],[0.013,-0.011,0.045,0.002,-0.025,-0.051,0.011,-0.006,-0.011,0.03,0.01,-0.001,-0.01,0.023,-0.079,-0.02,0.045,-0.126,0.001,-0.006],[-0.087,0.082,-0.014,0.042,0.01,-0.068,-0.108,0.04,-0.027,-0.019,-0.022,0.027,-0.084,0.041,0.008,0.04,0.011,0.01,0.03,-0.041],[-0.095,-0.066,0.027,0.016,-0.029,0.03,-0.024,0.012,0.026,0.007,0.131,-0.021,0.034,0.014,-0.03,-0.023,0.038,-0.047,0.037,0.015],[0.031,-0.008,0.064,0.021,0.01,0.022,-0.0,-0.068,-0.035,-0.035,-0.025,0.022,-0.03,-0.031,-0.025,0.017,-0.003,-0.034,-0.015,0.004],[0.039,0.038,-0.031,-0.015,-0.049,-0.058,-0.013,0.117,0.09,-0.004,-0.075,-0.077,0.022,-0.002,-0.045,0.031,0.015,-0.017,-0.004,0.035],[0.058,0.13,-0.006,-0.014,0.017,-0.02,0.04,-0.023,0.068,-0.051,0.015,0.012,-0.02,0.065,0.061,0.043,-0.009,-0.028,0.018,-0.016],[-0.023,0.016,0.018,-0.076,0.008,0.023,0.011,-0.008,0.089,0.058,0.144,0.013,0.011,0.096,-0.024,0.005,-0.014,-0.051,-0.009,-0.044],[0.049,0.061,0.005,-0.041,-0.038,-0.017,0.012,0.012,-0.02,0.006,-0.017,0.05,-0.025,-0.012,-0.066,0.016,-0.014,-0.032,0.018,0.073],[-0.047,0.077,-0.036,0.07,0.198,0.037,0.006,-0.01,0.042,0.009,0.05,0.01,-0.101,-0.043,-0.09,0.093,-0.096,-0.035,0.027,0.039],[0.075,0.028,0.026,0.032,-0.014,-0.069,-0.029,-0.065,-0.063,0.179,0.028,0.061,0.05,0.057,0.09,0.011,0.054,0.091,-0.041,-0.03],[-0.113,-0.023,-0.105,-0.012,-0.021,0.203,0.01,-0.01,0.013,-0.054,-0.047,-0.001,0.054,0.022,0.026,0.008,-0.053,-0.027,0.013,0.138],[-0.085,-0.001,0.193,0.272,0.333,0.006,-0.052,-0.003,-0.001,-0.021,0.003,0.096,0.077,-0.113,-0.033,0.062,-0.01,0.029,0.049,-0.05],[-0.012,-0.029,0.075,0.029,-0.026,-0.076,-0.048,0.063,0.015,0.031,0.043,0.019,-0.107,0.115,-0.187,-0.012,0.318,0.023,0.036,0.137],[0.014,0.007,0.013,0.012,0.0,-0.096,0.017,0.02,0.022,-0.065,-0.009,-0.035,-0.048,0.039,1.554,-0.016,-0.176,0.051,0.021,0.031],[-0.057,-0.014,-0.009,0.014,-0.013,-0.05,-0.01,0.119,0.111,-0.017,0.024,-0.007,0.032,0.011,0.027,-0.215,0.055,0.055,0.0,0.085],[0.298,-0.003,0.024,-0.009,0.008,0.016,0.037,0.002,0.043,0.052,-0.002,-0.098,0.007,-0.013,-0.001,-0.011,0.046,-0.024,0.014,0.005],[-0.009,-0.04,0.113,0.016,0.039,0.02,-0.01,0.037,0.001,-0.004,0.009,-0.021,-0.016,0.078,-0.036,0.009,-0.01,0.112,0.015,-0.032],[-0.005,-0.003,0.011,0.01,-0.011,0.015,-0.005,-0.043,-0.035,-0.012,-0.009,-0.001,-0.001,-0.002,0.006,0.009,-0.003,0.179,-0.039,-0.062],[0.006,0.017,0.047,0.022,0.023,0.044,0.001,-0.007,0.002,0.351,0.004,-0.005,-0.056,-0.132,-0.041,0.003,-0.047,0.029,-0.001,-0.001],[-0.225,0.002,-0.004,0.043,-0.01,-0.029,-0.017,0.055,-0.032,0.01,-0.015,-0.115,-0.009,-0.022,-0.056,-0.017,0.016,0.06,-0.001,0.007],[0.019,-0.002,-0.008,-0.009,0.002,-0.001,0.001,0.021,-0.002,0.024,-0.014,-0.055,0.007,-0.002,-0.013,-0.007,0.177,-0.001,0.016,0.008],[0.003,0.016,-0.052,0.009,0.066,-0.008,0.003,-0.006,-0.035,-0.011,0.011,0.045,-0.206,-0.041,-0.0,-0.023,-0.004,-0.001,0.019,-0.0],[-0.163,-0.003,-0.013,0.005,-0.001,0.013,-0.001,-0.002,0.056,0.005,-0.004,0.002,-0.023,-0.0,-0.008,-0.043,-0.004,0.068,-0.0,0.005],[-0.403,-0.007,-0.004,0.019,-0.01,-0.016,-0.043,0.044,-0.004,-0.0,0.055,-0.004,-0.002,0.137,0.108,-0.018,-0.031,-0.005,0.031,-0.002],[0.025,0.015,0.007,0.02,0.007,-0.002,-0.0,0.257,-0.032,0.017,-0.046,-0.014,-0.003,-0.002,0.004,-0.002,-0.013,0.009,0.005,-0.003],[-0.342,-0.005,0.025,0.06,-0.022,0.013,-0.002,-0.001,0.0,-0.009,0.001,-0.093,0.003,0.008,0.051,0.046,0.006,0.009,0.054,-0.013],[0.011,0.004,-0.016,0.011,0.004,0.037,-0.023,-0.074,0.012,0.011,0.098,-0.098,-0.024,0.004,-0.005,0.004,0.199,-0.023,-0.004,0.011],[-0.002,-0.018,0.002,0.037,0.072,0.003,-0.123,0.011,0.017,-0.026,-0.009,-0.036,0.011,-0.019,0.032,-0.04,-0.011,-0.011,0.037,-0.001],[0.048,0.012,0.011,0.002,0.006,0.005,-0.016,0.023,-0.035,0.008,-0.034,-0.018,-0.001,-0.017,0.013,-0.005,-0.032,0.016,0.033,0.03]],"top_heads":[{"head":"L20.H14","importance":1.554},{"head":"L25.H9","importance":0.351},{"head":"L18.H4","importance":0.333},{"head":"L19.H16","importance":0.318},{"head":"L22.H0","importance":0.298},{"head":"L18.H3","importance":0.272}],"n_layer":36,"n_head":20},"reasoning":{"prompt":"The capital of the state containing Dallas is the city of","bridge":" Texas","answer":" Austin","predicted":" Dallas","multihop_signature":true,"bridge_peak_layer":25,"answer_peak_layer":36,"layers":[{"layer":0,"bridge_prob":0.0,"bridge_rank":13386,"answer_prob":0.0,"answer_rank":8898},{"layer":1,"bridge_prob":0.00045,"bridge_rank":264,"answer_prob":2e-05,"answer_rank":3577},{"layer":2,"bridge_prob":0.00026,"bridge_rank":554,"answer_prob":2e-05,"answer_rank":6111},{"layer":3,"bridge_prob":0.00033,"bridge_rank":373,"answer_prob":4e-05,"answer_rank":4749},{"layer":4,"bridge_prob":0.00035,"bridge_rank":351,"answer_prob":5e-05,"answer_rank":4422},{"layer":5,"bridge_prob":0.0004,"bridge_rank":294,"answer_prob":7e-05,"answer_rank":2665},{"layer":6,"bridge_prob":0.00036,"bridge_rank":390,"answer_prob":9e-05,"answer_rank":2164},{"layer":7,"bridge_prob":0.00042,"bridge_rank":356,"answer_prob":0.00017,"answer_rank":1038},{"layer":8,"bridge_prob":0.00034,"bridge_rank":488,"answer_prob":0.00014,"answer_rank":1194},{"layer":9,"bridge_prob":0.00048,"bridge_rank":309,"answer_prob":0.00031,"answer_rank":540},{"layer":10,"bridge_prob":0.00045,"bridge_rank":342,"answer_prob":0.0003,"answer_rank":567},{"layer":11,"bridge_prob":0.00055,"bridge_rank":263,"answer_prob":0.00018,"answer_rank":855},{"layer":12,"bridge_prob":0.0004,"bridge_rank":355,"answer_prob":0.00046,"answer_rank":300},{"layer":13,"bridge_prob":0.00034,"bridge_rank":432,"answer_prob":0.00051,"answer_rank":284},{"layer":14,"bridge_prob":0.00037,"bridge_rank":376,"answer_prob":0.00059,"answer_rank":252},{"layer":15,"bridge_prob":0.00046,"bridge_rank":318,"answer_prob":0.00036,"answer_rank":388},{"layer":16,"bridge_prob":0.00107,"bridge_rank":129,"answer_prob":0.00094,"answer_rank":144},{"layer":17,"bridge_prob":0.001,"bridge_rank":135,"answer_prob":0.00075,"answer_rank":184},{"layer":18,"bridge_prob":0.00082,"bridge_rank":171,"answer_prob":0.00106,"answer_rank":127},{"layer":19,"bridge_prob":0.00113,"bridge_rank":120,"answer_prob":0.00145,"answer_rank":99},{"layer":20,"bridge_prob":0.00194,"bridge_rank":67,"answer_prob":0.00297,"answer_rank":44},{"layer":21,"bridge_prob":0.00224,"bridge_rank":63,"answer_prob":0.0039,"answer_rank":28},{"layer":22,"bridge_prob":0.00216,"bridge_rank":80,"answer_prob":0.00698,"answer_rank":15},{"layer":23,"bridge_prob":0.00306,"bridge_rank":52,"answer_prob":0.01295,"answer_rank":10},{"layer":24,"bridge_prob":0.0097,"bridge_rank":16,"answer_prob":0.019,"answer_rank":9},{"layer":25,"bridge_prob":0.01547,"bridge_rank":9,"answer_prob":0.0213,"answer_rank":7},{"layer":26,"bridge_prob":0.013,"bridge_rank":3,"answer_prob":0.00971,"answer_rank":4},{"layer":27,"bridge_prob":0.00754,"bridge_rank":2,"answer_prob":0.00066,"answer_rank":5},{"layer":28,"bridge_prob":0.01358,"bridge_rank":3,"answer_prob":0.00181,"answer_rank":5},{"layer":29,"bridge_prob":0.00451,"bridge_rank":2,"answer_prob":0.00053,"answer_rank":5},{"layer":30,"bridge_prob":0.00185,"bridge_rank":3,"answer_prob":0.00075,"answer_rank":5},{"layer":31,"bridge_prob":0.00388,"bridge_rank":3,"answer_prob":0.00382,"answer_rank":4},{"layer":32,"bridge_prob":0.00169,"bridge_rank":4,"answer_prob":0.00375,"answer_rank":3},{"layer":33,"bridge_prob":0.00119,"bridge_rank":4,"answer_prob":0.00296,"answer_rank":3},{"layer":34,"bridge_prob":0.00355,"bridge_rank":6,"answer_prob":0.02097,"answer_rank":3},{"layer":35,"bridge_prob":0.00189,"bridge_rank":14,"answer_prob":0.03436,"answer_rank":3},{"layer":36,"bridge_prob":0.00096,"bridge_rank":55,"answer_prob":0.03465,"answer_rank":4}]}},"probes":{"model":"gpt2","geometry":{"prompt":"The Eiffel Tower is located in the city of","predicted":" Paris","runner_up":" London","margin":0.324,"effective_dimension":1.003,"robust_to_deletion":false,"per_token":[{"token":"The","flip_distance":0.128,"deletion_flips":false,"deletion_new_top":" Paris","margin_after_deletion":0.264},{"token":" E","flip_distance":0.1647,"deletion_flips":true,"deletion_new_top":" London","margin_after_deletion":null},{"token":"iff","flip_distance":0.0751,"deletion_flips":true,"deletion_new_top":" E","margin_after_deletion":null},{"token":"el","flip_distance":0.216,"deletion_flips":true,"deletion_new_top":" London","margin_after_deletion":null},{"token":" Tower","flip_distance":0.1386,"deletion_flips":false,"deletion_new_top":" Paris","margin_after_deletion":0.25},{"token":" is","flip_distance":0.4867,"deletion_flips":false,"deletion_new_top":" Paris","margin_after_deletion":0.445},{"token":" located","flip_distance":0.2674,"deletion_flips":false,"deletion_new_top":" Paris","margin_after_deletion":0.182},{"token":" in","flip_distance":0.5101,"deletion_flips":true,"deletion_new_top":" London","margin_after_deletion":null},{"token":" the","flip_distance":0.4156,"deletion_flips":true,"deletion_new_top":" London","margin_after_deletion":null},{"token":" city","flip_distance":0.1269,"deletion_flips":true,"deletion_new_top":" the","margin_after_deletion":null},{"token":" of","flip_distance":0.4934,"deletion_flips":true,"deletion_new_top":" of","margin_after_deletion":null}]},"calibrate":{"prompts":14,"confidence_vs_margin_r":0.142,"confidence_vs_flipdist_r":-0.049,"points":[{"prompt":"The Eiffel Tower is located in the city of","predicted":" Paris","confidence":0.0638,"margin":0.324,"min_flip_distance":0.0751,"deletion_flips":7,"robust":false},{"prompt":"The capital of Japan is","predicted":" the","confidence":0.094,"margin":0.335,"min_flip_distance":0.0591,"deletion_flips":4,"robust":false},{"prompt":"The chemical symbol for gold is","predicted":" the","confidence":0.2202,"margin":0.987,"min_flip_distance":0.4618,"deletion_flips":3,"robust":false},{"prompt":"Two plus two equals","predicted":" one","confidence":0.3304,"margin":1.12,"min_flip_distance":0.5736,"deletion_flips":1,"robust":false},{"prompt":"The opposite of hot is","predicted":" cold","confidence":0.1627,"margin":0.683,"min_flip_distance":0.1974,"deletion_flips":5,"robust":false},{"prompt":"The first president of the United States was","predicted":" born","confidence":0.1328,"margin":0.381,"min_flip_distance":0.1562,"deletion_flips":8,"robust":false},{"prompt":"Water is made of hydrogen and","predicted":" oxygen","confidence":0.4641,"margin":0.508,"min_flip_distance":0.09,"deletion_flips":3,"robust":false},{"prompt":"The largest planet in the solar system is","predicted":" about","confidence":0.0823,"margin":0.215,"min_flip_distance":0.0723,"deletion_flips":8,"robust":false},{"prompt":"A group of lions is called a","predicted":" \"","confidence":0.1403,"margin":1.405,"min_flip_distance":1.0417,"deletion_flips":2,"robust":false},{"prompt":"The author of Romeo and Juliet is","predicted":" a","confidence":0.1747,"margin":1.262,"min_flip_distance":2.4144,"deletion_flips":2,"robust":false},{"prompt":"The square root of sixty-four is","predicted":" the","confidence":0.1603,"margin":1.342,"min_flip_distance":0.9457,"deletion_flips":1,"robust":false},{"prompt":"The color of a clear daytime sky is","predicted":" a","confidence":0.0751,"margin":0.239,"min_flip_distance":0.3138,"deletion_flips":3,"robust":false},{"prompt":"The freezing point of water in Celsius is","predicted":" about","confidence":0.1734,"margin":1.256,"min_flip_distance":0.636,"deletion_flips":4,"robust":false},{"prompt":"The currency used in Japan is the","predicted":" yen","confidence":0.373,"margin":0.432,"min_flip_distance":0.1459,"deletion_flips":4,"robust":false}]},"transport":{"concept":"the ocean","mean_adjacent_alignment":0.789,"alignment":[[1.0,0.618,0.502,0.388,0.28,0.234,0.192,0.169,0.158,0.154,0.133,0.078],[0.618,1.0,0.746,0.583,0.494,0.406,0.361,0.331,0.308,0.294,0.276,0.121],[0.502,0.746,1.0,0.809,0.66,0.541,0.448,0.395,0.354,0.335,0.298,0.08],[0.388,0.583,0.809,1.0,0.826,0.706,0.611,0.541,0.473,0.445,0.395,0.115],[0.28,0.494,0.66,0.826,1.0,0.854,0.718,0.646,0.553,0.512,0.447,0.137],[0.234,0.406,0.541,0.706,0.854,1.0,0.819,0.732,0.624,0.576,0.506,0.16],[0.192,0.361,0.448,0.611,0.718,0.819,1.0,0.891,0.783,0.725,0.634,0.225],[0.169,0.331,0.395,0.541,0.646,0.732,0.891,1.0,0.892,0.817,0.72,0.262],[0.158,0.308,0.354,0.473,0.553,0.624,0.783,0.892,1.0,0.913,0.805,0.319],[0.154,0.294,0.335,0.445,0.512,0.576,0.725,0.817,0.913,1.0,0.92,0.349],[0.133,0.276,0.298,0.395,0.447,0.506,0.634,0.72,0.805,0.92,1.0,0.393],[0.078,0.121,0.08,0.115,0.137,0.16,0.225,0.262,0.319,0.349,0.393,1.0]],"concept_tokens":["roar","trem","roaring","tsun","uncontroll","vanishing","surging","tidal","darkness","roofs"]},"localization":{"predicted":" Paris","per_layer":[{"layer":0,"effective_neurons":92.61,"concentration":0.0301,"top_neuron":2733,"top_attribution":5.086},{"layer":1,"effective_neurons":975.01,"concentration":0.3174,"top_neuron":640,"top_attribution":0.629},{"layer":2,"effective_neurons":514.86,"concentration":0.1676,"top_neuron":1667,"top_attribution":2.0},{"layer":3,"effective_neurons":674.33,"concentration":0.2195,"top_neuron":1545,"top_attribution":0.951},{"layer":4,"effective_neurons":606.66,"concentration":0.1975,"top_neuron":933,"top_attribution":-1.681},{"layer":5,"effective_neurons":466.4,"concentration":0.1518,"top_neuron":505,"top_attribution":2.021},{"layer":6,"effective_neurons":600.99,"concentration":0.1956,"top_neuron":483,"top_attribution":-2.289},{"layer":7,"effective_neurons":819.12,"concentration":0.2666,"top_neuron":608,"top_attribution":-1.63},{"layer":8,"effective_neurons":758.03,"concentration":0.2468,"top_neuron":66,"top_attribution":-1.733},{"layer":9,"effective_neurons":698.78,"concentration":0.2275,"top_neuron":840,"top_attribution":-2.071},{"layer":10,"effective_neurons":343.3,"concentration":0.1117,"top_neuron":379,"top_attribution":3.896},{"layer":11,"effective_neurons":100.52,"concentration":0.0327,"top_neuron":611,"top_attribution":-7.67}],"most_localized_layer":{"layer":0,"effective_neurons":92.61,"concentration":0.0301,"top_neuron":2733,"top_attribution":5.086},"top_causal_heads":[{"head":"L8.H10","importance":0.991},{"head":"L0.H10","importance":0.762},{"head":"L2.H0","importance":0.76},{"head":"L2.H5","importance":0.738},{"head":"L1.H10","importance":0.629},{"head":"L10.H0","importance":0.594}],"n_neurons_per_layer":3072}},"scaling":{"calibration_gpt2":[{"model":"distilgpt2","params":82000000,"mean_confidence":0.1645,"mean_margin":0.653,"fragile":1.0,"mean_flips":3.62,"spearman_conf_flipdist":0.572},{"model":"gpt2","params":124000000,"mean_confidence":0.1817,"mean_margin":0.692,"fragile":1.0,"mean_flips":3.77,"spearman_conf_flipdist":0.408},{"model":"gpt2-medium","params":355000000,"mean_confidence":0.2959,"mean_margin":1.206,"fragile":1.0,"mean_flips":4.3,"spearman_conf_flipdist":0.639},{"model":"gpt2-large","params":774000000,"mean_confidence":0.333,"mean_margin":1.276,"fragile":1.0,"mean_flips":3.6,"spearman_conf_flipdist":0.554}],"calibration_pythia":[{"model":"pythia-70m","params":70000000,"mean_confidence":0.1491,"mean_margin":0.621,"fragile":1.0,"mean_flips":3.12,"spearman_conf_flipdist":0.775},{"model":"pythia-160m","params":160000000,"mean_confidence":0.1644,"mean_margin":0.591,"fragile":1.0,"mean_flips":3.77,"spearman_conf_flipdist":0.495},{"model":"pythia-410m","params":410000000,"mean_confidence":0.2772,"mean_margin":1.082,"fragile":1.0,"mean_flips":4.08,"spearman_conf_flipdist":0.554},{"model":"pythia-1b","params":1000000000,"mean_confidence":0.3164,"mean_margin":1.142,"fragile":1.0,"mean_flips":3.98,"spearman_conf_flipdist":0.678}],"localization_gpt2":[{"model":"distilgpt2","params":82000000,"mean_fraction":0.195,"u_shaped":true,"per_layer":[256.2,892.0,776.8,605.9,842.9,219.8]},{"model":"gpt2","params":124000000,"mean_fraction":0.1804,"u_shaped":true,"per_layer":[92.6,975.0,514.9,674.3,606.7,466.4,601.0,819.1,758.0,698.8,343.3,100.5]},{"model":"gpt2-medium","params":355000000,"mean_fraction":0.2176,"u_shaped":true,"per_layer":[189.5,783.9,1533.4,1333.6,1083.4,956.8,1033.4,1000.2,1102.1,1052.4,1076.8,1050.0,1157.3,1032.9,801.9,862.4,697.9,1142.7,700.0,814.0,766.4,622.9,373.6,226.7]},{"model":"gpt2-large","params":774000000,"mean_fraction":0.2053,"u_shaped":true,"per_layer":[258.9,296.5,1537.8,1271.1,1589.5,1899.9,809.6,1338.3,1307.4,1326.8,1158.1,1252.1,1127.5,1002.2,859.9,1312.6,1265.1,1495.2,1811.9,1456.5,1542.3,1251.9,1074.5,1324.1,1372.8,1334.0,683.5,811.4,1076.2,686.4,619.3,712.7,106.1,181.9,413.7,269.5]}],"localization_pythia":[{"model":"pythia-70m","params":70000000,"mean_fraction":0.1959,"u_shaped":true,"per_layer":[308.2,508.0,617.3,518.0,279.2,176.3]},{"model":"pythia-160m","params":160000000,"mean_fraction":0.2307,"u_shaped":true,"per_layer":[479.3,1064.1,982.8,821.2,987.5,953.8,747.6,650.4,402.0,639.0,412.4,364.4]},{"model":"pythia-410m","params":410000000,"mean_fraction":0.2913,"u_shaped":true,"per_layer":[1241.7,1692.2,1586.7,1839.3,1120.8,1253.9,960.4,1367.4,1210.4,1182.0,1440.4,1654.8,1589.2,1635.4,1280.7,1069.9,471.4,1400.3,1255.8,640.1,989.0,1113.7,527.5,115.4]},{"model":"pythia-1b","params":1000000000,"mean_fraction":0.2218,"u_shaped":true,"per_layer":[152.8,2983.6,2225.0,2813.0,1751.1,1229.4,2352.9,2811.1,2683.5,2692.1,1279.8,2366.6,984.3,1247.6,1302.9,192.1]}],"calib_scatter":{"distilgpt2":[{"c":0.0769,"f":3},{"c":0.1322,"f":3},{"c":0.1178,"f":3},{"c":0.1231,"f":3},{"c":0.1699,"f":3},{"c":0.1403,"f":3},{"c":0.1089,"f":4},{"c":0.0921,"f":3},{"c":0.155,"f":2},{"c":0.1154,"f":4},{"c":0.1061,"f":5},{"c":0.0676,"f":3},{"c":0.3033,"f":2},{"c":0.0926,"f":4},{"c":0.1496,"f":4},{"c":0.233,"f":2},{"c":0.1108,"f":3},{"c":0.2791,"f":1},{"c":0.1875,"f":1},{"c":0.0997,"f":2},{"c":0.0805,"f":4},{"c":0.0722,"f":4},{"c":0.1645,"f":7},{"c":0.0806,"f":9},{"c":0.0351,"f":4},{"c":0.0468,"f":6},{"c":0.0558,"f":4},{"c":0.0209,"f":6},{"c":0.9349,"f":1},{"c":0.7912,"f":3},{"c":0.2493,"f":3},{"c":0.0874,"f":4},{"c":0.1527,"f":5},{"c":0.2225,"f":2},{"c":0.2633,"f":3},{"c":0.2213,"f":2},{"c":0.0694,"f":4},{"c":0.1303,"f":4},{"c":0.0167,"f":6},{"c":0.023,"f":6}],"gpt2-large":[{"c":0.5968,"f":5},{"c":0.4132,"f":5},{"c":0.097,"f":3},{"c":0.2589,"f":5},{"c":0.2572,"f":5},{"c":0.7285,"f":5},{"c":0.358,"f":2},{"c":0.0857,"f":4},{"c":0.7914,"f":4},{"c":0.5715,"f":4},{"c":0.8409,"f":3},{"c":0.2019,"f":4},{"c":0.8394,"f":2},{"c":0.1056,"f":6},{"c":0.1193,"f":6},{"c":0.188,"f":2},{"c":0.1577,"f":2},{"c":0.1257,"f":1},{"c":0.064,"f":2},{"c":0.0792,"f":3},{"c":0.1067,"f":1},{"c":0.5167,"f":3},{"c":0.409,"f":4},{"c":0.2471,"f":5},{"c":0.0892,"f":3},{"c":0.0842,"f":5},{"c":0.2183,"f":4},{"c":0.126,"f":5},{"c":0.9896,"f":1},{"c":0.9835,"f":2},{"c":0.5507,"f":2},{"c":0.1081,"f":6},{"c":0.5109,"f":5},{"c":0.1188,"f":3},{"c":0.4988,"f":4},{"c":0.3055,"f":2},{"c":0.2036,"f":5},{"c":0.2052,"f":3},{"c":0.0553,"f":4},{"c":0.1146,"f":4}]}},"models":[{"name":"distilgpt2","params":82,"family":"GPT-2","layers":6},{"name":"gpt2","params":124,"family":"GPT-2","layers":12},{"name":"gpt2-medium","params":355,"family":"GPT-2","layers":24},{"name":"gpt2-large","params":774,"family":"GPT-2","layers":36},{"name":"pythia-70m","params":70,"family":"Pythia","layers":6},{"name":"pythia-160m","params":160,"family":"Pythia","layers":12},{"name":"pythia-410m","params":410,"family":"Pythia","layers":24},{"name":"pythia-1b","params":1000,"family":"Pythia","layers":16}]}</script>
+  <script src="scripts.js"></script>
+  <script src="research.js"></script>
+</body>
+</html>
