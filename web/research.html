@@ -79,8 +79,10 @@
       border: 1px solid var(--line); color: var(--ink-2); }
     .tag.ok { color: var(--s-teal); border-color: rgba(103,232,195,0.4); }
     .tag.warn { color: var(--s-amber); border-color: rgba(244,176,106,0.4); }
-    svg { display: block; width: 100%; height: auto; overflow: visible; }
-    svg text { font-family: var(--mono); fill: var(--ink-3); }
+    /* Scoped to the data-viz containers only — a bare `svg` selector would
+       clobber the inline nav/footer brand logo, which sizes via its attrs. */
+    .figstage svg, .finding svg { display: block; width: 100%; height: auto; overflow: visible; }
+    .figstage svg text, .finding svg text { font-family: var(--mono); fill: var(--ink-3); }
     .gl { stroke: var(--line); stroke-width: 1; }
 
     /* heatmaps */
