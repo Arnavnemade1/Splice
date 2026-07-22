@@ -109,7 +109,7 @@ TEMPLATE = r"""<!doctype html><meta charset="utf-8">
   <div class="meta" id="meta"></div>
   <nav aria-label="Experiments">
     <a href="#f1">1 · Jacobian</a><a href="#f2">2 · Logit lens</a><a href="#f3">3 · Patching</a>
-    <a href="#f4">4 · Injection</a><a href="#f5">5 · Induction</a><a href="#f6">6 · Ablation</a><a href="#f7">7 · Knockout</a>
+    <a href="#f4">4 · Injection</a><a href="#f5">5 · Induction</a><a href="#f6">6 · Ablation</a><a href="#f7">7 · Knockout</a><a href="#f8">8 · Reasoning</a>
   </nav>
 
   <section id="f1"><div class="fig">Fig. 1 · The Jacobian space</div>
@@ -173,6 +173,17 @@ TEMPLATE = r"""<!doctype html><meta charset="utf-8">
       <div class="legend"><span class="lg"><span class="sw" style="background:var(--teal)"></span>supports answer</span>
         <span class="lg"><span class="sw" style="background:var(--copper)"></span>opposes answer</span></div>
       <div class="bars" id="kobars" style="margin-top:12px"></div></div></section>
+
+  <section id="f8"><div class="fig">Fig. 8 · Multi-hop reasoning</div>
+    <h2>Watching a two-step thought form</h2>
+    <p class="what">A two-hop question (Dallas → its state → that state's capital). The last-position residual is
+    decoded at every layer: if the model reasons internally, the intermediate <em>bridge</em> concept rises in
+    the middle layers <em>before</em> the final answer — even though the bridge is never the output.</p>
+    <div class="card"><div class="sub" id="r8sub"></div>
+      <div class="legend"><span class="lg"><span class="sw" style="background:var(--indigo)"></span>bridge (intermediate step)</span>
+        <span class="lg"><span class="sw" style="background:var(--teal)"></span>answer</span></div>
+      <svg id="rsvg" viewBox="0 0 640 250" role="img" aria-label="bridge and answer probability by layer"></svg>
+      <p class="note" id="rnote"></p></div></section>
 
   <footer id="foot"></footer>
 </main>
@@ -302,7 +313,27 @@ $("#kobars").innerHTML=KO.top_heads.map(h=>`<span class="rowlbl">${h.head}</span
   <div class="track"><div class="fill ${h.importance<0?"neg":""}" style="width:${(Math.abs(h.importance)/koHi*100).toFixed(1)}%"></div></div>
   <span class="val">${h.importance>=0?"+":""}${h.importance}</span>`).join("");
 
-function render(){drawJ();drawL();drawA();
+// ── Fig 8: Multi-hop reasoning ──
+const R=DATA.reasoning, RL=R.layers, nR=RL.length;
+const rMax=Math.max(...RL.map(l=>Math.max(l.bridge_prob,l.answer_prob)),1e-4);
+$("#r8sub").innerHTML=`“${esc(R.prompt)}” · bridge <b class="mono">${esc(R.bridge)}</b> → answer <b class="mono">${esc(R.answer)}</b> · `+
+  (R.multihop_signature?`<span class="pill ok">multi-hop signature</span>`:`<span class="pill warn">no clean signature</span>`);
+function rsvg(){const W=640,H=250,l=46,r=14,t=14,b=32;
+  const X=i=>l+(W-l-r)*i/(nR-1), Y=p=>H-b-(H-b-t)*p/(rMax*1.08);let s="";
+  for(const g of [0,rMax/2,rMax]){s+=`<line class="gridline" x1="${l}" x2="${W-r}" y1="${Y(g)}" y2="${Y(g)}"/><text x="${l-6}" y="${Y(g)+3}" text-anchor="end">${g.toFixed(3)}</text>`;}
+  const line=(key,col)=>`<polyline fill="none" stroke="${col}" stroke-width="2.5" points="${RL.map((v,i)=>X(i)+","+Y(v[key])).join(" ")}"/>`+
+    RL.map((v,i)=>`<circle cx="${X(i)}" cy="${Y(v[key])}" r="2.5" fill="${col}" data-t="layer ${v.layer}: ${key==='bridge_prob'?esc(R.bridge):esc(R.answer)} p=${v[key]} (rank ${key==='bridge_prob'?v.bridge_rank:v.answer_rank})"></circle>`).join("");
+  s+=line("bridge_prob",css("--indigo"))+line("answer_prob",css("--teal"));
+  // peak markers
+  s+=`<line x1="${X(R.bridge_peak_layer)}" x2="${X(R.bridge_peak_layer)}" y1="${t}" y2="${H-b}" stroke="var(--indigo)" stroke-dasharray="3 3" stroke-width="1"/>`;
+  s+=`<line x1="${X(R.answer_peak_layer)}" x2="${X(R.answer_peak_layer)}" y1="${t}" y2="${H-b}" stroke="var(--teal)" stroke-dasharray="3 3" stroke-width="1"/>`;
+  s+=`<text x="${l}" y="${H-8}">L0</text><text x="${W-r}" y="${H-8}" text-anchor="end">L${nR-1}</text>`;
+  s+=`<text x="14" y="${t+6}" transform="rotate(-90 14 ${H/2})" text-anchor="middle">probability</text>`;return s;}
+function drawR(){$("#rsvg").innerHTML=rsvg();
+  $("#rsvg").querySelectorAll("circle").forEach(c=>{c.onmousemove=(e)=>showTip(e,c.dataset.t);c.onmouseleave=hideTip;});}
+$("#rnote").innerHTML = R.interpretation.map(esc).join(" ");
+
+function render(){drawJ();drawL();drawA();drawR();
   $("#pheat").querySelectorAll(".cell").forEach(c=>c.style.background=heat(Math.max(0,PT.recovery[+c.dataset.l][+c.dataset.p])));
   $("#koheat").querySelectorAll(".cell").forEach(c=>c.style.background=diverge(KO.importance[+c.dataset.l][+c.dataset.h]/koAbs));}
 render();

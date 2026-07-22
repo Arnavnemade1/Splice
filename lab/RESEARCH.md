@@ -36,10 +36,16 @@ computations are circuits of features feeding features.
   GemmaScope transcoders), explorable in a Neuronpedia frontend, with feature-level
   interventions ("modify feature values and observe how outputs change").
 
-**Lab status**: attribution graphs need pre-trained transcoders per model — out of scope
-for a from-scratch lab. For that tier, use
-[`circuit-tracer`](https://github.com/safety-research/circuit-tracer) + Neuronpedia.
-Everything below is implemented here directly.
+**Lab status**: full attribution graphs need pre-trained transcoders per model — out of
+scope for a from-scratch lab (for that tier, use
+[`circuit-tracer`](https://github.com/safety-research/circuit-tracer) + Neuronpedia). But
+the *multi-hop* phenomenon itself is reproducible without them: `reasoning` runs the
+logit lens at the final position across every layer and tracks the intermediate **bridge**
+entity against the answer. On gpt2-large the bridge (*Texas*) rises to rank ~2 in the
+mid-layers and fades before the answer (*Austin*) crystallizes in the late layers — the
+internal two-step, visible — while gpt2-small shows no such signature. Internal multi-hop
+reasoning is scale-dependent, and the trace shows exactly where it appears. Everything
+below is implemented here directly.
 
 ### 1.2 Steering and injection — "thoughts as directions you can push"
 

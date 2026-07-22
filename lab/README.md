@@ -14,7 +14,8 @@ no cloud: [mindlab.py](mindlab.py).
 | `attention` | the induction heads that implement in-context learning | induction-head scan |
 | `ablation` | how localized a fact is — top MLP neurons by attribution, verified by real ablation, plus the *effective neuron count* (superposition measure) | neuron ablation / attribution patching |
 | `knockout` | a 12×12 causal map of which attention heads *cause* the answer (heads that support vs. oppose it) | attention-head knockout |
-| `report` | all seven in one HTML page — add `--interactive` for an explorable version | — |
+| `reasoning` | a two-hop trace — does the intermediate *bridge* concept surface in the middle layers before the answer? Watch multi-step reasoning form (and see it strengthen with scale) | multi-hop / bridge tracing via the logit lens |
+| `report` | all eight in one HTML page — add `--interactive` for an explorable version | — |
 
 Beyond replication, [`probes.py`](probes.py) runs measurements that haven't been done
 this way before — Splice's decision-geometry battery pointed at a real transformer,

@@ -593,6 +593,85 @@ def run_knockout(lab: Lab, clean: str, answer: str, foil: str) -> KnockoutResult
     )
 
 
+# ─── 8. Multi-hop reasoning trace (does a bridge concept surface?) ───────────
+
+
+@dataclass
+class ReasoningResult:
+    prompt: str
+    bridge: str
+    answer: str
+    predicted: str
+    #: per layer: probability + rank of the BRIDGE and the ANSWER at the final
+    #: position, decoded through the model's own readout (logit lens).
+    layers: list[dict[str, Any]]
+    bridge_peak_layer: int
+    answer_peak_layer: int
+    #: the multi-hop signature: the intermediate bridge concept rises to a
+    #: meaningful probability at an EARLIER layer than the answer crystallizes.
+    multihop_signature: bool
+    bridge_max_prob: float
+    interpretation: list[str]
+    note: str = (
+        "Two-hop trace: the last-position residual is decoded at every layer and "
+        "the probability of the intermediate BRIDGE entity is tracked against the "
+        "final ANSWER. A bridge that peaks in the middle layers before the answer "
+        "appears is the fingerprint of internal multi-step reasoning (RESEARCH.md "
+        "§1.1: 'capital of the state containing Dallas' → Texas → Austin). Bridge "
+        "and answer use their first sub-token; a small model may just pattern-match, "
+        "which the trace shows honestly."
+    )
+
+
+def run_reasoning(lab: Lab, prompt: str, bridge: str, answer: str) -> ReasoningResult:
+    ids = lab.ids(prompt)
+    bridge_id = lab.tok.encode(bridge)[0]
+    answer_id = lab.tok.encode(answer)[0]
+    with torch.no_grad():
+        out = lab.model(ids, output_hidden_states=True)
+        final_index = len(out.hidden_states) - 1
+        predicted = lab.tok.decode([int(out.logits[0, -1].argmax())])
+        layers: list[dict[str, Any]] = []
+        for li, h in enumerate(out.hidden_states):
+            logits = (h[0, -1] @ lab.unembed.T) if li == final_index else lab.decode_head(h[0, -1])
+            probs = torch.softmax(logits, dim=-1)
+            def rank(tid: int) -> int:
+                return int((probs > probs[tid]).sum()) + 1
+            layers.append({
+                "layer": li,
+                "bridge_prob": round(float(probs[bridge_id]), 5),
+                "bridge_rank": rank(bridge_id),
+                "answer_prob": round(float(probs[answer_id]), 5),
+                "answer_rank": rank(answer_id),
+            })
+
+    # Peak layers (skip layer 0 = embeddings). The signature: the bridge's peak
+    # probability is reached before the answer's, and is non-trivial.
+    body = layers[1:]
+    bridge_peak = max(body, key=lambda x: x["bridge_prob"])
+    answer_peak = max(body, key=lambda x: x["answer_prob"])
+    bridge_max = bridge_peak["bridge_prob"]
+    signature = bridge_peak["layer"] < answer_peak["layer"] and bridge_max >= 0.01
+
+    interp = [
+        f'"{prompt}" — bridge {bridge!r}, answer {answer!r}; model actually predicts {predicted!r}.',
+        (f"Multi-hop signature: {bridge!r} peaks at layer {bridge_peak['layer']} "
+         f"(p={bridge_max}) BEFORE {answer!r} peaks at layer {answer_peak['layer']} — the "
+         f"intermediate step surfaces internally before the answer."
+         if signature else
+         f"No clean multi-hop signature: {bridge!r} tops out at p={bridge_max} (layer "
+         f"{bridge_peak['layer']}) vs {answer!r} peak at layer {answer_peak['layer']}. "
+         f"{'The bridge barely registers — the model likely pattern-matches rather than reasoning in two steps.' if bridge_max < 0.01 else 'The two peaks do not order cleanly.'}"),
+        f"Answer {answer!r} reaches rank {min(l['answer_rank'] for l in body)} at best; "
+        f"bridge {bridge!r} reaches rank {min(l['bridge_rank'] for l in body)}.",
+    ]
+    return ReasoningResult(
+        prompt=prompt, bridge=bridge, answer=answer, predicted=predicted, layers=layers,
+        bridge_peak_layer=bridge_peak["layer"], answer_peak_layer=answer_peak["layer"],
+        multihop_signature=signature, bridge_max_prob=bridge_max, interpretation=interp,
+    )
+
+
 # ─── HTML report ────────────────────────────────────────────────────────────
 
 
@@ -604,7 +683,7 @@ def _heat(value: float, lo: float, hi: float) -> str:
 
 def render_html(model_name: str, jac: JacobianResult, lens: LensResult,
                 patch: PatchResult, steer: SteerResult, attn: AttentionResult,
-                elapsed_s: float) -> str:
+                elapsed_s: float, reason: "ReasoningResult | None" = None) -> str:
     e = html.escape
     css = """
     :root{--ink:#111827;--mut:#6b7280;--line:#e5e7eb;--brand:#4f46e5;--bg:#fafafa}
@@ -703,11 +782,24 @@ def render_html(model_name: str, jac: JacobianResult, lens: LensResult,
             parts.append(f"<div class='cell' style='{_heat(v, 0, 0.4)}'></div>")
     parts.append("</div></div>")
 
+    if reason is not None:
+        parts.append("<h2>8 · Multi-hop reasoning — watching a two-step thought form</h2>")
+        parts.append(f"<div class='note'>{e(reason.note)}</div><div class='card'>")
+        parts.append(f"<div class='sub'>“{e(reason.prompt)}” · bridge <b class='tag'>{e(reason.bridge)}</b> → "
+                     f"answer <b class='tag'>{e(reason.answer)}</b> · "
+                     f"{'multi-hop signature' if reason.multihop_signature else 'no clean signature'}</div>")
+        parts.append("<table style='margin-top:8px'><tr><th>layer</th><th>bridge p (rank)</th><th>answer p (rank)</th></tr>")
+        for L in reason.layers:
+            if L['bridge_prob'] > 0.002 or L['answer_prob'] > 0.002 or L['layer'] in (reason.bridge_peak_layer, reason.answer_peak_layer):
+                parts.append(f"<tr><td>{L['layer']}</td><td>{L['bridge_prob']} (r{L['bridge_rank']})</td>"
+                             f"<td>{L['answer_prob']} (r{L['answer_rank']})</td></tr>")
+        parts.append(f"</table><div class='note' style='margin-top:10px'>{e(reason.interpretation[1])}</div></div>")
+
     parts.append(
         "<footer>Every experiment here runs on locally held open weights; nothing probes a hosted "
         "model's internals. Methods and sources: <span class='mono'>lab/RESEARCH.md</span> — attribution "
         "graphs &amp; circuit tracing, concept injection (introspection), persona vectors, Jacobian "
-        "scopes, causal tracing, logit lens, induction heads.</footer></main>")
+        "scopes, causal tracing, logit lens, induction heads, multi-hop reasoning traces.</footer></main>")
     return "<!doctype html><meta charset='utf-8'><title>Model Mind Lab</title>" + "".join(parts)
 
 
@@ -716,12 +808,16 @@ def render_html(model_name: str, jac: JacobianResult, lens: LensResult,
 DEFAULT_PROMPT = "The Eiffel Tower is located in the city of"
 IOI_CLEAN = "When John and Mary went to the store, John gave a drink to"
 IOI_CORRUPT = "When John and Mary went to the store, Mary gave a drink to"
+# Two-hop default for the reasoning trace: Dallas → (Texas) → Austin.
+REASON_PROMPT = "The capital of the state containing Dallas is the city of"
+REASON_BRIDGE = " Texas"
+REASON_ANSWER = " Austin"
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("experiment", choices=["report", "jacobian", "lens", "patch", "steer",
-                                            "attention", "ablation", "knockout"])
+                                            "attention", "ablation", "knockout", "reasoning"])
     ap.add_argument("--model", default="gpt2")
     ap.add_argument("--prompt", default=DEFAULT_PROMPT)
     ap.add_argument("--clean", default=IOI_CLEAN)
@@ -729,6 +825,7 @@ def main() -> None:
     ap.add_argument("--answer", default=" Mary")
     ap.add_argument("--foil", default=" John")
     ap.add_argument("--concept", default="the ocean")
+    ap.add_argument("--bridge", default=REASON_BRIDGE, help="reasoning: the intermediate 'bridge' entity")
     ap.add_argument("--layer", type=int, default=None, help="steering/ablation layer (default n_layer//2)")
     ap.add_argument("--alphas", default="0,6,10,16,26")
     ap.add_argument("--interactive", action="store_true",
@@ -744,9 +841,9 @@ def main() -> None:
 
     if args.experiment == "report":
         steps = ["jacobian", "logit lens", "activation patching", "concept injection",
-                 "induction heads", "neuron ablation", "attention knockout"]
+                 "induction heads", "neuron ablation", "attention knockout", "reasoning trace"]
         def step(i):
-            sys.stderr.write(f"[mindlab] {i}/7 {steps[i - 1]}…\n")
+            sys.stderr.write(f"[mindlab] {i}/8 {steps[i - 1]}…\n")
         step(1); jac = run_jacobian(lab, args.prompt)
         step(2); lens = run_lens(lab, args.prompt)
         step(3); patch = run_patch(lab, args.clean, args.corrupt, args.answer, args.foil)
@@ -754,14 +851,15 @@ def main() -> None:
         step(5); attn = run_attention(lab)
         step(6); abl = run_ablation(lab, args.prompt, layer)
         step(7); ko = run_knockout(lab, args.clean, args.answer, args.foil)
+        step(8); reason = run_reasoning(lab, REASON_PROMPT, REASON_BRIDGE, REASON_ANSWER)
         results = {"model": args.model, "jacobian": asdict(jac), "lens": asdict(lens),
                    "patch": asdict(patch), "steer": asdict(steer), "attention": asdict(attn),
-                   "ablation": asdict(abl), "knockout": asdict(ko)}
+                   "ablation": asdict(abl), "knockout": asdict(ko), "reasoning": asdict(reason)}
         if args.interactive:
             from interactive import render_interactive
             html_text = render_interactive(args.model, results, time.time() - t0)
         else:
-            html_text = render_html(args.model, jac, lens, patch, steer, attn, time.time() - t0)
+            html_text = render_html(args.model, jac, lens, patch, steer, attn, time.time() - t0, reason)
         with open(args.out, "w") as f:
             f.write(html_text)
         with open(args.out.replace(".html", ".json"), "w") as f:
@@ -783,6 +881,10 @@ def main() -> None:
         result = run_ablation(lab, args.prompt, layer)
     elif args.experiment == "knockout":
         result = run_knockout(lab, args.clean, args.answer, args.foil)
+    elif args.experiment == "reasoning":
+        rp = REASON_PROMPT if args.prompt == DEFAULT_PROMPT else args.prompt
+        ra = REASON_ANSWER if args.answer == " Mary" else args.answer
+        result = run_reasoning(lab, rp, args.bridge, ra)
     else:
         result = run_attention(lab)
     json.dump(asdict(result), sys.stdout, indent=2)
