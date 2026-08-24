@@ -316,6 +316,70 @@ a handful lock onto BPE byte fragments. The selectivity metric measures *token* 
 so a genuinely context-selective feature scores badly on it. What is solid: the fidelity number,
 the features-vs-basis gap, and the causal takeovers — all reproducible with one command.
 
+### 9.1 Does scale make the features cleaner?
+
+**Question.** The obvious follow-up: run the same dictionary on `gpt2-large` (774M, 36 layers,
+d = 1280) and see whether a 6× bigger model holds cleaner features. Everything that could confound
+it is held fixed — sparsity (k = 32), expansion ratio (F/d = 5.33, so F = 6827), tokens per
+feature (~29, so 200k tokens), and epochs (20). Only the model changes.
+
+**First answer: worse on every headline number.** At matched *relative* depth (layer 18 of 36
+against layer 6 of 12), gpt2-large loses across the board — median feature entropy 0.442 → 0.565,
+monosemantic features 113/200 → 83/200, variance explained 77.4% → 68.3%, causal takeovers 4/8 →
+3/8. Its most selective features are whitespace and punctuation with incoherent readouts:
+`\n` → *ONY, 2018, deen*; `~` → *=~=~, beta, FP*.
+
+**But that comparison is confounded by depth, and §9's own depth sweep proves it.** On gpt2,
+median entropy rose with depth (0.446 at L2 → 0.442 at L6 → **0.638** at L10) and causal takeovers
+rose too (3/8 → 4/8 → **7/8**, since injecting nearer the output leaves fewer layers to wash the
+signal out). gpt2-large's layer 18 sits squarely in that trend. Matching relative depth necessarily
+unmatches absolute depth; you cannot have both. So the control is gpt2-large at **layer 6**,
+absolute depth matched, everything else identical:
+
+| | gpt2 L6 (124M) | gpt2-large L6 (774M) | gpt2-large L18 |
+| --- | --- | --- | --- |
+| median feature entropy | **0.442** | 0.507 | 0.565 |
+| monosemantic (H < 0.5) | **113/200** | 98/200 | 83/200 |
+| top token is a real word | 72% | **91%** | 62% |
+| top token is byte junk | 12% | **0%** | 3% |
+| variance explained | 77.4% | **79.5%** | 68.3% |
+| loss recovered | **98.3%** | 97.8% | 95.3% |
+| fires on ≥2 distinct words | 38% | **72%** | 41% |
+| single-token detectors | 34% | **12%** | 44% |
+| mean distinct word types | 2.16 | **2.94** | 1.53 |
+
+**Finding — the features do get cleaner, and the selectivity metric says the opposite because it
+rewards the wrong thing.** At matched depth, gpt2-large's byte-fragment features vanish entirely
+(12% → 0%), nearly every feature keys on a real word (72% → 91%), and it reconstructs slightly
+*better* despite a 67% wider residual stream. What it stops producing is the single-token detector:
+34% → 12%. What it produces instead are features spanning several related words —
+
+| gpt2-large L6 feature | fires on | writes |
+| --- | --- | --- |
+| #6556 | ` Isaiah`, ` prophetic` | `miah`, `iyah`, ` prophet`, ` Babel` |
+| #5079 | ` Mueller`, ` investigation` | ` indicted`, `buster`, `hound` |
+| #5322 | ` Moody`, ` outlook` | ` rating`, ` composite`, `graded` |
+| #2154 | ` impe`, ` impeachment` | `aching`, `achable`, `ACH` |
+| #4458 | ` pan` | `acea`, `orama`, `ographic` |
+
+A feature that fires on *both* ` Isaiah` and ` prophetic` and writes ` prophet` is doing something
+more concept-like than one that fires only on ` Wonder`. But token entropy scores it **worse**, by
+construction: the metric measures how concentrated a feature's top activations are on one token
+*type*, so a feature keyed to a concept rather than a string is penalized exactly for being more
+abstract. gpt2's 0.442 is partly a measure of how many pure string-detectors it has.
+
+The causal numbers are a depth artifact for the same reason: injecting at layer 6 of gpt2-large
+leaves **30** layers of downstream processing, against 6 in gpt2. That gap — not feature
+quality — is what 44.2% → 5.7% median peak probability measures.
+
+**Scope, and what this costs the earlier claim.** 32 inspected features per run is a small sample,
+"distinct word types" is a crude proxy for "concept," and this is one layer per model with one
+dictionary configuration. The honest correction to §9 is narrower than the headline: the
+features-vs-basis *selectivity lift* is real at both scales (1.90× and 1.57×), but the absolute
+entropy number should not be read as an interpretability score across models of different sizes or
+depths — it conflates "monosemantic" with "monolexical," and those come apart exactly where the
+interesting features are.
+
 **Why it matters here.** This is the same move Splice makes on its own decisions, one level down.
 `JSpace.ts` decomposes an action score into named, inspectable contributions rather than trusting
 a scalar; `features.py` decomposes a model's hidden state into named, inspectable parts rather

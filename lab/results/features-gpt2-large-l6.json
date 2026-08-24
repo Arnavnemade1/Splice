@@ -1,0 +1,4504 @@
+{
+  "model": "gpt2-large",
+  "layer": 6,
+  "config": {
+    "features": 6827,
+    "tokens": 200000,
+    "epochs": 20,
+    "sparsity": "topk",
+    "k": 32,
+    "l1": null,
+    "batch": 4096,
+    "lr": 0.003
+  },
+  "training": [
+    {
+      "epoch": 1,
+      "recon_loss": 326.4315,
+      "l1": 67.438,
+      "l0": 32.0,
+      "dead": 0
+    },
+    {
+      "epoch": 2,
+      "recon_loss": 166.6271,
+      "l1": 69.542,
+      "l0": 32.0,
+      "dead": 0
+    },
+    {
+      "epoch": 3,
+      "recon_loss": 129.5783,
+      "l1": 74.793,
+      "l0": 32.0,
+      "dead": 46
+    },
+    {
+      "epoch": 4,
+      "recon_loss": 115.6487,
+      "l1": 77.517,
+      "l0": 32.0,
+      "dead": 72
+    },
+    {
+      "epoch": 5,
+      "recon_loss": 108.3236,
+      "l1": 78.867,
+      "l0": 32.0,
+      "dead": 85
+    },
+    {
+      "epoch": 6,
+      "recon_loss": 104.8602,
+      "l1": 79.112,
+      "l0": 32.0,
+      "dead": 23
+    },
+    {
+      "epoch": 7,
+      "recon_loss": 99.2863,
+      "l1": 79.979,
+      "l0": 32.0,
+      "dead": 85
+    },
+    {
+      "epoch": 8,
+      "recon_loss": 95.7228,
+      "l1": 80.48,
+      "l0": 32.0,
+      "dead": 101
+    },
+    {
+      "epoch": 9,
+      "recon_loss": 92.6318,
+      "l1": 80.878,
+      "l0": 32.0,
+      "dead": 104
+    },
+    {
+      "epoch": 10,
+      "recon_loss": 90.0737,
+      "l1": 81.278,
+      "l0": 32.0,
+      "dead": 106
+    },
+    {
+      "epoch": 11,
+      "recon_loss": 88.8431,
+      "l1": 81.338,
+      "l0": 32.0,
+      "dead": 1
+    },
+    {
+      "epoch": 12,
+      "recon_loss": 85.4509,
+      "l1": 82.016,
+      "l0": 32.0,
+      "dead": 52
+    },
+    {
+      "epoch": 13,
+      "recon_loss": 83.5694,
+      "l1": 82.486,
+      "l0": 32.0,
+      "dead": 67
+    },
+    {
+      "epoch": 14,
+      "recon_loss": 81.8587,
+      "l1": 82.865,
+      "l0": 32.0,
+      "dead": 78
+    },
+    {
+      "epoch": 15,
+      "recon_loss": 80.39,
+      "l1": 83.251,
+      "l0": 32.0,
+      "dead": 73
+    },
+    {
+      "epoch": 16,
+      "recon_loss": 79.2519,
+      "l1": 83.599,
+      "l0": 32.0,
+      "dead": 78
+    },
+    {
+      "epoch": 17,
+      "recon_loss": 78.1292,
+      "l1": 83.852,
+      "l0": 32.0,
+      "dead": 79
+    },
+    {
+      "epoch": 18,
+      "recon_loss": 77.3663,
+      "l1": 84.063,
+      "l0": 32.0,
+      "dead": 77
+    },
+    {
+      "epoch": 19,
+      "recon_loss": 76.7729,
+      "l1": 84.163,
+      "l0": 32.0,
+      "dead": 80
+    },
+    {
+      "epoch": 20,
+      "recon_loss": 76.5131,
+      "l1": 84.222,
+      "l0": 32.0,
+      "dead": 81
+    }
+  ],
+  "fidelity": {
+    "l0": 32.0,
+    "n_features": 6827,
+    "d_model": 1280,
+    "dead_features": 193,
+    "variance_explained": 0.7946,
+    "ce_baseline": 3.6267,
+    "ce_reconstructed": 3.746,
+    "ce_ablated": 8.9658,
+    "loss_recovered": 0.9777,
+    "interpretation": [
+      "32.0 of 6827 features fire per token \u2014 the model's 1280-dimensional state at layer 6 is re-expressed as a sum of about 32 named parts.",
+      "The reconstruction keeps 79.5% of the variance, and splicing it back into the forward pass recovers 97.8% of the model's language-modelling loss (CE 3.63 real \u2192 3.75 rebuilt \u2192 8.97 deleted).",
+      "193 features never fired on held-out text."
+    ],
+    "note": "Loss recovered is the honest test of a dictionary: splice the reconstruction back into the forward pass in place of the real residual stream and see whether the model still predicts text. 1.0 means the sparse code carried everything the layer was doing; 0.0 means it carried no more than deleting the layer's output."
+  },
+  "interpret": {
+    "layer": 6,
+    "n_inspected": 32,
+    "features": [
+      {
+        "index": 5429,
+        "density": 0.000361,
+        "max_activation": 37.01,
+        "token_entropy": 0.0,
+        "top_contexts": [
+          {
+            "token": "etc",
+            "left": " 2019 debug1: Reading configuration data /",
+            "right": "/ssh/",
+            "token_id": 14784,
+            "activation": 37.01
+          },
+          {
+            "token": "etc",
+            "left": " this by modifying /",
+            "right": "/hosts",
+            "token_id": 14784,
+            "activation": 35.094
+          },
+          {
+            "token": "etc",
+            "left": " We can do that by looking in /",
+            "right": "/apt/",
+            "token_id": 14784,
+            "activation": 34.585
+          },
+          {
+            "token": "etc",
+            "left": " the GECOS field of each /",
+            "right": "/passwd",
+            "token_id": 14784,
+            "activation": 34.485
+          },
+          {
+            "token": "etc",
+            "left": " local DNS entry for the box in /",
+            "right": "/hosts",
+            "token_id": 14784,
+            "activation": 33.622
+          },
+          {
+            "token": "etc",
+            "left": " manager to use.\n\ncat /",
+            "right": "/apt/",
+            "token_id": 14784,
+            "activation": 33.504
+          },
+          {
+            "token": "etc",
+            "left": "/ssh_config debug1: /",
+            "right": "/ssh/",
+            "token_id": 14784,
+            "activation": 33.399
+          },
+          {
+            "token": "etc",
+            "left": "! Let\u2019s check out /",
+            "right": "/passwd",
+            "token_id": 14784,
+            "activation": 32.019
+          },
+          {
+            "token": "etc",
+            "left": " shell, we can symlink /",
+            "right": "/passwd",
+            "token_id": 14784,
+            "activation": 31.951
+          },
+          {
+            "token": "etc",
+            "left": "/hosts .\n\n1 /",
+            "right": "/hosts",
+            "token_id": 14784,
+            "activation": 31.323
+          },
+          {
+            "token": "etc",
+            "left": "ftp> ln -s /",
+            "right": "/passwd",
+            "token_id": 14784,
+            "activation": 30.505
+          },
+          {
+            "token": "etc",
+            "left": "etc/hosts .\n\n/",
+            "right": "/hosts",
+            "token_id": 14784,
+            "activation": 29.704
+          }
+        ],
+        "promotes": [
+          "etc",
+          "opl",
+          "uration",
+          "ocracy",
+          "aran",
+          "ersen",
+          "atro",
+          "urable"
+        ],
+        "suppresses": [
+          "\u30ae",
+          "pha",
+          " necklace",
+          " Cadillac",
+          " thorn"
+        ]
+      },
+      {
+        "index": 5361,
+        "density": 0.000417,
+        "max_activation": 34.15,
+        "token_entropy": 0.0,
+        "top_contexts": [
+          {
+            "token": " >>",
+            "left": ":31 No.452157818",
+            "right": "4521577",
+            "token_id": 9609,
+            "activation": 34.15
+          },
+          {
+            "token": " >>",
+            "left": ".452155892 Replies:",
+            "right": "4521561",
+            "token_id": 9609,
+            "activation": 31.71
+          },
+          {
+            "token": " >>",
+            "left": ".452154764 Replies:",
+            "right": "452155342",
+            "token_id": 9609,
+            "activation": 31.513
+          },
+          {
+            "token": " >>",
+            "left": ".452156963 Replies:",
+            "right": "452157229",
+            "token_id": 9609,
+            "activation": 31.271
+          },
+          {
+            "token": " >>",
+            "left": "64 Replies: >>452155342",
+            "right": "4521623",
+            "token_id": 9609,
+            "activation": 30.85
+          },
+          {
+            "token": " >>",
+            "left": " Replies: >>452156101",
+            "right": "452156116",
+            "token_id": 9609,
+            "activation": 30.703
+          },
+          {
+            "token": " >>",
+            "left": ".452153060 Replies:",
+            "right": "4521534",
+            "token_id": 9609,
+            "activation": 30.559
+          },
+          {
+            "token": " >>",
+            "left": "63 Replies: >>452157229",
+            "right": "452157609",
+            "token_id": 9609,
+            "activation": 30.53
+          },
+          {
+            "token": " >>",
+            "left": "6429",
+            "right": "4521623",
+            "token_id": 9609,
+            "activation": 30.249
+          },
+          {
+            "token": " >>",
+            "left": ".452157949 Replies:",
+            "right": "4521580",
+            "token_id": 9609,
+            "activation": 30.022
+          },
+          {
+            "token": " >>",
+            "left": " Replies: >>452153414",
+            "right": "4521537",
+            "token_id": 9609,
+            "activation": 29.247
+          },
+          {
+            "token": " >>",
+            "left": "452156101 >>452156116",
+            "right": "4521563",
+            "token_id": 9609,
+            "activation": 28.745
+          }
+        ],
+        "promotes": [
+          "=\"#",
+          " ali",
+          "Ru",
+          " Hob",
+          "ancial",
+          "trump",
+          "#",
+          " NYT"
+        ],
+        "suppresses": [
+          "OTS",
+          "ppelin",
+          " loosely",
+          "\ufffd\ufffd",
+          "Catalog"
+        ]
+      },
+      {
+        "index": 4458,
+        "density": 0.000545,
+        "max_activation": 30.676,
+        "token_entropy": 0.0,
+        "top_contexts": [
+          {
+            "token": " pan",
+            "left": " the",
+            "right": " to make sure",
+            "token_id": 3425,
+            "activation": 30.676
+          },
+          {
+            "token": " pan",
+            "left": " let my filling sit in the springform",
+            "right": " for a good",
+            "token_id": 3425,
+            "activation": 24.361
+          },
+          {
+            "token": " pan",
+            "left": " not need to grease the bottom of the",
+            "right": ". If you",
+            "token_id": 3425,
+            "activation": 24.089
+          },
+          {
+            "token": " pan",
+            "left": ". His character has been written with such",
+            "right": "ache but so",
+            "token_id": 3425,
+            "activation": 23.509
+          },
+          {
+            "token": " pan",
+            "left": " che lo vedr\u00e0 sulla",
+            "right": "china de",
+            "token_id": 3425,
+            "activation": 23.469
+          },
+          {
+            "token": " pan",
+            "left": " you are going to need a springform",
+            "right": ". That\ufffd",
+            "token_id": 3425,
+            "activation": 23.225
+          },
+          {
+            "token": " pan",
+            "left": ". You can literally sit the springform",
+            "right": " in a pan",
+            "token_id": 3425,
+            "activation": 23.165
+          },
+          {
+            "token": " pan",
+            "left": " grease up the sides of the springform",
+            "right": " and pour your",
+            "token_id": 3425,
+            "activation": 23.124
+          },
+          {
+            "token": " pan",
+            "left": " firmly into the bottom of the springform",
+            "right": ". If you",
+            "token_id": 3425,
+            "activation": 23.1
+          },
+          {
+            "token": " pan",
+            "left": " grease up the sides of the springform",
+            "right": " and pour your",
+            "token_id": 3425,
+            "activation": 22.663
+          },
+          {
+            "token": " pan",
+            "left": " glommed onto the side of the",
+            "right": ", it will",
+            "token_id": 3425,
+            "activation": 22.598
+          },
+          {
+            "token": " pan",
+            "left": "\u0131\u015f\u0131kl\u0131 reklam",
+            "right": "osunda k",
+            "token_id": 3425,
+            "activation": 22.367
+          }
+        ],
+        "promotes": [
+          "acea",
+          "orama",
+          "zers",
+          "zer",
+          "ographic",
+          "tera",
+          "zac",
+          "ically"
+        ],
+        "suppresses": [
+          "ombs",
+          "DON",
+          "Watch",
+          "iona",
+          "inders"
+        ]
+      },
+      {
+        "index": 4719,
+        "density": 0.000445,
+        "max_activation": 30.259,
+        "token_entropy": 0.0,
+        "top_contexts": [
+          {
+            "token": " apt",
+            "left": " on the target machine, we first run",
+            "right": "-get update",
+            "token_id": 15409,
+            "activation": 30.259
+          },
+          {
+            "token": " apt",
+            "left": "ll just copy and paste the output from",
+            "right": "-cache show",
+            "token_id": 15409,
+            "activation": 30.045
+          },
+          {
+            "token": " apt",
+            "left": " on the fact that we can call both",
+            "right": "-get update",
+            "token_id": 15409,
+            "activation": 29.837
+          },
+          {
+            "token": " apt",
+            "left": ".\n\nA package manager (like",
+            "right": "-get et",
+            "token_id": 15409,
+            "activation": 29.757
+          },
+          {
+            "token": " apt",
+            "left": "0.0.1:8002",
+            "right": "-get update",
+            "token_id": 15409,
+            "activation": 29.584
+          },
+          {
+            "token": " apt",
+            "left": "0.0.1:8002",
+            "right": "-get upgrade",
+            "token_id": 15409,
+            "activation": 29.291
+          },
+          {
+            "token": " apt",
+            "left": " potentially dangerous to use. N: See",
+            "right": "-secure(",
+            "token_id": 15409,
+            "activation": 28.978
+          },
+          {
+            "token": " apt",
+            "left": " tunnels, sftp, php,",
+            "right": ", apt-",
+            "token_id": 15409,
+            "activation": 28.912
+          },
+          {
+            "token": " apt",
+            "left": " first run apt-get update followed by",
+            "right": "",
+            "token_id": 15409,
+            "activation": 27.827
+          },
+          {
+            "token": " apt",
+            "left": " (described below) and trying to run",
+            "right": "-get update",
+            "token_id": 15409,
+            "activation": 26.607
+          },
+          {
+            "token": " apt",
+            "left": " sftp, php, apt,",
+            "right": "-get,",
+            "token_id": 15409,
+            "activation": 26.305
+          },
+          {
+            "token": " apt",
+            "left": " can call both apt-get update and",
+            "right": "-get upgrade",
+            "token_id": 15409,
+            "activation": 25.98
+          }
+        ],
+        "promotes": [
+          "itude",
+          "itudes",
+          "ussen",
+          "oise",
+          "uncture",
+          "resses",
+          "uana",
+          "ilus"
+        ],
+        "suppresses": [
+          " plotted",
+          "Var",
+          "udder",
+          "ctors",
+          "\u9f8d\u559a\u58eb"
+        ]
+      },
+      {
+        "index": 390,
+        "density": 0.000317,
+        "max_activation": 32.368,
+        "token_entropy": 0.2263,
+        "top_contexts": [
+          {
+            "token": " vis",
+            "left": ",",
+            "right": "er en st",
+            "token_id": 1490,
+            "activation": 32.368
+          },
+          {
+            "token": " vis",
+            "left": " to appear in the Reporter; my obligation",
+            "right": " a vis As",
+            "token_id": 1490,
+            "activation": 28.015
+          },
+          {
+            "token": " vis",
+            "left": " the flared brim at the back, the",
+            "right": "or framework and",
+            "token_id": 1490,
+            "activation": 27.987
+          },
+          {
+            "token": " vis",
+            "left": " r\u00f8veri.\n\nDet",
+            "right": "er en op",
+            "token_id": 1490,
+            "activation": 27.219
+          },
+          {
+            "token": " vis",
+            "left": "me.\n\nSamtidig",
+            "right": "er rapporten",
+            "token_id": 1490,
+            "activation": 26.794
+          },
+          {
+            "token": " vis",
+            "left": "is\u2019s mercy and sound advice",
+            "right": " a vis bald",
+            "token_id": 1490,
+            "activation": 26.469
+          },
+          {
+            "token": " vis",
+            "left": "omsorg. Unders\u00f8kelsen",
+            "right": "er at to",
+            "token_id": 1490,
+            "activation": 25.352
+          },
+          {
+            "token": " vis",
+            "left": " in the Reporter; my obligation vis a",
+            "right": " Ascoli",
+            "token_id": 1490,
+            "activation": 24.698
+          },
+          {
+            "token": " vis",
+            "left": "\ufffds mercy and sound advice vis a",
+            "right": " bald men.",
+            "token_id": 1490,
+            "activation": 24.099
+          },
+          {
+            "token": " Vis",
+            "left": ".W. (1998) Blackness",
+            "right": "ible: Ess",
+            "token_id": 6911,
+            "activation": 13.758
+          },
+          {
+            "token": " Vis",
+            "left": " Vedlog / Dagbladet.",
+            "right": " mer\n\n",
+            "token_id": 6911,
+            "activation": 13.163
+          },
+          {
+            "token": " Vis",
+            "left": ". Foto: Linda Kastrup",
+            "right": " mere Ahmed D",
+            "token_id": 6911,
+            "activation": 13.087
+          }
+        ],
+        "promotes": [
+          "age",
+          " vis",
+          "DEM",
+          "brow",
+          "AGE",
+          " versa",
+          "cer",
+          "nu"
+        ],
+        "suppresses": [
+          "xual",
+          "ILD",
+          "inic",
+          "Valid",
+          "hots"
+        ]
+      },
+      {
+        "index": 6556,
+        "density": 0.000339,
+        "max_activation": 31.783,
+        "token_entropy": 0.2278,
+        "top_contexts": [
+          {
+            "token": " Isaiah",
+            "left": "\ufffdWriting on Berlin\u2019 in The",
+            "right": " Berlin Virtual Library",
+            "token_id": 29756,
+            "activation": 31.783
+          },
+          {
+            "token": " Isaiah",
+            "left": " seems to me quintessential in comprehending",
+            "right": "\u2019s",
+            "token_id": 29756,
+            "activation": 30.798
+          },
+          {
+            "token": " Isaiah",
+            "left": " period, which are posted on the official",
+            "right": " Berlin website as",
+            "token_id": 29756,
+            "activation": 30.727
+          },
+          {
+            "token": " Isaiah",
+            "left": " Osip Mandelshtam, and",
+            "right": " agreed to write",
+            "token_id": 29756,
+            "activation": 29.824
+          },
+          {
+            "token": " Isaiah",
+            "left": ", Oxford University. He is one of",
+            "right": " Berlin's literary",
+            "token_id": 29756,
+            "activation": 29.627
+          },
+          {
+            "token": " Isaiah",
+            "left": "after IBVL), the website of The",
+            "right": " Berlin Literary Trust",
+            "token_id": 29756,
+            "activation": 29.412
+          },
+          {
+            "token": " Isaiah",
+            "left": "\ufffdAn American Remembrance\u2019 of",
+            "right": " Berlin was held",
+            "token_id": 29756,
+            "activation": 29.135
+          },
+          {
+            "token": " Isaiah",
+            "left": " before anything for bringing out his plans.\"",
+            "right": " Berlin, \ufffd",
+            "token_id": 29756,
+            "activation": 28.299
+          },
+          {
+            "token": " Isaiah",
+            "left": " known that this book ought to exist.",
+            "right": " Berlin\u2019",
+            "token_id": 29756,
+            "activation": 28.217
+          },
+          {
+            "token": " Isaiah",
+            "left": "Brookings Institution Press, 2011) by",
+            "right": "",
+            "token_id": 29756,
+            "activation": 28.197
+          },
+          {
+            "token": " prophetic",
+            "left": " once lyrical and ironical, boldly",
+            "right": " and filled with",
+            "token_id": 49054,
+            "activation": 6.603
+          },
+          {
+            "token": "iah",
+            "left": " according to US.\n\nWhile Mar",
+            "right": "\u2019s",
+            "token_id": 9520,
+            "activation": 6.112
+          }
+        ],
+        "promotes": [
+          "miah",
+          "iyah",
+          " Yose",
+          " prophet",
+          " Babel",
+          " Isaiah",
+          "agi",
+          " Jeremiah"
+        ],
+        "suppresses": [
+          "velop",
+          "castle",
+          "enary",
+          "owners",
+          "aways"
+        ]
+      },
+      {
+        "index": 2154,
+        "density": 0.000422,
+        "max_activation": 31.028,
+        "token_entropy": 0.2562,
+        "top_contexts": [
+          {
+            "token": " impe",
+            "left": " But I do think that the failure to",
+            "right": "ach \u2014 it",
+            "token_id": 18516,
+            "activation": 31.028
+          },
+          {
+            "token": " impe",
+            "left": " also don\u2019t necessarily think that",
+            "right": "aching will be",
+            "token_id": 18516,
+            "activation": 30.64
+          },
+          {
+            "token": " impe",
+            "left": " it seemed highly unlikely that House Democrats would",
+            "right": "ach President Trump",
+            "token_id": 18516,
+            "activation": 30.0
+          },
+          {
+            "token": " impe",
+            "left": ". So the end game is Trump gets",
+            "right": "ached. He",
+            "token_id": 18516,
+            "activation": 29.893
+          },
+          {
+            "token": " impe",
+            "left": "\nI\u2019m not sure that",
+            "right": "aching is a",
+            "token_id": 18516,
+            "activation": 29.255
+          },
+          {
+            "token": " impe",
+            "left": "\ufffds engaged in so far is not",
+            "right": "achable and is",
+            "token_id": 18516,
+            "activation": 29.205
+          },
+          {
+            "token": " impe",
+            "left": ", particularly at this point, that not",
+            "right": "aching now looks",
+            "token_id": 18516,
+            "activation": 28.754
+          },
+          {
+            "token": " impe",
+            "left": " wants to be",
+            "right": "ached. I",
+            "token_id": 18516,
+            "activation": 28.735
+          },
+          {
+            "token": " impeachment",
+            "left": ". The",
+            "right": " helps elevate Warren",
+            "token_id": 30258,
+            "activation": 27.926
+          },
+          {
+            "token": " impeachment",
+            "left": " some of the Democrats who have been against",
+            "right": " have worried that",
+            "token_id": 30258,
+            "activation": 27.2
+          },
+          {
+            "token": " impeachment",
+            "left": " Trump thinks he could get out of an",
+            "right": " fight? The",
+            "token_id": 30258,
+            "activation": 27.016
+          },
+          {
+            "token": " impeachment",
+            "left": " think there\u2019s part of an",
+            "right": " fight that he",
+            "token_id": 30258,
+            "activation": 26.697
+          }
+        ],
+        "promotes": [
+          " impe",
+          "aching",
+          "achable",
+          " impeachment",
+          "ACH",
+          "llers",
+          "ached",
+          " Scrolls"
+        ],
+        "suppresses": [
+          " Wichita",
+          " Crest",
+          "nings",
+          "worn",
+          "820"
+        ]
+      },
+      {
+        "index": 1732,
+        "density": 0.000633,
+        "max_activation": 30.52,
+        "token_entropy": 0.2733,
+        "top_contexts": [
+          {
+            "token": " cad",
+            "left": "ades federales identificaron 12 mil",
+            "right": "\u00e1veres",
+            "token_id": 20603,
+            "activation": 30.52
+          },
+          {
+            "token": " cad",
+            "left": "ado alrededor de 12 mil",
+            "right": "\u00e1veres",
+            "token_id": 20603,
+            "activation": 30.476
+          },
+          {
+            "token": " cad",
+            "left": " a alrededor de 12 mil",
+            "right": "\u00e1veres",
+            "token_id": 20603,
+            "activation": 30.257
+          },
+          {
+            "token": " cad",
+            "left": "ado alrededor de 12 mil",
+            "right": "\u00e1veres",
+            "token_id": 20603,
+            "activation": 29.82
+          },
+          {
+            "token": " cad",
+            "left": " que el reconocimiento de",
+            "right": "\u00e1veres",
+            "token_id": 20603,
+            "activation": 28.908
+          },
+          {
+            "token": " cad",
+            "left": "ificado a m\u00e1s de 12 mil",
+            "right": "\u00e1veres",
+            "token_id": 20603,
+            "activation": 28.88
+          },
+          {
+            "token": " cad",
+            "left": ", ou nous te faisons",
+            "right": "enasser le",
+            "token_id": 20603,
+            "activation": 28.11
+          },
+          {
+            "token": "ad",
+            "left": "\n\n(Dagbl",
+            "right": "et): Et",
+            "token_id": 324,
+            "activation": 8.113
+          },
+          {
+            "token": "ad",
+            "left": " Hans Arne Vedlog / Dagbl",
+            "right": "et. Vis",
+            "token_id": 324,
+            "activation": 8.071
+          },
+          {
+            "token": "ad",
+            "left": "nsker i reformen. Dagbl",
+            "right": "et f\u00e5",
+            "token_id": 324,
+            "activation": 7.879
+          },
+          {
+            "token": "ad",
+            "left": " reformen, etter det Dagbl",
+            "right": "et forst",
+            "token_id": 324,
+            "activation": 7.756
+          },
+          {
+            "token": "ad",
+            "left": ".\n\nN\u00e5 kan Dagbl",
+            "right": "et gi",
+            "token_id": 324,
+            "activation": 7.656
+          }
+        ],
+        "promotes": [
+          "bury",
+          "uve",
+          "bys",
+          " cad",
+          " Rout",
+          "venture",
+          "ouble",
+          " travellers"
+        ],
+        "suppresses": [
+          "advertisement",
+          "atton",
+          "opher",
+          " RNC",
+          " testifying"
+        ]
+      },
+      {
+        "index": 2051,
+        "density": 0.00035,
+        "max_activation": 30.427,
+        "token_entropy": 0.2733,
+        "top_contexts": [
+          {
+            "token": " stra",
+            "left": "mdeles skal v\u00e6re",
+            "right": "ffbart.",
+            "token_id": 3534,
+            "activation": 30.427
+          },
+          {
+            "token": " stra",
+            "left": "ke allerede pletter p\u00e5",
+            "right": "ffeattest",
+            "token_id": 3534,
+            "activation": 30.309
+          },
+          {
+            "token": " stra",
+            "left": "g\u00f8relser \u2013 dvs.",
+            "right": "ffe som f",
+            "token_id": 3534,
+            "activation": 29.997
+          },
+          {
+            "token": " stra",
+            "left": "g\u00f8relser \u2013 dvs.",
+            "right": "ffe som f",
+            "token_id": 3534,
+            "activation": 29.815
+          },
+          {
+            "token": " stra",
+            "left": "g\u00f8relser \u2013 dvs.",
+            "right": "ffe som f",
+            "token_id": 3534,
+            "activation": 29.762
+          },
+          {
+            "token": " stra",
+            "left": " besittelse ikke skal",
+            "right": "ffes.",
+            "token_id": 3534,
+            "activation": 29.213
+          },
+          {
+            "token": " stra",
+            "left": " 2018 er somaliere i Danmark",
+            "right": "ffet 26",
+            "token_id": 3534,
+            "activation": 28.835
+          },
+          {
+            "token": "stra",
+            "left": " de skulle bli ek",
+            "right": " tatt hensyn",
+            "token_id": 12044,
+            "activation": 18.221
+          },
+          {
+            "token": "stra",
+            "left": "reformen p\u00e5 et ek",
+            "right": "ordin\u00e6",
+            "token_id": 12044,
+            "activation": 17.929
+          },
+          {
+            "token": "stra",
+            "left": "15 million to Gaza to allow cash-",
+            "right": "pped Hamas to",
+            "token_id": 12044,
+            "activation": 17.806
+          },
+          {
+            "token": "stra",
+            "left": "\u00e5rd ska ske p\u00e5 \u00d6",
+            "right": " sjuk",
+            "token_id": 12044,
+            "activation": 17.566
+          },
+          {
+            "token": "stra",
+            "left": " indigent or unidentified, but cash-",
+            "right": "pped jurisdictions from",
+            "token_id": 12044,
+            "activation": 17.285
+          }
+        ],
+        "promotes": [
+          "agin",
+          "ieri",
+          "ffer",
+          "ject",
+          "addle",
+          "ights",
+          "istered",
+          "igning"
+        ],
+        "suppresses": [
+          "artments",
+          " \u88cf\ufffd",
+          "\u738b",
+          " Constable",
+          "\u6b66"
+        ]
+      },
+      {
+        "index": 2475,
+        "density": 0.000333,
+        "max_activation": 38.063,
+        "token_entropy": 0.2789,
+        "top_contexts": [
+          {
+            "token": " copyright",
+            "left": " and ideological sacrifices.\u201d<|endoftext|>Image",
+            "right": " PAcemaker",
+            "token_id": 6634,
+            "activation": 38.063
+          },
+          {
+            "token": " copyright",
+            "left": " every day and night\".\n\nImage",
+            "right": " PA Media Image",
+            "token_id": 6634,
+            "activation": 34.477
+          },
+          {
+            "token": " copyright",
+            "left": "'s electorate took part.\n\nimage",
+            "right": " Getty Images image",
+            "token_id": 6634,
+            "activation": 29.424
+          },
+          {
+            "token": " copyright",
+            "left": " should he enter Spain.\n\nimage",
+            "right": " Getty",
+            "token_id": 6634,
+            "activation": 28.389
+          },
+          {
+            "token": " copyright",
+            "left": " Related Topics Catalonia independence protests\n\nimage",
+            "right": " Reuters image caption",
+            "token_id": 6634,
+            "activation": 28.195
+          },
+          {
+            "token": " caption",
+            "left": "\".\n\nImage copyright PA Media Image",
+            "right": " PPE equipment",
+            "token_id": 8305,
+            "activation": 17.56
+          },
+          {
+            "token": " caption",
+            "left": "\ufffd<|endoftext|>Image copyright PAcemaker Image",
+            "right": " Workers at Lind",
+            "token_id": 8305,
+            "activation": 17.067
+          },
+          {
+            "token": " caption",
+            "left": " Images image",
+            "right": " Independence supporters celebrated",
+            "token_id": 8305,
+            "activation": 16.423
+          },
+          {
+            "token": " caption",
+            "left": ".\n\nimage copyright Getty Images image",
+            "right": " In\u00e9s Ar",
+            "token_id": 8305,
+            "activation": 14.211
+          },
+          {
+            "token": " copyright",
+            "left": " every month!\n\nPong is",
+            "right": " Atari Inc.",
+            "token_id": 6634,
+            "activation": 13.896
+          },
+          {
+            "token": " caption",
+            "left": " independence protests\n\nimage copyright Reuters image",
+            "right": " \"Now is",
+            "token_id": 8305,
+            "activation": 13.352
+          },
+          {
+            "token": " caption",
+            "left": " Published duration 8 November 2012\n\nimage",
+            "right": " Frank Stron",
+            "token_id": 8305,
+            "activation": 13.068
+          }
+        ],
+        "promotes": [
+          "yright",
+          "yo",
+          " Science",
+          " \u00a9",
+          " AFP",
+          "cop",
+          "protected",
+          " Reuters"
+        ],
+        "suppresses": [
+          " Norn",
+          " Berserker",
+          "iven",
+          "LET",
+          "BG"
+        ]
+      },
+      {
+        "index": 5093,
+        "density": 0.000295,
+        "max_activation": 35.505,
+        "token_entropy": 0.2903,
+        "top_contexts": [
+          {
+            "token": "Anonymous",
+            "left": " to our channels on YouTube & Telegram<|endoftext|>",
+            "right": " (ID:",
+            "token_id": 20660,
+            "activation": 35.505
+          },
+          {
+            "token": "Anonymous",
+            "left": "\n\nalso more pics please\n\n",
+            "right": " (ID:",
+            "token_id": 20660,
+            "activation": 33.868
+          },
+          {
+            "token": "Anonymous",
+            "left": " emotional breakdown\n\ncontinued\n\n",
+            "right": " (ID:",
+            "token_id": 20660,
+            "activation": 33.847
+          },
+          {
+            "token": "Anonymous",
+            "left": "uddling\n\ncontinued\n\n",
+            "right": " (ID:",
+            "token_id": 20660,
+            "activation": 32.867
+          },
+          {
+            "token": "Anonymous",
+            "left": " so whatever\n\nContinued\n\n",
+            "right": " (ID:",
+            "token_id": 20660,
+            "activation": 32.773
+          },
+          {
+            "token": "Anonymous",
+            "left": " do\n\ncontinued\n\n",
+            "right": " (ID:",
+            "token_id": 20660,
+            "activation": 32.739
+          },
+          {
+            "token": "Anonymous",
+            "left": "Hurry the fuck up op\n\n",
+            "right": " (ID:",
+            "token_id": 20660,
+            "activation": 31.759
+          },
+          {
+            "token": "Anonymous",
+            "left": " OP wouldn't do that.\n\n",
+            "right": " (ID:",
+            "token_id": 20660,
+            "activation": 31.01
+          },
+          {
+            "token": "Anonymous",
+            "left": ", ill try to be faster\n\n",
+            "right": " (ID:",
+            "token_id": 20660,
+            "activation": 30.636
+          },
+          {
+            "token": " Anonymous",
+            "left": " was organized by the by the hacking group",
+            "right": ". Protesters wore",
+            "token_id": 19200,
+            "activation": 22.358
+          },
+          {
+            "token": " anonymous",
+            "left": "s the article in our normal series of",
+            "right": " articles signed with",
+            "token_id": 11614,
+            "activation": 18.297
+          },
+          {
+            "token": " anonymous",
+            "left": " piece is published. Do you ever publish",
+            "right": " pieces? if",
+            "token_id": 11614,
+            "activation": 12.558
+          }
+        ],
+        "promotes": [
+          "onymous",
+          " PB",
+          "anian",
+          " Conan",
+          "NP",
+          "anon",
+          " Anonymous",
+          "imity"
+        ],
+        "suppresses": [
+          "yard",
+          "uca",
+          "uga",
+          "lah",
+          "regular"
+        ]
+      },
+      {
+        "index": 5079,
+        "density": 0.000545,
+        "max_activation": 31.791,
+        "token_entropy": 0.2903,
+        "top_contexts": [
+          {
+            "token": " Mueller",
+            "left": " part of the",
+            "right": " investigation that he",
+            "token_id": 17768,
+            "activation": 31.791
+          },
+          {
+            "token": " Mueller",
+            "left": ". I really disagree that Trump enjoyed the",
+            "right": " investigation. He",
+            "token_id": 17768,
+            "activation": 30.175
+          },
+          {
+            "token": " Mueller",
+            "left": " thought it would have been a mistake after",
+            "right": " because I don",
+            "token_id": 17768,
+            "activation": 30.167
+          },
+          {
+            "token": " Mueller",
+            "left": " Trump should be gone. Given that the",
+            "right": " Report was a",
+            "token_id": 17768,
+            "activation": 29.065
+          },
+          {
+            "token": " Mueller",
+            "left": " for her failure to do it after the",
+            "right": " Report, which",
+            "token_id": 17768,
+            "activation": 28.795
+          },
+          {
+            "token": " Mueller",
+            "left": " investigation. He was more restrained during the",
+            "right": " investigation and became",
+            "token_id": 17768,
+            "activation": 28.184
+          },
+          {
+            "token": " Mueller",
+            "left": " he can only be removed from office whereas",
+            "right": " could actually put",
+            "token_id": 17768,
+            "activation": 27.417
+          },
+          {
+            "token": " Mueller",
+            "left": " been much more overtly lawless since the",
+            "right": " investigation ended,",
+            "token_id": 17768,
+            "activation": 26.919
+          },
+          {
+            "token": " Mueller",
+            "left": " ended, which suggests to me that the",
+            "right": " investigation worried him",
+            "token_id": 17768,
+            "activation": 25.359
+          },
+          {
+            "token": " investigation",
+            "left": " part of the Mueller",
+            "right": " that he enjoyed",
+            "token_id": 3645,
+            "activation": 8.295
+          },
+          {
+            "token": " investigation",
+            "left": " I really disagree that Trump enjoyed the Mueller",
+            "right": ". He was",
+            "token_id": 3645,
+            "activation": 7.881
+          },
+          {
+            "token": " probe",
+            "left": " SchiffTop Democrats call for DOJ watchdog to",
+            "right": " Barr over possible",
+            "token_id": 12774,
+            "activation": 7.835
+          }
+        ],
+        "promotes": [
+          "kai",
+          "buster",
+          "stal",
+          " indicted",
+          "hound",
+          " sealed",
+          "assic",
+          "Entry"
+        ],
+        "suppresses": [
+          "obar",
+          "ouf",
+          "Redditor",
+          " Cameroon",
+          "sec"
+        ]
+      },
+      {
+        "index": 5322,
+        "density": 0.000233,
+        "max_activation": 32.073,
+        "token_entropy": 0.3316,
+        "top_contexts": [
+          {
+            "token": " Moody",
+            "left": " bonds remains unchanged at Baa3,",
+            "right": "'s lowest investment",
+            "token_id": 32136,
+            "activation": 32.073
+          },
+          {
+            "token": " Moody",
+            "left": ", when it had a cash deficit by",
+            "right": "'s calculations.",
+            "token_id": 32136,
+            "activation": 31.811
+          },
+          {
+            "token": " Moody",
+            "left": " $16 billion in 2017, according to",
+            "right": "'s.\n",
+            "token_id": 32136,
+            "activation": 31.708
+          },
+          {
+            "token": " Moody",
+            "left": " has been downgraded four notches by",
+            "right": "'s since June",
+            "token_id": 32136,
+            "activation": 31.513
+          },
+          {
+            "token": " Moody",
+            "left": ", vice president and senior credit officer at",
+            "right": "'s. \"",
+            "token_id": 32136,
+            "activation": 30.789
+          },
+          {
+            "token": " Moody",
+            "left": " and budget strains continuing to pose problems,",
+            "right": "'s said in",
+            "token_id": 32136,
+            "activation": 30.335
+          },
+          {
+            "token": " Moody",
+            "left": ". Baraka said in a statement that",
+            "right": "'s outlook represented",
+            "token_id": 32136,
+            "activation": 29.74
+          },
+          {
+            "token": " Moody",
+            "left": " representing 9.8% of revenues,",
+            "right": "'s said.",
+            "token_id": 32136,
+            "activation": 28.198
+          },
+          {
+            "token": " outlook",
+            "left": "-rating was A2 with a negative",
+            "right": ".\n\n",
+            "token_id": 19360,
+            "activation": 7.144
+          },
+          {
+            "token": " outlook",
+            "left": "aka said in a statement that Moody's",
+            "right": " represented \"conf",
+            "token_id": 19360,
+            "activation": 7.017
+          },
+          {
+            "token": "ood",
+            "left": " Turnout was 72 percent.<|endoftext|>M",
+            "right": "y's Investors",
+            "token_id": 702,
+            "activation": 6.794
+          },
+          {
+            "token": " outlook",
+            "left": "y's Investors Service has raised its rating",
+            "right": " for Newark to",
+            "token_id": 19360,
+            "activation": 6.713
+          }
+        ],
+        "promotes": [
+          "graded",
+          " rating",
+          " composite",
+          "lio",
+          "etts",
+          " Moody",
+          "ets",
+          "eting"
+        ],
+        "suppresses": [
+          "dh",
+          "RAFT",
+          "iscover",
+          " unse",
+          "{{"
+        ]
+      },
+      {
+        "index": 3547,
+        "density": 0.00065,
+        "max_activation": 30.954,
+        "token_entropy": 0.3368,
+        "top_contexts": [
+          {
+            "token": " Alleg",
+            "left": " \u2014 Massimiliano",
+            "right": "ri (@Official",
+            "token_id": 26326,
+            "activation": 30.954
+          },
+          {
+            "token": " Alleg",
+            "left": " Highway to Broad Street<|endoftext|>Massimiliano",
+            "right": "ri ha firm",
+            "token_id": 26326,
+            "activation": 29.983
+          },
+          {
+            "token": " Alleg",
+            "left": " they were hungry.<|endoftext|>(Carlo",
+            "right": "ri/Reuters",
+            "token_id": 26326,
+            "activation": 29.311
+          },
+          {
+            "token": " Alleg",
+            "left": "vato l'annuncio.",
+            "right": "ri ha firm",
+            "token_id": 26326,
+            "activation": 29.187
+          },
+          {
+            "token": " Alleg",
+            "left": "a Supercoppa Italiana. Con",
+            "right": "ri alla",
+            "token_id": 26326,
+            "activation": 29.107
+          },
+          {
+            "token": " Alleg",
+            "left": "i a livello tecnico.",
+            "right": "ri, P",
+            "token_id": 26326,
+            "activation": 28.653
+          },
+          {
+            "token": " Alleg",
+            "left": "i dicono anche che con",
+            "right": "ri alla",
+            "token_id": 26326,
+            "activation": 28.002
+          },
+          {
+            "token": " Alleg",
+            "left": " altre parole, la Juve e",
+            "right": "",
+            "token_id": 26326,
+            "activation": 27.87
+          },
+          {
+            "token": " Alleg",
+            "left": " ufficiale: Massimiliano",
+            "right": "ri ha r",
+            "token_id": 26326,
+            "activation": 27.569
+          },
+          {
+            "token": " allegations",
+            "left": " just happened.\n\n\"If the",
+            "right": " are correct,",
+            "token_id": 7636,
+            "activation": 9.303
+          },
+          {
+            "token": " accusations",
+            "left": ", how the women who have made the",
+            "right": " are only seeing",
+            "token_id": 14227,
+            "activation": 9.27
+          },
+          {
+            "token": " alleged",
+            "left": " producing a visual depiction.\"\n\nThe",
+            "right": " price wasn't",
+            "token_id": 4260,
+            "activation": 9.15
+          }
+        ],
+        "promotes": [
+          " Riot",
+          "heny",
+          "iance",
+          "edly",
+          "roit",
+          "ective",
+          " Imper",
+          " Alleg"
+        ],
+        "suppresses": [
+          "anthrop",
+          "OLD",
+          "adan",
+          "pei",
+          "berus"
+        ]
+      },
+      {
+        "index": 482,
+        "density": 0.000211,
+        "max_activation": 32.762,
+        "token_entropy": 0.3956,
+        "top_contexts": [
+          {
+            "token": "inst",
+            "left": "/DEBIAN/post",
+            "right": "\n\nWith",
+            "token_id": 8625,
+            "activation": 32.762
+          },
+          {
+            "token": "inst",
+            "left": "whois/DEBIAN/post",
+            "right": " \u2550",
+            "token_id": 8625,
+            "activation": 31.306
+          },
+          {
+            "token": "inst",
+            "left": ", we\u2019ll create our post",
+            "right": " maintainer script",
+            "token_id": 8625,
+            "activation": 31.208
+          },
+          {
+            "token": "inst",
+            "left": " DSS research at CSP, \"",
+            "right": "alling in the",
+            "token_id": 8625,
+            "activation": 30.121
+          },
+          {
+            "token": "inst",
+            "left": " does when institutional racism becomes an \u2018",
+            "right": "itutional admission\ufffd",
+            "token_id": 8625,
+            "activation": 30.063
+          },
+          {
+            "token": " Inst",
+            "left": "2.17~deb9u1",
+            "right": "alled-Size",
+            "token_id": 2262,
+            "activation": 29.563
+          },
+          {
+            "token": "inst",
+            "left": " recognises the police force as \u2018",
+            "right": "itutionally racist",
+            "token_id": 8625,
+            "activation": 29.427
+          },
+          {
+            "token": " inst",
+            "left": " sooner\n\n>Old cousinfag",
+            "right": "ates random different",
+            "token_id": 916,
+            "activation": 29.297
+          },
+          {
+            "token": "inst",
+            "left": "Don\u2019t forget to make post",
+            "right": " executable!\n",
+            "token_id": 8625,
+            "activation": 29.001
+          },
+          {
+            "token": "inst",
+            "left": " postinst maintainer script. The post",
+            "right": " script will run",
+            "token_id": 8625,
+            "activation": 28.392
+          },
+          {
+            "token": "Inst",
+            "left": "Provided by Leibniz-",
+            "right": "itut",
+            "token_id": 6310,
+            "activation": 28.191
+          },
+          {
+            "token": " Inst",
+            "left": "2.17~deb9u1",
+            "right": "alled-Size",
+            "token_id": 2262,
+            "activation": 26.488
+          }
+        ],
+        "promotes": [
+          "ruction",
+          "itution",
+          "itutional",
+          "itute",
+          "agram",
+          "inct",
+          " inst",
+          "anced"
+        ],
+        "suppresses": [
+          "pheus",
+          "cone",
+          "halla",
+          "gow",
+          "sem"
+        ]
+      },
+      {
+        "index": 84,
+        "density": 0.001267,
+        "max_activation": 33.593,
+        "token_entropy": 0.407,
+        "top_contexts": [
+          {
+            "token": " Pinterest",
+            "left": " budgie smugglers.\n\nFacebook Twitter",
+            "right": " GetUp demonstrators",
+            "token_id": 17334,
+            "activation": 33.593
+          },
+          {
+            "token": " Pinterest",
+            "left": "ichael coalmine.\n\nFacebook Twitter",
+            "right": " (L-",
+            "token_id": 17334,
+            "activation": 33.478
+          },
+          {
+            "token": " Pinterest",
+            "left": " but much faster.\n\nFacebook Twitter",
+            "right": " Hybrid purple r",
+            "token_id": 17334,
+            "activation": 33.404
+          },
+          {
+            "token": " Pinterest",
+            "left": " spacing of fruit.\n\nFacebook Twitter",
+            "right": " Inside a lab",
+            "token_id": 17334,
+            "activation": 33.135
+          },
+          {
+            "token": " Pinterest",
+            "left": " the other candidates.\n\nFacebook Twitter",
+            "right": " Dave Sharma",
+            "token_id": 17334,
+            "activation": 32.319
+          },
+          {
+            "token": " Pinterest",
+            "left": " hit the pin button to share it on",
+            "right": "! And don",
+            "token_id": 17334,
+            "activation": 19.112
+          },
+          {
+            "token": " caption",
+            "left": "\".\n\nImage copyright PA Media Image",
+            "right": " PPE equipment",
+            "token_id": 8305,
+            "activation": 7.975
+          },
+          {
+            "token": " caption",
+            "left": ".\n\nimage copyright Getty Images image",
+            "right": " In\u00e9s Ar",
+            "token_id": 8305,
+            "activation": 5.717
+          },
+          {
+            "token": " caption",
+            "left": "\ufffd<|endoftext|>Image copyright PAcemaker Image",
+            "right": " Workers at Lind",
+            "token_id": 8305,
+            "activation": 4.881
+          },
+          {
+            "token": " caption",
+            "left": " independence protests\n\nimage copyright Reuters image",
+            "right": " \"Now is",
+            "token_id": 8305,
+            "activation": 4.461
+          },
+          {
+            "token": " Twitter",
+            "left": " the spacing of fruit.\n\nFacebook",
+            "right": " Pinterest Inside a",
+            "token_id": 3009,
+            "activation": 4.338
+          },
+          {
+            "token": " Twitter",
+            "left": " \u2013 but much faster.\n\nFacebook",
+            "right": " Pinterest Hybrid purple",
+            "token_id": 3009,
+            "activation": 4.11
+          }
+        ],
+        "promotes": [
+          " Rox",
+          " Fell",
+          " Images",
+          " Related",
+          " Products",
+          " Clouds",
+          " Carbuncle",
+          " Elves"
+        ],
+        "suppresses": [
+          "edly",
+          "ingly",
+          "ctor",
+          "clusively",
+          "eal"
+        ]
+      },
+      {
+        "index": 5029,
+        "density": 0.000395,
+        "max_activation": 30.517,
+        "token_entropy": 0.4138,
+        "top_contexts": [
+          {
+            "token": " Olympic",
+            "left": " have said they are working with the International",
+            "right": " Committee to grant",
+            "token_id": 11514,
+            "activation": 30.517
+          },
+          {
+            "token": " Olympic",
+            "left": " to the present schedule, that the International",
+            "right": " Committee will be",
+            "token_id": 11514,
+            "activation": 28.389
+          },
+          {
+            "token": " Olympic",
+            "left": " breakthrough, forged on the back of the",
+            "right": " Games, have",
+            "token_id": 11514,
+            "activation": 28.144
+          },
+          {
+            "token": " Olympics",
+            "left": " demand concessions in return for participation in the",
+            "right": ".\n\n",
+            "token_id": 14935,
+            "activation": 27.287
+          },
+          {
+            "token": " Olympics",
+            "left": " cooperation at next month\u2019s Winter",
+            "right": " in Pye",
+            "token_id": 14935,
+            "activation": 26.761
+          },
+          {
+            "token": " Olympic",
+            "left": " of the abandoned airport and some disused",
+            "right": " Games venues,",
+            "token_id": 11514,
+            "activation": 25.803
+          },
+          {
+            "token": " Olympic",
+            "left": " Westside in time for the 2028",
+            "right": " Games as part",
+            "token_id": 11514,
+            "activation": 23.918
+          },
+          {
+            "token": " Games",
+            "left": ", forged on the back of the Olympic",
+            "right": ", have elevated",
+            "token_id": 5776,
+            "activation": 22.804
+          },
+          {
+            "token": " Games",
+            "left": " decide whether Boston will host the 2024 Summer",
+            "right": ". Kerry,",
+            "token_id": 5776,
+            "activation": 21.765
+          },
+          {
+            "token": " Games",
+            "left": " the abandoned airport and some disused Olympic",
+            "right": " venues, is",
+            "token_id": 5776,
+            "activation": 21.215
+          },
+          {
+            "token": " Games",
+            "left": "side in time for the 2028 Olympic",
+            "right": " as part of",
+            "token_id": 5776,
+            "activation": 21.112
+          },
+          {
+            "token": " Games",
+            "left": " no North Korean athlete has qualified for the",
+            "right": ", which start",
+            "token_id": 5776,
+            "activation": 21.022
+          }
+        ],
+        "promotes": [
+          " Rings",
+          " Games",
+          " Opening",
+          " athletes",
+          " Olymp",
+          " rings",
+          " Closing",
+          " Athlet"
+        ],
+        "suppresses": [
+          "ufact",
+          "ackle",
+          "ipple",
+          "ebook",
+          "Fed"
+        ]
+      },
+      {
+        "index": 6065,
+        "density": 0.000972,
+        "max_activation": 34.084,
+        "token_entropy": 0.4327,
+        "top_contexts": [
+          {
+            "token": " Whedon",
+            "left": " chart-topping team of Joss",
+            "right": " & John Cass",
+            "token_id": 49891,
+            "activation": 34.084
+          },
+          {
+            "token": " Whedon",
+            "left": "? Are you excited to see Joss",
+            "right": " & John Cass",
+            "token_id": 49891,
+            "activation": 33.322
+          },
+          {
+            "token": " Whedon",
+            "left": " X-Men: The Last Stand.",
+            "right": " & Cassaday",
+            "token_id": 49891,
+            "activation": 32.674
+          },
+          {
+            "token": "hedon",
+            "left": "a & Mike Perkins.\n\nW",
+            "right": " & Cassaday",
+            "token_id": 46086,
+            "activation": 21.864
+          },
+          {
+            "token": " Avengers",
+            "left": " shine in mainstream pop culture the way other",
+            "right": " and Justice Le",
+            "token_id": 19845,
+            "activation": 8.227
+          },
+          {
+            "token": " America",
+            "left": " teaming up once again to celebrate Captain",
+            "right": "'s 75th",
+            "token_id": 2253,
+            "activation": 7.391
+          },
+          {
+            "token": " America",
+            "left": "Cassaday is no stranger to Captain",
+            "right": ", having drawn",
+            "token_id": 2253,
+            "activation": 6.485
+          },
+          {
+            "token": " America",
+            "left": " story celebrating the legacy and legend of Captain",
+            "right": ". The issue",
+            "token_id": 2253,
+            "activation": 6.35
+          },
+          {
+            "token": " America",
+            "left": " in Captain",
+            "right": ": Sam Wilson",
+            "token_id": 2253,
+            "activation": 6.236
+          },
+          {
+            "token": " America",
+            "left": " John Ney Riber.\n\nCaptain",
+            "right": ": Sam Wilson",
+            "token_id": 2253,
+            "activation": 5.788
+          },
+          {
+            "token": " America",
+            "left": " of Fallen Son: The Death Of Captain",
+            "right": " and a Captain",
+            "token_id": 2253,
+            "activation": 5.327
+          },
+          {
+            "token": " America",
+            "left": " The Death Of Captain America and a Captain",
+            "right": " limited series with",
+            "token_id": 2253,
+            "activation": 4.832
+          }
+        ],
+        "promotes": [
+          " Whedon",
+          " Contra",
+          " Summers",
+          "ECA",
+          " Sched",
+          " Timbers",
+          " Brigade",
+          " LCS"
+        ],
+        "suppresses": [
+          "bered",
+          "uran",
+          "\u30a4\u30c8",
+          "jack",
+          "\u0001"
+        ]
+      },
+      {
+        "index": 1701,
+        "density": 0.000984,
+        "max_activation": 33.689,
+        "token_entropy": 0.4327,
+        "top_contexts": [
+          {
+            "token": " orig",
+            "left": " essence of Buddhism is fundamentally based on dependent",
+            "right": "ination (pr",
+            "token_id": 1796,
+            "activation": 33.689
+          },
+          {
+            "token": " orig",
+            "left": ". 517).\n\nDependent",
+            "right": "ination is usually",
+            "token_id": 1796,
+            "activation": 33.666
+          },
+          {
+            "token": " orig",
+            "left": "ourses of the Buddha do not regard dependent",
+            "right": "ination and no",
+            "token_id": 1796,
+            "activation": 33.561
+          },
+          {
+            "token": " orig",
+            "left": " attention to the scholarly world of what dependent",
+            "right": "ination probably means",
+            "token_id": 1796,
+            "activation": 32.079
+          },
+          {
+            "token": " orig",
+            "left": "The ultimate purpose of the teaching of dependent",
+            "right": "ination is to",
+            "token_id": 1796,
+            "activation": 31.965
+          },
+          {
+            "token": " orig",
+            "left": ", instead, regard transcendence of dependent",
+            "right": "ination and no",
+            "token_id": 1796,
+            "activation": 30.119
+          },
+          {
+            "token": " orig",
+            "left": " \u2013 ao empres\u00e1rio de",
+            "right": "em argent",
+            "token_id": 1796,
+            "activation": 28.992
+          },
+          {
+            "token": "Orig",
+            "left": " minimal interaction in the spirit world, (",
+            "right": "ins Parts 1",
+            "token_id": 11610,
+            "activation": 26.232
+          },
+          {
+            "token": " origin",
+            "left": " This is not to posit racism as the",
+            "right": " of everything,",
+            "token_id": 8159,
+            "activation": 16.607
+          },
+          {
+            "token": " origin",
+            "left": " might even produce the white subject as the",
+            "right": " of good feeling",
+            "token_id": 8159,
+            "activation": 15.894
+          },
+          {
+            "token": " origin",
+            "left": " object returns us to the subject as the",
+            "right": " of love?",
+            "token_id": 8159,
+            "activation": 15.678
+          },
+          {
+            "token": " originated",
+            "left": "itioned; which is not dependently",
+            "right": ". Nirvana is",
+            "token_id": 20973,
+            "activation": 15.393
+          }
+        ],
+        "promotes": [
+          " orig",
+          "ator",
+          "ITY",
+          "atell",
+          " blind",
+          "ators",
+          " stink",
+          "arag"
+        ],
+        "suppresses": [
+          "houses",
+          " Baxter",
+          "immers",
+          " Gors",
+          "zar"
+        ]
+      },
+      {
+        "index": 308,
+        "density": 0.000845,
+        "max_activation": 30.6,
+        "token_entropy": 0.4327,
+        "top_contexts": [
+          {
+            "token": " Urs",
+            "left": " surrounding",
+            "right": "a during Avatar",
+            "token_id": 37935,
+            "activation": 30.6
+          },
+          {
+            "token": " Urs",
+            "left": " of Zuko\u2019s mom,",
+            "right": "a, sometime",
+            "token_id": 37935,
+            "activation": 30.28
+          },
+          {
+            "token": " Urs",
+            "left": " Team Avatar\u2019s journey to find",
+            "right": "a \u2014 Z",
+            "token_id": 37935,
+            "activation": 29.932
+          },
+          {
+            "token": " Urs",
+            "left": "ino weren\u2019t going to give",
+            "right": "a\u2019",
+            "token_id": 37935,
+            "activation": 29.342
+          },
+          {
+            "token": " Urs",
+            "left": " Prince Zuko\u2019s mom,",
+            "right": "",
+            "token_id": 37935,
+            "activation": 28.844
+          },
+          {
+            "token": " Urs",
+            "left": " writer\u2019s had an idea behind",
+            "right": "a\u2019",
+            "token_id": 37935,
+            "activation": 27.188
+          },
+          {
+            "token": " Urs",
+            "left": "term environmental effects like GMOs,\" affirms",
+            "right": "ula Hudson,",
+            "token_id": 37935,
+            "activation": 26.414
+          },
+          {
+            "token": " Oz",
+            "left": " overshadow Aang\u2019s battle with",
+            "right": "ai because that",
+            "token_id": 18024,
+            "activation": 6.294
+          },
+          {
+            "token": " U",
+            "left": " retrieved data in background, you need the",
+            "right": "i thread,",
+            "token_id": 471,
+            "activation": 5.3
+          },
+          {
+            "token": " U",
+            "left": "i thread you have drawing problems and your",
+            "right": "i can seem",
+            "token_id": 471,
+            "activation": 5.05
+          },
+          {
+            "token": " U",
+            "left": " a Handler to post the results in the",
+            "right": "i Thread,",
+            "token_id": 471,
+            "activation": 5.024
+          },
+          {
+            "token": " Sven",
+            "left": "\n\nViking Chieftain",
+            "right": ": \u201c",
+            "token_id": 44611,
+            "activation": 4.87
+          }
+        ],
+        "promotes": [
+          "ula",
+          "isode",
+          "arent",
+          "aeus",
+          "arks",
+          "abus",
+          "cano",
+          "aman"
+        ],
+        "suppresses": [
+          "istically",
+          "baugh",
+          " plaster",
+          "cloth",
+          " practition"
+        ]
+      },
+      {
+        "index": 4354,
+        "density": 0.000895,
+        "max_activation": 30.985,
+        "token_entropy": 0.4825,
+        "top_contexts": [
+          {
+            "token": "UTC",
+            "left": " PM (",
+            "right": "), split into",
+            "token_id": 17429,
+            "activation": 30.985
+          },
+          {
+            "token": "UTC",
+            "left": " 2019 0:00:00 AM (",
+            "right": ") to September",
+            "token_id": 17429,
+            "activation": 25.076
+          },
+          {
+            "token": " GMT",
+            "left": " 17:37 ET (22:37",
+            "right": ")<|endoftext|>Pope",
+            "token_id": 16987,
+            "activation": 23.89
+          },
+          {
+            "token": " ET",
+            "left": " on Wednesday (5 p.m.",
+            "right": ") before closing",
+            "token_id": 12152,
+            "activation": 14.559
+          },
+          {
+            "token": " ET",
+            "left": " p.m.",
+            "right": "). The 2017",
+            "token_id": 12152,
+            "activation": 14.451
+          },
+          {
+            "token": " ET",
+            "left": "\nJanuary 11, 2018 17:37",
+            "right": " (22:",
+            "token_id": 12152,
+            "activation": 14.099
+          },
+          {
+            "token": " ET",
+            "left": " March 4 at 2 p.m.",
+            "right": ". Crew SC",
+            "token_id": 12152,
+            "activation": 13.837
+          },
+          {
+            "token": " ET",
+            "left": " at 1:30 p.m.",
+            "right": ", with the",
+            "token_id": 12152,
+            "activation": 13.307
+          },
+          {
+            "token": " ET",
+            "left": " at 2:00 p.m.",
+            "right": ", simulcast",
+            "token_id": 12152,
+            "activation": 12.474
+          },
+          {
+            "token": "Reuters",
+            "left": "(djwm)<|endoftext|>CAIRO (",
+            "right": ") - Wheat",
+            "token_id": 12637,
+            "activation": 11.656
+          },
+          {
+            "token": "Reuters",
+            "left": " )\n\nBANGKOK (",
+            "right": ") - U",
+            "token_id": 12637,
+            "activation": 11.051
+          },
+          {
+            "token": "Reuters",
+            "left": "\n\nLONDON, June 27 (",
+            "right": ") - Prime",
+            "token_id": 12637,
+            "activation": 11.033
+          }
+        ],
+        "promotes": [
+          "OUT",
+          "UTC",
+          " LIMITED",
+          "ULT",
+          "ABLE",
+          "ERA",
+          "INS",
+          "URE"
+        ],
+        "suppresses": [
+          "oway",
+          "lia",
+          "alyses",
+          "otine",
+          "nie"
+        ]
+      },
+      {
+        "index": 1425,
+        "density": 0.000872,
+        "max_activation": 33.103,
+        "token_entropy": 0.5,
+        "top_contexts": [
+          {
+            "token": "Enlarge",
+            "left": "\n",
+            "right": " Image Lotus\n",
+            "token_id": 30952,
+            "activation": 33.103
+          },
+          {
+            "token": "Enlarge",
+            "left": " manual gearbox is standard.\n\n",
+            "right": " Image Lotus\n",
+            "token_id": 30952,
+            "activation": 27.693
+          },
+          {
+            "token": " Photograph",
+            "left": " Paris an effective financial rival to London.",
+            "right": ": Alamy",
+            "token_id": 18903,
+            "activation": 19.151
+          },
+          {
+            "token": " Photograph",
+            "left": " outside the candidate\u2019s forum.",
+            "right": ": Carly Earl",
+            "token_id": 18903,
+            "activation": 18.895
+          },
+          {
+            "token": "ideshow",
+            "left": " equal their annual salary.\n\nSl",
+            "right": " ( 12 images",
+            "token_id": 42286,
+            "activation": 18.867
+          },
+          {
+            "token": " Photograph",
+            "left": " candidates forum in Bondi on Monday.",
+            "right": ": Carly Earl",
+            "token_id": 18903,
+            "activation": 18.499
+          },
+          {
+            "token": " Photograph",
+            "left": "pr may make such specimens more common.",
+            "right": ": PR/",
+            "token_id": 18903,
+            "activation": 18.246
+          },
+          {
+            "token": " Photograph",
+            "left": " Kanak and independent Licia Heath.",
+            "right": ": Carly Earl",
+            "token_id": 18903,
+            "activation": 17.204
+          },
+          {
+            "token": " Photograph",
+            "left": " Crispr to create a better banana.",
+            "right": ": Tatum",
+            "token_id": 18903,
+            "activation": 16.476
+          },
+          {
+            "token": "ideshow",
+            "left": " Tribune Content Agency, LLC.<|endoftext|>Sl",
+            "right": " ( 3 images",
+            "token_id": 42286,
+            "activation": 15.969
+          },
+          {
+            "token": " copyright",
+            "left": " and ideological sacrifices.\u201d<|endoftext|>Image",
+            "right": " PAcemaker",
+            "token_id": 6634,
+            "activation": 15.036
+          },
+          {
+            "token": " copyright",
+            "left": " every day and night\".\n\nImage",
+            "right": " PA Media Image",
+            "token_id": 6634,
+            "activation": 14.441
+          }
+        ],
+        "promotes": [
+          "Enlarge",
+          "Picture",
+          " Getty",
+          "Courtesy",
+          "tesy",
+          " COP",
+          " Copyright",
+          " Courtesy"
+        ],
+        "suppresses": [
+          "ongh",
+          "ullivan",
+          "outhern",
+          "eno",
+          " Yar"
+        ]
+      },
+      {
+        "index": 5598,
+        "density": 0.001061,
+        "max_activation": 32.662,
+        "token_entropy": 0.5442,
+        "top_contexts": [
+          {
+            "token": " MORE",
+            "left": " Biden courts veterans after Trump's military controversies",
+            "right": " (D-",
+            "token_id": 12011,
+            "activation": 32.662
+          },
+          {
+            "token": " MORE",
+            "left": " Read: Senate GOP's controversial Biden report",
+            "right": " (R-",
+            "token_id": 12011,
+            "activation": 31.463
+          },
+          {
+            "token": " MORE",
+            "left": " oust Pelosi if she moves forward with impeachment",
+            "right": " (Calif.),",
+            "token_id": 12011,
+            "activation": 29.542
+          },
+          {
+            "token": " MORE",
+            "left": " amid Breonna Taylor grand jury protests",
+            "right": " struck a deal",
+            "token_id": 12011,
+            "activation": 27.979
+          },
+          {
+            "token": "ADVERTISEMENT",
+            "left": " U.S. interests.\"\n\n",
+            "right": "\n\n\"",
+            "token_id": 19053,
+            "activation": 20.159
+          },
+          {
+            "token": " More",
+            "left": " officer praised for thwarting Texas attack Replay",
+            "right": " Videos ... MUST",
+            "token_id": 3125,
+            "activation": 6.294
+          },
+          {
+            "token": " More",
+            "left": "men opened fire at Mohammed cartoon event Replay",
+            "right": " Videos ... MUST",
+            "token_id": 3125,
+            "activation": 5.774
+          },
+          {
+            "token": " More",
+            "left": " contest organizer defends decision to hold event Replay",
+            "right": " Videos ... MUST",
+            "token_id": 3125,
+            "activation": 5.69
+          },
+          {
+            "token": " More",
+            "left": " Texas shooters self-radicalized? Replay",
+            "right": " Videos ... MUST",
+            "token_id": 3125,
+            "activation": 5.328
+          },
+          {
+            "token": " rep",
+            "left": " deal Ruth Bader Ginsburg lies in",
+            "right": "ose at Supreme",
+            "token_id": 1128,
+            "activation": 2.702
+          },
+          {
+            "token": "More",
+            "left": " the situation is as deadly as ever.",
+            "right": " than 2,",
+            "token_id": 5167,
+            "activation": 2.626
+          },
+          {
+            "token": " More",
+            "left": " they found and whether those were fixed.",
+            "right": " detailed reports came",
+            "token_id": 3125,
+            "activation": 2.544
+          }
+        ],
+        "promotes": [
+          " Bere",
+          "pots",
+          " CoC",
+          "NESS",
+          " =====",
+          "illac",
+          " lawy",
+          " Detected"
+        ],
+        "suppresses": [
+          "imes",
+          "ogue",
+          "orp",
+          "edited",
+          "RN"
+        ]
+      },
+      {
+        "index": 6141,
+        "density": 0.000467,
+        "max_activation": 31.212,
+        "token_entropy": 0.5465,
+        "top_contexts": [
+          {
+            "token": " vim",
+            "left": " as a result of",
+            "right": " exiting in a",
+            "token_id": 43907,
+            "activation": 31.212
+          },
+          {
+            "token": " Vim",
+            "left": "\u2550\u2550 login.php.swp:",
+            "right": " swap file,",
+            "token_id": 36645,
+            "activation": 29.643
+          },
+          {
+            "token": "vim",
+            "left": " to recover the original file.\n\n",
+            "right": " -r .",
+            "token_id": 31124,
+            "activation": 28.618
+          },
+          {
+            "token": " vim",
+            "left": "php\n\nIn this case, when",
+            "right": " opened the login",
+            "token_id": 43907,
+            "activation": 28.505
+          },
+          {
+            "token": " vim",
+            "left": " shows us that it\u2019s a",
+            "right": " swap file.",
+            "token_id": 43907,
+            "activation": 26.894
+          },
+          {
+            "token": " vim",
+            "left": ".swp . This is pretty standard",
+            "right": " behavior and it",
+            "token_id": 43907,
+            "activation": 26.724
+          },
+          {
+            "token": " vim",
+            "left": " of vim exiting in a weird state or",
+            "right": " editors being left",
+            "token_id": 43907,
+            "activation": 25.917
+          },
+          {
+            "token": "vim",
+            "left": " reason is that the idea of liberation (",
+            "right": "ukti)",
+            "token_id": 31124,
+            "activation": 24.769
+          },
+          {
+            "token": " vim",
+            "left": " \"liberation\" (gedatsu;",
+            "right": "ukti",
+            "token_id": 43907,
+            "activation": 21.007
+          },
+          {
+            "token": " editors",
+            "left": " vim exiting in a weird state or vim",
+            "right": " being left open",
+            "token_id": 15719,
+            "activation": 5.866
+          },
+          {
+            "token": " Vi",
+            "left": "lingsbordet.\n\n-",
+            "right": " har ment at",
+            "token_id": 16049,
+            "activation": 4.568
+          },
+          {
+            "token": " Vi",
+            "left": " forn\u00f8yd.\n\n-",
+            "right": " hadde sam",
+            "token_id": 16049,
+            "activation": 4.562
+          }
+        ],
+        "promotes": [
+          "pee",
+          "atsu",
+          "script",
+          "aline",
+          "jet",
+          "pson",
+          "ple",
+          "antically"
+        ],
+        "suppresses": [
+          " Hands",
+          " Sail",
+          "onne",
+          " Borg",
+          " Feder"
+        ]
+      },
+      {
+        "index": 422,
+        "density": 0.000217,
+        "max_activation": 30.624,
+        "token_entropy": 0.5465,
+        "top_contexts": [
+          {
+            "token": " ii",
+            "left": "64 Displays user-friendly dialog box",
+            "right": " whois 5",
+            "token_id": 21065,
+            "activation": 30.624
+          },
+          {
+            "token": " ii",
+            "left": "9u amd64 intelligent WHOIS client",
+            "right": " xauth 1",
+            "token_id": 21065,
+            "activation": 29.293
+          },
+          {
+            "token": " ii",
+            "left": "==================================-============-===============================================================================",
+            "right": " adduser 3",
+            "token_id": 21065,
+            "activation": 28.415
+          },
+          {
+            "token": " ii",
+            "left": "9u6 amd64 Apache HTTP Server",
+            "right": " apache2",
+            "token_id": 21065,
+            "activation": 27.357
+          },
+          {
+            "token": " ii",
+            "left": " binary files) -------------8<-------------",
+            "right": " whiptail",
+            "token_id": 21065,
+            "activation": 27.119
+          },
+          {
+            "token": " ii",
+            "left": "115 all add and remove users and groups",
+            "right": " apache2",
+            "token_id": 21065,
+            "activation": 25.237
+          },
+          {
+            "token": "ii",
+            "left": " three portable panels below.\n\n\n\n",
+            "right": ". Solar Charge",
+            "token_id": 4178,
+            "activation": 12.96
+          },
+          {
+            "token": "ii",
+            "left": " collective.\n\nEvelyn H",
+            "right": ", whose",
+            "token_id": 4178,
+            "activation": 9.439
+          },
+          {
+            "token": "iii",
+            "left": " solar charge controllers below.\n\n\n\n",
+            "right": ". Battery Packs",
+            "token_id": 15479,
+            "activation": 8.541
+          },
+          {
+            "token": " Maine",
+            "left": " September, and Berlin (who was in",
+            "right": "",
+            "token_id": 15080,
+            "activation": 4.2
+          },
+          {
+            "token": " amd",
+            "left": ".2.17~deb9u",
+            "right": "64 intelligent WHO",
+            "token_id": 39971,
+            "activation": 4.004
+          },
+          {
+            "token": " amd",
+            "left": "0.9-1+b2",
+            "right": "64 X authentication",
+            "token_id": 39971,
+            "activation": 3.844
+          }
+        ],
+        "promotes": [
+          "Wa",
+          "q",
+          " Ves",
+          "quin",
+          "\ufe0f",
+          "urden",
+          " ii",
+          "\ufffd"
+        ],
+        "suppresses": [
+          "\u9f8d\ufffd",
+          "\f",
+          "\u0002",
+          "\ufffd",
+          "\u0000"
+        ]
+      },
+      {
+        "index": 156,
+        "density": 0.002256,
+        "max_activation": 31.272,
+        "token_entropy": 0.5731,
+        "top_contexts": [
+          {
+            "token": " harassment",
+            "left": " Fox News higher-ups for their sexual",
+            "right": " and complicity as",
+            "token_id": 10556,
+            "activation": 31.272
+          },
+          {
+            "token": " harassment",
+            "left": " at Fox News who actively engaged in sexual",
+            "right": " and/or",
+            "token_id": 10556,
+            "activation": 31.087
+          },
+          {
+            "token": " harassment",
+            "left": " O\u2019Reilly\u2018s sexual",
+            "right": " accusers penned",
+            "token_id": 10556,
+            "activation": 30.941
+          },
+          {
+            "token": " harassment",
+            "left": " that Murdoch is not being accused of sexual",
+            "right": ", but rather",
+            "token_id": 10556,
+            "activation": 30.429
+          },
+          {
+            "token": " harassment",
+            "left": " at the conservative network of engaging in sexual",
+            "right": " and",
+            "token_id": 10556,
+            "activation": 29.448
+          },
+          {
+            "token": " harass",
+            "left": " for as-yet-unnamed sexual",
+            "right": "ers. The",
+            "token_id": 7671,
+            "activation": 28.797
+          },
+          {
+            "token": " harass",
+            "left": "ives who not only covered up for sexual",
+            "right": "ers/pred",
+            "token_id": 7671,
+            "activation": 25.938
+          },
+          {
+            "token": " accus",
+            "left": "\u2019Reilly\u2018s sexual harassment",
+            "right": "ers penned an",
+            "token_id": 10458,
+            "activation": 19.347
+          },
+          {
+            "token": " assault",
+            "left": " University continues to deny students accused of sexual",
+            "right": " their due process",
+            "token_id": 4641,
+            "activation": 18.026
+          },
+          {
+            "token": " assaulted",
+            "left": " that he was the one who was sexually",
+            "right": ". The adj",
+            "token_id": 18513,
+            "activation": 17.692
+          },
+          {
+            "token": " harass",
+            "left": " being one such figure\u2013though not a",
+            "right": "er himself.",
+            "token_id": 7671,
+            "activation": 16.841
+          },
+          {
+            "token": " accus",
+            "left": " suggested that I, along with the other",
+            "right": "ers, are",
+            "token_id": 10458,
+            "activation": 15.861
+          }
+        ],
+        "promotes": [
+          " accus",
+          " misconduct",
+          " harassment",
+          " scandal",
+          " scandals",
+          " harass",
+          " accuser",
+          " Meredith"
+        ],
+        "suppresses": [
+          "lime",
+          " Colomb",
+          "ustom",
+          " Cipher",
+          "OOK"
+        ]
+      },
+      {
+        "index": 2601,
+        "density": 0.00055,
+        "max_activation": 33.439,
+        "token_entropy": 0.593,
+        "top_contexts": [
+          {
+            "token": " quant",
+            "left": ". But if you allow three \u2200",
+            "right": "ifiers (or",
+            "token_id": 5554,
+            "activation": 33.439
+          },
+          {
+            "token": " quant",
+            "left": " one need only consider formulas where all the",
+            "right": "ifiers are at",
+            "token_id": 5554,
+            "activation": 33.238
+          },
+          {
+            "token": " quant",
+            "left": "\ufffdz, with exactly two \u2200",
+            "right": "ifiers, with",
+            "token_id": 5554,
+            "activation": 32.159
+          },
+          {
+            "token": " quant",
+            "left": " }$$ It may contain a bunch of",
+            "right": "ified variables (",
+            "token_id": 5554,
+            "activation": 30.882
+          },
+          {
+            "token": " quant",
+            "left": " because there is a simple method for moving",
+            "right": "ifiers to the",
+            "token_id": 5554,
+            "activation": 28.498
+          },
+          {
+            "token": " quant",
+            "left": "go faces ongoing challenges when it comes to",
+            "right": "ifying energy and",
+            "token_id": 5554,
+            "activation": 27.444
+          },
+          {
+            "token": " quantify",
+            "left": " reduction, but not to be able to",
+            "right": " your impact,",
+            "token_id": 36336,
+            "activation": 14.867
+          },
+          {
+            "token": " quantify",
+            "left": " report on our natural resource consumption generally and",
+            "right": " our carbon consumption",
+            "token_id": 36336,
+            "activation": 12.721
+          },
+          {
+            "token": "ified",
+            "left": "$$ It may contain a bunch of quant",
+            "right": " variables (a",
+            "token_id": 1431,
+            "activation": 10.388
+          },
+          {
+            "token": "ifying",
+            "left": " faces ongoing challenges when it comes to quant",
+            "right": " energy and cost",
+            "token_id": 4035,
+            "activation": 8.882
+          },
+          {
+            "token": " empir",
+            "left": " to create spaces to speak, intellectually or",
+            "right": "ically, about",
+            "token_id": 18097,
+            "activation": 8.599
+          },
+          {
+            "token": " tempor",
+            "left": " transcendent which lies beyond the sphere of",
+            "right": "ality. Any",
+            "token_id": 10042,
+            "activation": 7.966
+          }
+        ],
+        "promotes": [
+          "itatively",
+          " quant",
+          "ified",
+          "ractor",
+          "ately",
+          "ifying",
+          "ized",
+          "enance"
+        ],
+        "suppresses": [
+          "uren",
+          " horr",
+          "gru",
+          " sterling",
+          " Sovereign"
+        ]
+      },
+      {
+        "index": 3595,
+        "density": 0.000222,
+        "max_activation": 32.609,
+        "token_entropy": 0.593,
+        "top_contexts": [
+          {
+            "token": " pit",
+            "left": " for USA TODAY Sports\n\nNASCAR",
+            "right": " roads will have",
+            "token_id": 6028,
+            "activation": 32.609
+          },
+          {
+            "token": " pit",
+            "left": "\u201d\n\nIn recent seasons,",
+            "right": " stops generally have",
+            "token_id": 6028,
+            "activation": 31.824
+          },
+          {
+            "token": " pit",
+            "left": "\n\nThe over-the-wall",
+            "right": " crew reduction is",
+            "token_id": 6028,
+            "activation": 31.593
+          },
+          {
+            "token": " pit",
+            "left": "In an effort to spotlight the work of",
+            "right": " crew members,",
+            "token_id": 6028,
+            "activation": 31.147
+          },
+          {
+            "token": " pit",
+            "left": " with tires or making chassis adjustments \u2014 during",
+            "right": " stops.\n",
+            "token_id": 6028,
+            "activation": 30.4
+          },
+          {
+            "token": " pit",
+            "left": "\n\nThe second game I played in",
+            "right": " the Sagu",
+            "token_id": 6028,
+            "activation": 25.889
+          },
+          {
+            "token": " pits",
+            "left": " a big impact on time spent in the",
+            "right": ".\n\n",
+            "token_id": 29699,
+            "activation": 24.124
+          },
+          {
+            "token": " pitted",
+            "left": "-government outlets routinely refer to the opposition",
+            "right": " against Syrian President",
+            "token_id": 46852,
+            "activation": 15.327
+          },
+          {
+            "token": "pit",
+            "left": " always have more access to the bully pul",
+            "right": " than those without",
+            "token_id": 15544,
+            "activation": 11.289
+          },
+          {
+            "token": " feeding",
+            "left": "\n\u201cThere is no question that",
+            "right": " the homeless is",
+            "token_id": 13017,
+            "activation": 9.2
+          },
+          {
+            "token": " feeding",
+            "left": "colored fibers from the caterpillars by",
+            "right": " them dyed leaves",
+            "token_id": 13017,
+            "activation": 8.928
+          },
+          {
+            "token": " Feed",
+            "left": " Colored Silk Cocoons Using a Green",
+            "right": "ing Approach\"",
+            "token_id": 18272,
+            "activation": 8.88
+          }
+        ],
+        "promotes": [
+          "bull",
+          "fall",
+          "rill",
+          "uit",
+          "iful",
+          "andon",
+          " pit",
+          "lords"
+        ],
+        "suppresses": [
+          "Syn",
+          "OPE",
+          "Mur",
+          "Fran",
+          "Attorney"
+        ]
+      },
+      {
+        "index": 3009,
+        "density": 0.000322,
+        "max_activation": 31.866,
+        "token_entropy": 0.6836,
+        "top_contexts": [
+          {
+            "token": "\u00a9",
+            "left": "\n\n",
+            "right": "2018 The Orlando",
+            "token_id": 16224,
+            "activation": 31.866
+          },
+          {
+            "token": " \u00a9",
+            "left": " Berlin. Preface",
+            "right": " Henry Hardy 2004",
+            "token_id": 10673,
+            "activation": 27.598
+          },
+          {
+            "token": "\u00a9",
+            "left": "1/lawrence.html\n\n",
+            "right": " borderlands e",
+            "token_id": 16224,
+            "activation": 27.113
+          },
+          {
+            "token": "Copyright",
+            "left": "cher college held daylong protest\n\n",
+            "right": "",
+            "token_id": 15269,
+            "activation": 17.545
+          },
+          {
+            "token": " copyright",
+            "left": " every month!\n\nPong is",
+            "right": " Atari Inc.",
+            "token_id": 6634,
+            "activation": 17.065
+          },
+          {
+            "token": " copyright",
+            "left": ", corporate buyouts, and patent and",
+            "right": " licensing,\n",
+            "token_id": 6634,
+            "activation": 14.964
+          },
+          {
+            "token": " copyright",
+            "left": " Related Topics Catalonia independence protests\n\nimage",
+            "right": " Reuters image caption",
+            "token_id": 6634,
+            "activation": 12.564
+          },
+          {
+            "token": " copyright",
+            "left": " should he enter Spain.\n\nimage",
+            "right": " Getty",
+            "token_id": 6634,
+            "activation": 11.379
+          },
+          {
+            "token": "Disclaimer",
+            "left": " anywhere you want to.\n\n\n\n",
+            "right": ": We don",
+            "token_id": 19618,
+            "activation": 10.898
+          },
+          {
+            "token": " copyright",
+            "left": "'s electorate took part.\n\nimage",
+            "right": " Getty Images image",
+            "token_id": 6634,
+            "activation": 8.973
+          },
+          {
+            "token": " patents",
+            "left": " a solution that also seems to help with",
+            "right": ". I asked",
+            "token_id": 21216,
+            "activation": 8.375
+          },
+          {
+            "token": " patent",
+            "left": " liability levels, corporate buyouts, and",
+            "right": " and copyright licensing",
+            "token_id": 12701,
+            "activation": 8.311
+          }
+        ],
+        "promotes": [
+          " Copyright",
+          " infringement",
+          "Copyright",
+          " infringing",
+          " \u00a9",
+          "\u00a9",
+          " Getty",
+          " AFP"
+        ],
+        "suppresses": [
+          "idem",
+          "ozo",
+          "ctors",
+          "assi",
+          "idian"
+        ]
+      },
+      {
+        "index": 1606,
+        "density": 0.000356,
+        "max_activation": 30.434,
+        "token_entropy": 0.6836,
+        "top_contexts": [
+          {
+            "token": " Optimus",
+            "left": " future belongs to SKYNET. When",
+            "right": " Prime offers his",
+            "token_id": 44863,
+            "activation": 30.434
+          },
+          {
+            "token": "atron",
+            "left": " his aid, suggesting they go after Meg",
+            "right": " together, the",
+            "token_id": 23484,
+            "activation": 21.464
+          },
+          {
+            "token": " Prime",
+            "left": " belongs to SKYNET. When Optimus",
+            "right": " offers his aid",
+            "token_id": 5537,
+            "activation": 20.063
+          },
+          {
+            "token": " Transformers",
+            "left": " issue of the",
+            "right": " vs. The",
+            "token_id": 39185,
+            "activation": 17.859
+          },
+          {
+            "token": "ron",
+            "left": " simple: Exterminate the Cybert",
+            "right": "ians and ensure",
+            "token_id": 1313,
+            "activation": 17.02
+          },
+          {
+            "token": "Prime",
+            "left": " his candidacy fail to gain traction.<|endoftext|>",
+            "right": " minister\u2019",
+            "token_id": 26405,
+            "activation": 15.919
+          },
+          {
+            "token": " Prime",
+            "left": "ONDON, June 27 (Reuters) -",
+            "right": " Minister David Cameron",
+            "token_id": 5537,
+            "activation": 12.827
+          },
+          {
+            "token": " Prime",
+            "left": ". I think the plan of [Spanish",
+            "right": " Minister] Mar",
+            "token_id": 5537,
+            "activation": 11.96
+          },
+          {
+            "token": " prime",
+            "left": " your status symbol, or something. The",
+            "right": " culprit for cracks",
+            "token_id": 6994,
+            "activation": 11.838
+          },
+          {
+            "token": " Prime",
+            "left": "\n\nIf, by general consent,",
+            "right": " Minister Narendra Modi",
+            "token_id": 5537,
+            "activation": 11.803
+          },
+          {
+            "token": " Prime",
+            "left": "<|endoftext|>British legislators have rejected beleaguered",
+            "right": " Minister Theresa May",
+            "token_id": 5537,
+            "activation": 11.725
+          },
+          {
+            "token": " prime",
+            "left": " out. With Battlefield V one of the",
+            "right": " candidates for Den",
+            "token_id": 6994,
+            "activation": 11.563
+          }
+        ],
+        "promotes": [
+          " Prime",
+          "prime",
+          " prime",
+          " minister",
+          "sburg",
+          "Prime",
+          " Braun",
+          "urus"
+        ],
+        "suppresses": [
+          "ritch",
+          "oeuv",
+          "\u043c",
+          "igue",
+          "anchester"
+        ]
+      },
+      {
+        "index": 4081,
+        "density": 0.000256,
+        "max_activation": 30.406,
+        "token_entropy": 0.6836,
+        "top_contexts": [
+          {
+            "token": " 404",
+            "left": ">\n\nThe website responds with a",
+            "right": " error.\n",
+            "token_id": 32320,
+            "activation": 30.406
+          },
+          {
+            "token": " 404",
+            "left": "addon-upload.php and got a",
+            "right": " response. We",
+            "token_id": 32320,
+            "activation": 29.182
+          },
+          {
+            "token": " 404",
+            "left": " the required string, but not get the",
+            "right": ".\n\n",
+            "token_id": 32320,
+            "activation": 26.975
+          },
+          {
+            "token": " 404",
+            "left": " note that tells us disabled features result in",
+            "right": " errors. We",
+            "token_id": 32320,
+            "activation": 26.943
+          },
+          {
+            "token": " 404",
+            "left": "/binary-amd64/Packages",
+            "right": " File not found",
+            "token_id": 32320,
+            "activation": 20.561
+          },
+          {
+            "token": " 400",
+            "left": " application would know to respond with an HTTP",
+            "right": " status.\n",
+            "token_id": 7337,
+            "activation": 14.734
+          },
+          {
+            "token": " 400",
+            "left": ") {\n\n### // respond with",
+            "right": " status and include",
+            "token_id": 7337,
+            "activation": 11.844
+          },
+          {
+            "token": "400",
+            "left": " details\n\nreturn res.status(",
+            "right": ").json({",
+            "token_id": 7029,
+            "activation": 7.713
+          },
+          {
+            "token": " 402",
+            "left": "en:",
+            "right": " Polen:",
+            "token_id": 42622,
+            "activation": 7.113
+          },
+          {
+            "token": " DNS",
+            "left": ", let\u2019s update our local",
+            "right": " entry for the",
+            "token_id": 18538,
+            "activation": 6.033
+          },
+          {
+            "token": " 200",
+            "left": " 12 13 if ($file_size >",
+            "right": "00 ){",
+            "token_id": 939,
+            "activation": 5.942
+          },
+          {
+            "token": " 104",
+            "left": ".0.0.1) or",
+            "right": ".24.",
+            "token_id": 14436,
+            "activation": 4.964
+          }
+        ],
+        "promotes": [
+          "drop",
+          "404",
+          " 404",
+          " Drop",
+          "Drop",
+          " slash",
+          "'/",
+          "ocket"
+        ],
+        "suppresses": [
+          "vered",
+          "roth",
+          "rador",
+          "ienne",
+          "essen"
+        ]
+      },
+      {
+        "index": 5832,
+        "density": 0.000533,
+        "max_activation": 33.214,
+        "token_entropy": 0.7675,
+        "top_contexts": [
+          {
+            "token": "ADVERTISEMENT",
+            "left": " U.S. interests.\"\n\n",
+            "right": "\n\n\"",
+            "token_id": 19053,
+            "activation": 33.214
+          },
+          {
+            "token": "VERTISEMENT",
+            "left": " and several others two months later. AD",
+            "right": "\n\nCanada",
+            "token_id": 18679,
+            "activation": 29.859
+          },
+          {
+            "token": "ideshow",
+            "left": " equal their annual salary.\n\nSl",
+            "right": " ( 12 images",
+            "token_id": 42286,
+            "activation": 14.576
+          },
+          {
+            "token": " MORE",
+            "left": " Biden courts veterans after Trump's military controversies",
+            "right": " (D-",
+            "token_id": 12011,
+            "activation": 14.412
+          },
+          {
+            "token": " MORE",
+            "left": " Read: Senate GOP's controversial Biden report",
+            "right": " (R-",
+            "token_id": 12011,
+            "activation": 14.07
+          },
+          {
+            "token": " MORE",
+            "left": " oust Pelosi if she moves forward with impeachment",
+            "right": " (Calif.),",
+            "token_id": 12011,
+            "activation": 13.68
+          },
+          {
+            "token": " MORE",
+            "left": " amid Breonna Taylor grand jury protests",
+            "right": " struck a deal",
+            "token_id": 12011,
+            "activation": 12.507
+          },
+          {
+            "token": "ideshow",
+            "left": " Tribune Content Agency, LLC.<|endoftext|>Sl",
+            "right": " ( 3 images",
+            "token_id": 42286,
+            "activation": 11.975
+          },
+          {
+            "token": " SHARES",
+            "left": " patisserie.\u201d<|endoftext|>22",
+            "right": " Share Tweet\n",
+            "token_id": 44806,
+            "activation": 10.221
+          },
+          {
+            "token": "RELATED",
+            "left": " has damaged US-Ukraine relations. (",
+            "right": ": Everybody Is",
+            "token_id": 20112,
+            "activation": 9.479
+          },
+          {
+            "token": "vernight",
+            "left": " probe Barr over possible 2020 election influence O",
+            "right": " Defense: Top",
+            "token_id": 47443,
+            "activation": 9.057
+          },
+          {
+            "token": " Related",
+            "left": " talks with Spain Published duration 22 December 2017",
+            "right": " Topics Catalonia independence",
+            "token_id": 19809,
+            "activation": 8.523
+          }
+        ],
+        "promotes": [
+          "VERTISEMENT",
+          " Speaker",
+          " Reader",
+          " EVENTS",
+          " interf",
+          "Skip",
+          "gered",
+          "ifter"
+        ],
+        "suppresses": [
+          "chedel",
+          " caps",
+          "CVE",
+          "caps",
+          "ocial"
+        ]
+      }
+    ],
+    "note": "A feature has two independent halves, measured separately here. What fires it comes from the corpus (top-activating contexts). What it writes comes from the weights (its decoder direction pushed through the unembedding). Nothing forces them to agree \u2014 where they do, the feature is doing one legible job."
+  },
+  "compare": {
+    "n_units": 200,
+    "top_k": 32,
+    "feature_entropy_median": 0.5067,
+    "neuron_entropy_median": 0.7933,
+    "feature_entropy_mean": 0.4464,
+    "neuron_entropy_mean": 0.7483,
+    "ratio": 1.566,
+    "monosemantic_features": 98,
+    "monosemantic_neurons": 17,
+    "feature_entropies": [
+      0.5688,
+      0.0,
+      0.1554,
+      0.6953,
+      0.5854,
+      0.1554,
+      0.6954,
+      0.1714,
+      0.6052,
+      0.0,
+      0.5239,
+      0.2119,
+      0.5105,
+      0.6532,
+      0.5165,
+      0.76,
+      0.6169,
+      0.3002,
+      0.0,
+      0.8858,
+      0.4627,
+      0.0401,
+      0.567,
+      0.5921,
+      0.567,
+      0.6608,
+      0.2475,
+      0.2326,
+      0.7526,
+      0.6123,
+      0.5246,
+      0.0,
+      0.6454,
+      0.355,
+      0.3497,
+      0.7174,
+      0.2018,
+      0.0,
+      0.6079,
+      0.369,
+      0.5527,
+      0.345,
+      0.5704,
+      0.66,
+      0.3657,
+      0.3524,
+      0.0401,
+      0.2267,
+      0.475,
+      0.0,
+      0.5764,
+      0.6427,
+      0.4771,
+      0.6014,
+      0.5568,
+      0.3765,
+      0.5643,
+      0.0675,
+      0.2219,
+      0.301,
+      0.7858,
+      0.6024,
+      0.0898,
+      0.6299,
+      0.6052,
+      0.5471,
+      0.3159,
+      0.686,
+      0.4261,
+      0.0,
+      0.4141,
+      0.107,
+      0.5786,
+      0.1623,
+      0.4461,
+      0.479,
+      0.1516,
+      0.2659,
+      0.6827,
+      0.6074,
+      0.5934,
+      0.7133,
+      0.304,
+      0.3325,
+      0.3006,
+      0.5732,
+      0.5519,
+      0.4608,
+      0.6604,
+      0.1737,
+      0.271,
+      0.4778,
+      0.5758,
+      0.7686,
+      0.4127,
+      0.3118,
+      0.2085,
+      0.5699,
+      0.7686,
+      0.129,
+      0.4119,
+      0.1767,
+      0.5351,
+      0.4179,
+      0.6532,
+      0.6157,
+      0.7123,
+      0.344,
+      0.107,
+      0.7358,
+      0.7546,
+      0.3061,
+      0.2243,
+      0.4158,
+      0.2517,
+      0.7406,
+      0.718,
+      0.2498,
+      0.5949,
+      0.5141,
+      0.5007,
+      0.5549,
+      0.925,
+      0.5485,
+      0.3365,
+      0.6449,
+      0.5498,
+      0.7177,
+      0.4614,
+      0.7258,
+      0.0,
+      0.0,
+      0.5982,
+      0.0,
+      0.3118,
+      0.0,
+      0.5948,
+      0.4281,
+      0.6139,
+      0.7677,
+      0.6627,
+      0.5804,
+      0.3206,
+      0.6661,
+      0.6749,
+      0.0,
+      0.5942,
+      0.5319,
+      0.4283,
+      0.2845,
+      0.6038,
+      0.3387,
+      0.5979,
+      0.0401,
+      0.4638,
+      0.5774,
+      0.5461,
+      0.5432,
+      0.5125,
+      0.5805,
+      0.3378,
+      0.264,
+      0.7758,
+      0.6002,
+      0.4896,
+      0.3636,
+      0.7083,
+      0.2452,
+      0.5208,
+      0.5967,
+      0.2843,
+      0.4869,
+      0.685,
+      0.5458,
+      0.7288,
+      0.7358,
+      0.4855,
+      0.1392,
+      0.3658,
+      0.5149,
+      0.5028,
+      0.0401,
+      0.6079,
+      0.27,
+      0.4787,
+      0.2119,
+      0.5813,
+      0.4935,
+      0.08,
+      0.6633,
+      0.6531,
+      0.2778,
+      0.0,
+      0.5123,
+      0.7686,
+      0.7828,
+      0.3526,
+      0.5641,
+      0.2231,
+      0.2028
+    ],
+    "neuron_entropies": [
+      0.9031,
+      0.6639,
+      0.5589,
+      0.8531,
+      0.9203,
+      0.9203,
+      0.7781,
+      0.8953,
+      0.8477,
+      0.8686,
+      0.818,
+      0.8828,
+      0.6954,
+      0.8358,
+      0.7983,
+      0.8406,
+      0.8875,
+      0.6743,
+      0.8477,
+      0.8531,
+      0.4887,
+      0.9203,
+      0.8531,
+      0.7531,
+      0.7674,
+      0.4399,
+      0.9328,
+      0.6059,
+      0.7977,
+      0.8203,
+      0.7799,
+      0.8781,
+      0.511,
+      0.8233,
+      0.6799,
+      0.462,
+      0.8828,
+      0.5295,
+      0.8477,
+      0.6446,
+      0.8656,
+      0.9578,
+      0.7877,
+      0.738,
+      0.7005,
+      0.7725,
+      0.7508,
+      0.6018,
+      0.9031,
+      0.5699,
+      0.9078,
+      0.7552,
+      0.8061,
+      0.8656,
+      0.735,
+      0.793,
+      0.6454,
+      0.7274,
+      0.7703,
+      0.7211,
+      0.9078,
+      0.1195,
+      0.4984,
+      0.9328,
+      0.9,
+      0.8649,
+      0.7546,
+      0.7475,
+      0.6747,
+      0.7899,
+      0.6614,
+      0.9108,
+      0.8281,
+      0.7133,
+      0.8352,
+      0.7561,
+      0.8656,
+      0.5902,
+      0.95,
+      0.5149,
+      0.8875,
+      0.7686,
+      0.7049,
+      0.6171,
+      0.8656,
+      0.7852,
+      0.4831,
+      0.7264,
+      0.8656,
+      0.7233,
+      0.7217,
+      0.564,
+      0.6889,
+      0.8781,
+      0.7799,
+      0.8203,
+      0.7975,
+      0.2065,
+      0.7802,
+      0.9024,
+      0.8477,
+      0.8358,
+      0.8305,
+      0.7133,
+      0.6239,
+      0.6952,
+      0.7531,
+      0.5375,
+      0.8906,
+      0.5717,
+      0.8156,
+      0.7578,
+      0.8281,
+      0.08,
+      0.8453,
+      0.7406,
+      0.8578,
+      0.4003,
+      0.9031,
+      0.81,
+      0.8061,
+      0.8781,
+      0.85,
+      0.8647,
+      0.8477,
+      0.763,
+      0.8436,
+      0.8352,
+      0.8649,
+      0.8024,
+      0.8656,
+      0.6446,
+      0.7328,
+      0.8102,
+      0.9274,
+      0.7069,
+      0.2528,
+      0.8828,
+      0.6383,
+      0.5601,
+      0.5184,
+      0.3938,
+      0.7156,
+      0.8102,
+      0.7883,
+      0.735,
+      0.8781,
+      0.7975,
+      0.6883,
+      0.1195,
+      0.7174,
+      0.8608,
+      0.9031,
+      0.9024,
+      0.8828,
+      0.925,
+      0.5768,
+      0.5768,
+      0.8625,
+      0.8602,
+      0.6295,
+      0.7953,
+      0.9125,
+      0.7758,
+      0.9156,
+      0.7079,
+      0.7102,
+      0.8727,
+      0.4589,
+      0.9031,
+      0.8906,
+      0.8875,
+      0.8108,
+      0.5924,
+      0.8055,
+      0.85,
+      0.8578,
+      0.7514,
+      0.4533,
+      0.8656,
+      0.423,
+      0.8133,
+      0.8149,
+      0.4406,
+      0.9024,
+      0.8358,
+      0.5574,
+      0.8281,
+      0.5521,
+      0.7811,
+      0.7186,
+      0.7936,
+      0.7217,
+      0.6983,
+      0.7647,
+      0.4917,
+      0.8002,
+      0.925,
+      0.8531,
+      0.7545
+    ],
+    "interpretation": [
+      "Median top-32 token entropy: learned features 0.507 vs. residual-stream directions 0.793 \u2014 features are 1.6\u00d7 more token-selective on the same activations.",
+      "98 of 200 features clear the entropy < 0.5 bar, against 17 of 200 basis directions.",
+      "This is the superposition claim made concrete: the model's own coordinates are blends; a sparse overcomplete basis pulls legible parts back out of them."
+    ],
+    "note": "Selectivity proxy: take the tokens a unit most strongly fires on and measure their entropy. Low means the unit answers to a tight family of tokens; high means it answers to everything. Basis directions of the residual stream are the baseline \u2014 the same activations, read in the coordinate system the model happens to store them in. This measures token-level selectivity only; a feature can be selective for a context rather than a token and score high here."
+  },
+  "causal": {
+    "prompt": "The next thing that happened was",
+    "layer": 6,
+    "alphas": [
+      10.0,
+      20.0,
+      40.0,
+      80.0,
+      160.0
+    ],
+    "features": [
+      {
+        "index": 5429,
+        "fires_on": [
+          "etc",
+          "etc",
+          "etc",
+          "etc",
+          "etc"
+        ],
+        "predicted_promotes": [
+          "etc",
+          "opl",
+          "uration",
+          "ocracy",
+          "aran"
+        ],
+        "sweep": [
+          {
+            "alpha": 10.0,
+            "prob": 0.0,
+            "top_token": " that"
+          },
+          {
+            "alpha": 20.0,
+            "prob": 0.0,
+            "top_token": " that"
+          },
+          {
+            "alpha": 40.0,
+            "prob": 2.6e-05,
+            "top_token": "."
+          },
+          {
+            "alpha": 80.0,
+            "prob": 0.017679,
+            "top_token": " etc"
+          },
+          {
+            "alpha": 160.0,
+            "prob": 0.019918,
+            "top_token": "."
+          }
+        ],
+        "baseline_prob": 9e-08,
+        "peak_prob": 0.019918,
+        "lift": 19918.0,
+        "takeover_alpha": null,
+        "takeover_token": null
+      },
+      {
+        "index": 5361,
+        "fires_on": [
+          " >>",
+          " >>",
+          " >>",
+          " >>",
+          " >>"
+        ],
+        "predicted_promotes": [
+          "=\"#",
+          " ali",
+          "Ru",
+          " Hob",
+          "ancial"
+        ],
+        "sweep": [
+          {
+            "alpha": 10.0,
+            "prob": 3e-06,
+            "top_token": " that"
+          },
+          {
+            "alpha": 20.0,
+            "prob": 3e-06,
+            "top_token": " that"
+          },
+          {
+            "alpha": 40.0,
+            "prob": 4.7e-05,
+            "top_token": " is"
+          },
+          {
+            "alpha": 80.0,
+            "prob": 0.000221,
+            "top_token": " >>"
+          },
+          {
+            "alpha": 160.0,
+            "prob": 0.000459,
+            "top_token": " #"
+          }
+        ],
+        "baseline_prob": 2.6e-06,
+        "peak_prob": 0.000459,
+        "lift": 176.5,
+        "takeover_alpha": null,
+        "takeover_token": null
+      },
+      {
+        "index": 4458,
+        "fires_on": [
+          " pan",
+          " pan",
+          " pan",
+          " pan",
+          " pan"
+        ],
+        "predicted_promotes": [
+          "acea",
+          "orama",
+          "zers",
+          "zer",
+          "ographic"
+        ],
+        "sweep": [
+          {
+            "alpha": 10.0,
+            "prob": 0.0,
+            "top_token": " that"
+          },
+          {
+            "alpha": 20.0,
+            "prob": 0.0,
+            "top_token": " that"
+          },
+          {
+            "alpha": 40.0,
+            "prob": 0.006517,
+            "top_token": "."
+          },
+          {
+            "alpha": 80.0,
+            "prob": 0.075594,
+            "top_token": " pan"
+          },
+          {
+            "alpha": 160.0,
+            "prob": 0.003693,
+            "top_token": " pan"
+          }
+        ],
+        "baseline_prob": 3e-08,
+        "peak_prob": 0.075594,
+        "lift": 75594.0,
+        "takeover_alpha": null,
+        "takeover_token": null
+      },
+      {
+        "index": 4719,
+        "fires_on": [
+          " apt",
+          " apt",
+          " apt",
+          " apt",
+          " apt"
+        ],
+        "predicted_promotes": [
+          "itude",
+          "itudes",
+          "ussen",
+          "oise",
+          "uncture"
+        ],
+        "sweep": [
+          {
+            "alpha": 10.0,
+            "prob": 0.0,
+            "top_token": " that"
+          },
+          {
+            "alpha": 20.0,
+            "prob": 0.0,
+            "top_token": " that"
+          },
+          {
+            "alpha": 40.0,
+            "prob": 0.005121,
+            "top_token": " to"
+          },
+          {
+            "alpha": 80.0,
+            "prob": 0.814457,
+            "top_token": "itude"
+          },
+          {
+            "alpha": 160.0,
+            "prob": 0.609509,
+            "top_token": "itude"
+          }
+        ],
+        "baseline_prob": 4e-08,
+        "peak_prob": 0.814457,
+        "lift": 814457.0,
+        "takeover_alpha": 80.0,
+        "takeover_token": "itude"
+      },
+      {
+        "index": 390,
+        "fires_on": [
+          " vis",
+          " vis",
+          " vis",
+          " vis",
+          " vis"
+        ],
+        "predicted_promotes": [
+          "age",
+          " vis",
+          "DEM",
+          "brow",
+          "AGE"
+        ],
+        "sweep": [
+          {
+            "alpha": 10.0,
+            "prob": 2e-06,
+            "top_token": " that"
+          },
+          {
+            "alpha": 20.0,
+            "prob": 2e-06,
+            "top_token": " that"
+          },
+          {
+            "alpha": 40.0,
+            "prob": 0.000219,
+            "top_token": " the"
+          },
+          {
+            "alpha": 80.0,
+            "prob": 0.180225,
+            "top_token": "-"
+          },
+          {
+            "alpha": 160.0,
+            "prob": 0.218916,
+            "top_token": "-"
+          }
+        ],
+        "baseline_prob": 1.18e-06,
+        "peak_prob": 0.218916,
+        "lift": 185173.5,
+        "takeover_alpha": null,
+        "takeover_token": null
+      },
+      {
+        "index": 6556,
+        "fires_on": [
+          " Isaiah",
+          " Isaiah",
+          " Isaiah",
+          " Isaiah",
+          " Isaiah"
+        ],
+        "predicted_promotes": [
+          "miah",
+          "iyah",
+          " Yose",
+          " prophet",
+          " Babel"
+        ],
+        "sweep": [
+          {
+            "alpha": 10.0,
+            "prob": 2e-06,
+            "top_token": " that"
+          },
+          {
+            "alpha": 20.0,
+            "prob": 7e-06,
+            "top_token": " that"
+          },
+          {
+            "alpha": 40.0,
+            "prob": 0.002423,
+            "top_token": ","
+          },
+          {
+            "alpha": 80.0,
+            "prob": 0.000656,
+            "top_token": " 53"
+          },
+          {
+            "alpha": 160.0,
+            "prob": 0.003127,
+            "top_token": ","
+          }
+        ],
+        "baseline_prob": 1.49e-06,
+        "peak_prob": 0.003127,
+        "lift": 2094.1,
+        "takeover_alpha": null,
+        "takeover_token": null
+      },
+      {
+        "index": 2154,
+        "fires_on": [
+          " impe",
+          " impe",
+          " impe",
+          " impe",
+          " impe"
+        ],
+        "predicted_promotes": [
+          " impe",
+          "aching",
+          "achable",
+          " impeachment",
+          "ACH"
+        ],
+        "sweep": [
+          {
+            "alpha": 10.0,
+            "prob": 7e-06,
+            "top_token": " that"
+          },
+          {
+            "alpha": 20.0,
+            "prob": 1.4e-05,
+            "top_token": " that"
+          },
+          {
+            "alpha": 40.0,
+            "prob": 0.038947,
+            "top_token": " the"
+          },
+          {
+            "alpha": 80.0,
+            "prob": 0.015164,
+            "top_token": "."
+          },
+          {
+            "alpha": 160.0,
+            "prob": 0.016769,
+            "top_token": "."
+          }
+        ],
+        "baseline_prob": 4.13e-06,
+        "peak_prob": 0.038947,
+        "lift": 9426.8,
+        "takeover_alpha": null,
+        "takeover_token": null
+      },
+      {
+        "index": 1732,
+        "fires_on": [
+          " cad",
+          " cad",
+          " cad",
+          " cad",
+          " cad"
+        ],
+        "predicted_promotes": [
+          "bury",
+          "uve",
+          "bys",
+          " cad",
+          " Rout"
+        ],
+        "sweep": [
+          {
+            "alpha": 10.0,
+            "prob": 1e-06,
+            "top_token": " that"
+          },
+          {
+            "alpha": 20.0,
+            "prob": 1e-06,
+            "top_token": " that"
+          },
+          {
+            "alpha": 40.0,
+            "prob": 2.4e-05,
+            "top_token": " a"
+          },
+          {
+            "alpha": 80.0,
+            "prob": 0.019501,
+            "top_token": " the"
+          },
+          {
+            "alpha": 160.0,
+            "prob": 0.175036,
+            "top_token": " cad"
+          }
+        ],
+        "baseline_prob": 4.5e-07,
+        "peak_prob": 0.175036,
+        "lift": 175036.0,
+        "takeover_alpha": 160.0,
+        "takeover_token": " cad"
+      }
+    ],
+    "n_taken_over": 2,
+    "median_peak_prob": 0.0573,
+    "median_lift": 47756.0,
+    "interpretation": [
+      "Injecting one feature direction at layer 6 into 'The next thing that happened was' \u2014 a prompt with nothing to do with any of them \u2014 pushes the tokens that feature's weights named from effectively zero to a median peak of 5.7% of the model's probability mass, across 8 features.",
+      "For 2 of 8, the predicted token becomes the model's actual output: feature #4719 fires only on ' apt', its decoder direction names 'itude', and at strength 80 the model says 'itude'.",
+      "Read the feature off the weights, inject it, and the prediction comes true \u2014 what fires the feature and what it writes are two views of one object."
+    ],
+    "note": "The label a feature gets from its decoder weights is a prediction, not an observation. This tests it: add the feature's direction to the residual stream during a real forward pass on an unrelated prompt and sweep the strength, checking whether the tokens the weights named actually arrive. Takeover \u2014 the model's top token becoming one the weights predicted, on a prompt with nothing to do with the feature \u2014 is the strong form of the result."
+  },
+  "seconds": 701.1
+}
