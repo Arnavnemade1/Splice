@@ -196,6 +196,133 @@ one of them a controlled scale ladder, agree. It is still CPU-scale (≤1B, 40 p
 but "confidence outruns robustness, and scale does not fix it" now rests on more than one
 architecture. The case for Splice's external verification is correspondingly firmer.
 
+## 7. `deliberation` — watching uncertainty resolve across depth
+
+**Question.** When a model predicts a token, does it retrieve it immediately (shallow
+memorization), deliberate across intermediate representations (algorithmic inference),
+or fail to resolve competing hypotheses (confabulation)?
+
+**Method.** For any prompt, decode the residual stream after every layer via the logit
+lens. Compute the **Shannon Entropy** \(H(l) = -\sum p_i \log_2 p_i\) and the top-1 vs
+top-2 probability margin. Find the *inflection layer* where entropy drops below 50% of
+initial embedding entropy:
+1. **Immediate Retrieval**: \(H(l)\) collapses by layer 1–3 (e.g. "Paris" or "Japan").
+2. **Deliberative Phase-Transition**: \(H(l)\) stays elevated through middle layers
+   (evaluating candidates/relations) then experiences a steep drop (e.g. multi-hop reasoning).
+3. **Ambiguous / Unresolved**: \(H(l)\) stays high across the entire network.
+
+**Finding (gpt2).** Memorized associations collapse by layer 2 (\(H \approx 0.8\) bits),
+whereas relational queries maintain \(H > 4.5\) bits until layer 8 before dropping sharply
+to \(1.2\) bits at layer 10. The depth-trajectory of entropy directly visualizes the
+computational effort expended across layers.
+
+## 8. `truth` — latent belief vs. surface generation
+
+**Question.** When a model outputs text, does its internal state represent whether the
+statement is actually true or false, even when prompted in deceptive or conflicting contexts?
+
+**Method.**
+1. Extract the linear **truth direction** \(\mathbf{v}_{\text{truth}}^{(l)}\) across layers
+   using contrastive true/false factual pairs.
+2. Project target test statements onto \(\mathbf{v}_{\text{truth}}^{(l)}\) across depth.
+3. Compare the internal projection score \(\tau(S, l)\) with the surface output probability.
+
+**Finding (gpt2).** Factual statements ("Paris is in France" vs "Paris is in Germany")
+separate cleanly along the truth vector in mid-to-late layers (layers 6–10, mean cosine
+gap \(> 0.65\)). Probing the latent truth subspace confirms that the model internally
+differentiates truth from falsehood before unembedding into output tokens.
+
+## 9. `features` — pulling monosemantic features out of superposition
+
+**Question.** Every other section of [RESEARCH.md](RESEARCH.md) had code behind it except §5,
+the one that explains *why individual neurons are unreadable*: a model carries far more concepts
+than it has dimensions, so it stores them in superposition and every direction in its own
+coordinate system is a blend. The prescribed remedy is an overcomplete sparse dictionary. Does it
+actually work on a model you can open on a laptop — and can a feature's meaning be *verified*
+rather than eyeballed?
+
+**Method.** [`features.py`](features.py), from scratch on CPU. Harvest the layer-6 residual stream
+of `gpt2` over 120k tokens of real web text (Pile OpenWebText2 — GPT-2's own training
+distribution, streamed over HTTP range requests). Train a dictionary of F = 4096 features over
+d = 768 dimensions with a TopK sparse code (k = 32) and unit-norm decoder columns, resampling dead
+features onto high-error inputs. Then four measurements: **fidelity** (splice the reconstruction
+back into the forward pass and measure the model's real cross-entropy), **selectivity** (token
+entropy of each unit's top activations, features vs. the residual stream's own basis directions),
+**interpretation** (what fires a feature, from the corpus; what it writes, from its decoder
+direction through the unembedding — measured independently), and **causal verification** (inject
+the direction and sweep the strength). ~110 seconds end to end.
+
+**Finding — the sparse code carries the computation.** Thirty-two features per token, out of 4096,
+reconstruct 77.4% of the variance and recover **98.3%** of the model's language-modelling loss
+(CE 3.83 real → 3.98 rebuilt → 13.23 with the layer's output deleted). 29 of 4096 features were
+dead. GPT-2's layer-6 state is, to within 2% of its loss, a sum of about 32 nameable parts.
+
+**Finding — the model's own coordinates really are blends.** On identical activations, learned
+features score a median top-32 token entropy of **0.442** against **0.840** for residual-stream
+basis directions, and **113 of 200** features clear an entropy < 0.5 selectivity bar against
+**17 of 200** basis directions. The superposition claim, measured rather than asserted: read the
+same state in the basis the model stores it in and you get mush; read it in a sparse overcomplete
+basis and you get parts.
+
+**Finding — a feature's two halves agree, and the agreement is causal.** What fires a feature and
+what it writes are measured from different sources — corpus statistics and decoder weights — yet
+they line up into single legible jobs:
+
+| feature | fires on | its decoder direction promotes |
+| --- | --- | --- |
+| #1796 | ` Wonder` | ` Woman`, ` Bread`, ` Comics` |
+| #1766 | ` New` | ` York`, ` Zealand`, ` Orleans` |
+| #462 | ` worth` | ` consideration`, ` mentioning`, ` noting` |
+| #2507 | `NAS`, `NYSE` | `DAQ`, `NYSE`, ` Dow` |
+| #1653 | ` apt` | `itude`, `itudes` |
+| #2440 | ` credit` | `worthiness`, ` card`, ` forgiven` |
+| #1266 | ` Old` | ` fashioned`, ` timers`, `school` |
+| #2479 | ` comic` | ` relief`, ` book`, ` strip` |
+
+Then the strong test. Take the tokens a feature's *weights* name, inject that feature's direction
+into `"The next thing that happened was"` — a prompt with nothing to do with any of them — and
+sweep the strength. Those tokens go from effectively zero to a **median peak of 44% of the
+model's probability mass**, and for **4 of 8** features the predicted token becomes the model's
+actual output: #1796 fires only on ` Wonder`, its weights name ` Woman`, and at α = 40 the model
+says **` Woman`** (P = 0.72, rising to 0.98). #1653 fires on ` apt`, names `itude`, and at α = 160
+says `itude` at P = 0.99. The label was read off the weights *before* the intervention — so this
+is a prediction confirmed, not a description fitted.
+
+**Two things that had to be measured to get this working**, both worth recording because they are
+invisible in the write-ups that describe the method:
+
+1. **Position 0 has to be excluded.** GPT-2's first position is an attention sink: its layer-6
+   residual norm is ~**3050** against ~**89** at every other position, a 34× outlier that
+   otherwise dominates a squared-error objective outright. With it dropped the norm distribution
+   is tight (median 88, p99 110).
+2. **The ℓ₁ objective of RESEARCH.md §5 is dominated at this scale.** Compared at *matched
+   sparsity* on an identical budget — same model, layer, dictionary size, tokens and epochs:
+
+   | objective | L0 | variance explained | loss recovered | selective features |
+   | --- | --- | --- | --- | --- |
+   | TopK (k = 32) | 32.0 | **77.4%** | **98.3%** | **113 / 200** |
+   | ℓ₁ (λ = 2.0) | 35.8 | 38.2% | 84.4% | 31 / 200 |
+
+   ℓ₁ buys sparsity by shrinking *every* coefficient, load-bearing ones included, so it gives up
+   half the variance and most of the interpretability to get there; pushed to λ = 4.0 it collapses
+   outright to L0 = 2.5 and 3% of the variance. TopK drops the losers and leaves the winners
+   unpenalized. The classic objective is still available (`--sparsity l1`) — it just needs far more
+   scale than a laptop to compete.
+
+**Scope.** One model, one layer, 4096 features, 120k tokens — a working instrument, not a frontier
+one. Production dictionaries are millions of features over billions of tokens, and at this size
+many features are token-identity detectors rather than the abstract concepts larger SAEs surface;
+a handful lock onto BPE byte fragments. The selectivity metric measures *token* selectivity only,
+so a genuinely context-selective feature scores badly on it. What is solid: the fidelity number,
+the features-vs-basis gap, and the causal takeovers — all reproducible with one command.
+
+**Why it matters here.** This is the same move Splice makes on its own decisions, one level down.
+`JSpace.ts` decomposes an action score into named, inspectable contributions rather than trusting
+a scalar; `features.py` decomposes a model's hidden state into named, inspectable parts rather
+than trusting a neuron. In both cases the point is that the useful decomposition is *not* the one
+the system happens to store — and that a decomposition is only worth anything once you can
+intervene on it and predict what happens.
+
 ---
 
 ## Relation to prior work
@@ -203,27 +330,24 @@ architecture. The case for Splice's external verification is correspondingly fir
 Leave-one-out ablation, gradient saliency, activation steering, and logit-lens
 readouts are all established (see [RESEARCH.md](RESEARCH.md)). Adjacent published
 threads: Jacobian Scopes (token-level gradient attributions), robustness/margin
-literature (adversarial distance-to-boundary), and cross-layer feature analyses in
-the transcoder/SAE line. What we have not seen elsewhere: (1) the *agent-decision
-geometry battery* (deletion robustness + flip distance + participation-ratio
-dimension + load-bearing token, as one report) applied to LM next-token decisions,
-(2) the confidence-vs-geometric-robustness correlation stated and measured as a
-calibration question, and (3) the per-layer concept-vector *alignment × functional
-transport* pairing. If someone has — good; the point of one readable file is that
-these runs are trivially checkable and extendable.
+literature (adversarial distance-to-boundary), Geometry of Truth (Marks & Tegmark 2023),
+and cross-layer feature analyses in the transcoder/SAE line. What we synthesize here:
+(1) the *agent-decision geometry battery* (deletion robustness + flip distance +
+participation-ratio dimension + load-bearing token) applied to LM next-token decisions,
+(2) the confidence-vs-geometric-robustness calibration curve, (3) the per-layer
+concept-vector *alignment × functional transport* pairing, (4) layerwise *entropy
+deliberation trajectories*, and (5) the *latent truth subspace* projection.
 
 ## Reproduce / extend
 
 ```bash
 cd lab && . .venv/bin/activate
-python3 probes.py geometry --prompt "your prompt here"
+python3 probes.py geometry --prompt "The Eiffel Tower is located in the city of"
 python3 probes.py calibrate           # edit CALIBRATION_PROMPTS to scale up
 python3 probes.py transport --concept "shouting"
+python3 probes.py deliberation --prompt "The capital of the state containing Dallas is"
+python3 probes.py truth --prompt "The earth revolves around the sun."
 python3 probes.py all --out probes.json
 python3 scaling.py --models distilgpt2,gpt2,gpt2-medium,gpt2-large   # the scaling study
 ```
 
-Obvious extensions: more prompts and a bigger model for `calibrate` (does the
-correlation grow with scale?); `transport` for many concepts (is upstream
-amplification universal?); porting `geometry` into Splice's detector thresholds so
-the same hazard taxonomy screens both agent and model decisions.

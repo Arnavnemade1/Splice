@@ -39,11 +39,20 @@ decision, plus one open question that battery lets us ask."
              attribution) at every layer, plus the causally important attention
              heads (from knockout). Reuses mindlab's ablation + knockout.
 
+  deliberation  Layerwise entropy trajectory: Shannon entropy H(l) and top margin
+             across residual depth via logit lens. Classifies cognitive modes:
+             Immediate Retrieval vs Deliberative Phase-Transition vs Unresolved.
+
+  truth      Latent truth & belief subspace: extracts contrastive truth direction
+             and projects statement residual vectors to probe internal belief.
+
 Usage:
   python3 probes.py geometry  --prompt "The Eiffel Tower is located in the city of"
   python3 probes.py calibrate
   python3 probes.py transport --concept "the ocean"
   python3 probes.py localization
+  python3 probes.py deliberation --prompt "The capital of France is"
+  python3 probes.py truth --statement "The earth revolves around the sun."
   python3 probes.py all --interactive --out probes.json
 """
 
@@ -65,6 +74,7 @@ except ImportError as exc:  # pragma: no cover
 
 from mindlab import (  # reuse the loaded-model plumbing + causal experiments
     Lab, concept_vector, CONCEPT_CONTRASTS, run_ablation, run_knockout,
+    run_deliberation, DeliberationResult, run_truth, TruthResult,
 )
 
 torch.manual_seed(0)
@@ -450,11 +460,16 @@ def run_localization(lab: Lab, prompt: str,
 # ─── CLI ────────────────────────────────────────────────────────────────────
 
 
+DEFAULT_STATEMENT = "The earth revolves around the sun."
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("probe", choices=["geometry", "calibrate", "transport", "localization", "all"])
+    ap.add_argument("probe", choices=["geometry", "calibrate", "transport", "localization",
+                                      "deliberation", "truth", "all"])
     ap.add_argument("--model", default="gpt2")
     ap.add_argument("--prompt", default="The Eiffel Tower is located in the city of")
+    ap.add_argument("--statement", default=DEFAULT_STATEMENT, help="truth probe target statement")
     ap.add_argument("--concept", default="the ocean")
     ap.add_argument("--interactive", action="store_true",
                     help="with `all`: also write an explorable HTML report next to the JSON")
@@ -466,16 +481,21 @@ def main() -> None:
     lab = Lab(args.model)
 
     if args.probe == "all":
-        sys.stderr.write("[probes] 1/4 geometry...\n")
+        sys.stderr.write("[probes] 1/6 geometry...\n")
         geo = run_geometry(lab, args.prompt)
-        sys.stderr.write("[probes] 2/4 calibrate...\n")
+        sys.stderr.write("[probes] 2/6 calibrate...\n")
         cal = run_calibrate(lab)
-        sys.stderr.write("[probes] 3/4 transport...\n")
+        sys.stderr.write("[probes] 3/6 transport...\n")
         tr = run_transport(lab, args.concept)
-        sys.stderr.write("[probes] 4/4 localization...\n")
+        sys.stderr.write("[probes] 4/6 localization...\n")
         loc = run_localization(lab, args.prompt)
+        sys.stderr.write("[probes] 5/6 deliberation...\n")
+        delib = run_deliberation(lab, args.prompt)
+        sys.stderr.write("[probes] 6/6 truth...\n")
+        tr_probe = run_truth(lab, args.statement)
         payload = {"model": args.model, "geometry": asdict(geo), "calibrate": asdict(cal),
-                   "transport": asdict(tr), "localization": asdict(loc)}
+                   "transport": asdict(tr), "localization": asdict(loc),
+                   "deliberation": asdict(delib), "truth": asdict(tr_probe)}
         with open(args.out, "w") as f:
             json.dump(payload, f, indent=2)
         sys.stderr.write(f"[probes] wrote {args.out} in {time.time() - t0:.1f}s\n")
@@ -487,20 +507,25 @@ def main() -> None:
             with open(html_path, "w") as f:
                 f.write(render_probes_interactive(args.model, payload, time.time() - t0))
             sys.stderr.write(f"[probes] interactive report → {html_path}\n")
-        for name, res in [("GEOMETRY", geo), ("CALIBRATE", cal), ("TRANSPORT", tr), ("LOCALIZATION", loc)]:
+        for name, res in [("GEOMETRY", geo), ("CALIBRATE", cal), ("TRANSPORT", tr),
+                          ("LOCALIZATION", loc), ("DELIBERATION", delib), ("TRUTH", tr_probe)]:
             sys.stderr.write(f"\n=== {name} ===\n")
             for line in res.interpretation:
                 sys.stderr.write(f"  - {line}\n")
         return
 
-    fn = {"geometry": run_geometry, "calibrate": run_calibrate,
-          "transport": run_transport, "localization": run_localization}[args.probe]
     if args.probe == "geometry" or args.probe == "localization":
-        out = fn(lab, args.prompt)
+        out = run_geometry(lab, args.prompt) if args.probe == "geometry" else run_localization(lab, args.prompt)
     elif args.probe == "transport":
-        out = fn(lab, args.concept)
+        out = run_transport(lab, args.concept)
+    elif args.probe == "calibrate":
+        out = run_calibrate(lab)
+    elif args.probe == "deliberation":
+        out = run_deliberation(lab, args.prompt)
+    elif args.probe == "truth":
+        out = run_truth(lab, args.statement)
     else:
-        out = fn(lab)
+        raise ValueError(f"Unknown probe {args.probe}")
     json.dump(asdict(out), sys.stdout, indent=2)
     sys.stdout.write("\n")
 

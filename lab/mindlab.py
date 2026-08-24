@@ -6,21 +6,27 @@ Runs the interpretability experiments described in lab/RESEARCH.md on a real
 open-weights model (GPT-2 class, CPU-friendly), from scratch — every number is
 computed in this one file:
 
-  jacobian   The Jacobian space: d logit / d input-embedding. Per-token
-             saliency for the predicted token, plus an SVD of the token x logit
-             Jacobian — the model-side sibling of Splice's JSpace.ts spectrum.
-  lens       Logit lens: decode the residual stream after every layer and
-             watch the answer crystallize (planning made visible).
-  patch      Activation patching (causal tracing) on the classic IOI task:
-             swap clean activations into a corrupted run, cell by
-             (layer x position), and map where the computation lives.
-  steer      Concept injection (the protocol behind Anthropic's introspection
-             experiments): build a concept vector from contrastive prompts,
-             inject it at a layer across a strength sweep, and watch the
-             "sweet spot" -> incoherence arc.
-  attention  Induction-head scan: find the [A][B]...[A] -> [B] heads that
-             implement in-context learning, by prefix-matching score.
-  report     All of the above -> one self-contained HTML report.
+  jacobian     The Jacobian space: d logit / d input-embedding. Per-token
+               saliency for the predicted token, plus an SVD of the token x logit
+               Jacobian — the model-side sibling of Splice's JSpace.ts spectrum.
+  lens         Logit lens: decode the residual stream after every layer and
+               watch the answer crystallize (planning made visible).
+  patch        Activation patching (causal tracing) on the classic IOI task:
+               swap clean activations into a corrupted run, cell by
+               (layer x position), and map where the computation lives.
+  steer        Concept injection (the protocol behind Anthropic's introspection
+               experiments): build a concept vector from contrastive prompts,
+               inject it at a layer across a strength sweep, and watch the
+               "sweet spot" -> incoherence arc.
+  attention    Induction-head scan: find the [A][B]...[A] -> [B] heads that
+               implement in-context learning, by prefix-matching score.
+  ablation     Neuron ablation: top MLP neurons by attribution, verified by
+               real ablation, plus effective neuron count (superposition).
+  knockout     Attention-head knockout: causal importance map on IOI task.
+  reasoning    Multi-hop reasoning trace: bridge entity emergence across depth.
+  deliberation Layerwise entropy trajectory: Shannon entropy & deliberation curves.
+  truth        Latent truth & belief subspace: projection onto contrastive truth axes.
+  report       All of the above -> one self-contained HTML report.
 
 Honest scope: this operates on models whose weights you hold locally. It makes
 no claim about any hosted model's internals — that line (documented across the
@@ -31,6 +37,8 @@ Usage:
   python3 mindlab.py report --model distilgpt2 --prompt "The capital of France is"
   python3 mindlab.py jacobian --prompt "..."      # single experiment, JSON to stdout
   python3 mindlab.py steer --concept "the ocean" --layer 6
+  python3 mindlab.py deliberation --prompt "The capital of France is"
+  python3 mindlab.py truth --statement "The earth revolves around the sun."
 
 Dependencies (lab/requirements.txt): torch, transformers, numpy.
 """
@@ -672,6 +680,189 @@ def run_reasoning(lab: Lab, prompt: str, bridge: str, answer: str) -> ReasoningR
     )
 
 
+# ─── 9. Deliberation dynamics & layerwise entropy ───────────────────────────
+
+
+@dataclass
+class DeliberationLayer:
+    layer: int
+    entropy_bits: float
+    top1_token: str
+    top1_prob: float
+    margin_top2: float
+    top_candidates: list[dict[str, Any]]
+
+
+@dataclass
+class DeliberationResult:
+    prompt: str
+    predicted: str
+    layers: list[DeliberationLayer]
+    inflection_layer: int | None
+    initial_entropy: float
+    final_entropy: float
+    entropy_drop: float
+    cognition_pattern: str  # "Immediate Retrieval", "Deliberative Phase-Transition", or "Ambiguous / Unresolved"
+    interpretation: list[str]
+    note: str = (
+        "Shannon entropy H(l) = -sum p_i log2(p_i) and top-1 margin tracked across "
+        "residual depth via the logit lens. Reveals whether a decision is an immediate "
+        "associative lookup, a deliberative phase transition, or unresolved uncertainty "
+        "(RESEARCH.md §2.2)."
+    )
+
+
+def run_deliberation(lab: Lab, prompt: str) -> DeliberationResult:
+    ids = lab.ids(prompt)
+    with torch.no_grad():
+        out = lab.model(ids, output_hidden_states=True)
+        final_index = len(out.hidden_states) - 1
+        predicted = lab.tok.decode([int(out.logits[0, -1].argmax())])
+        layers: list[DeliberationLayer] = []
+        for li, h in enumerate(out.hidden_states):
+            logits = (h[0, -1] @ lab.unembed.T) if li == final_index else lab.decode_head(h[0, -1])
+            probs = torch.softmax(logits, dim=-1)
+            clamped_probs = probs.clamp_min(1e-12)
+            entropy = float(-(probs * clamped_probs.log2()).sum())
+            top2 = torch.topk(probs, 2)
+            top1_p = float(top2.values[0])
+            top2_p = float(top2.values[1])
+            top5 = torch.topk(probs, 5)
+            top_cand = [{"token": lab.tok.decode([int(i)]), "prob": round(float(p), 4)}
+                        for p, i in zip(top5.values, top5.indices)]
+            layers.append(DeliberationLayer(
+                layer=li,
+                entropy_bits=round(entropy, 3),
+                top1_token=lab.tok.decode([int(top2.indices[0])]),
+                top1_prob=round(top1_p, 4),
+                margin_top2=round(float(top1_p - top2_p), 4),
+                top_candidates=top_cand,
+            ))
+
+    h0 = layers[0].entropy_bits
+    h_final = layers[-1].entropy_bits
+    h_drop = round(h0 - h_final, 3)
+
+    # Inflection layer: first layer where entropy drops below 50% of h0 or margin >= 0.30
+    inflection = None
+    for L in layers[1:]:
+        if L.entropy_bits <= 0.5 * h0 or L.margin_top2 >= 0.30:
+            inflection = L.layer
+            break
+
+    n_layers = len(layers) - 1
+    if inflection is not None and inflection <= max(2, n_layers // 4):
+        pattern = "Immediate Retrieval"
+    elif inflection is not None and inflection > max(2, n_layers // 4) and h_final < 0.6 * h0:
+        pattern = "Deliberative Phase-Transition"
+    else:
+        pattern = "Ambiguous / Unresolved"
+
+    interp = [
+        f'"{prompt}" → predicted {predicted!r}. Initial entropy {h0} bits → final {h_final} bits (drop of {h_drop} bits).',
+        f'Cognition pattern: {pattern}. ' + (
+            f'Uncertainty resolves early at layer {inflection} (direct memory lookup).' if pattern == "Immediate Retrieval" else
+            f'Uncertainty remains high through early/mid layers, then undergoes a sharp phase-transition at layer {inflection}.' if pattern == "Deliberative Phase-Transition" else
+            f'Entropy remains elevated across the entire stack — no clear winner dominates before the final layer.'
+        ),
+        f'Final layer top-1 margin over runner-up is {layers[-1].margin_top2} (P(top-1)={layers[-1].top1_prob}).',
+    ]
+
+    return DeliberationResult(
+        prompt=prompt, predicted=predicted, layers=layers,
+        inflection_layer=inflection, initial_entropy=h0, final_entropy=h_final,
+        entropy_drop=h_drop, cognition_pattern=pattern, interpretation=interp,
+    )
+
+
+# ─── 10. Latent truth & belief subspace ──────────────────────────────────────
+
+
+@dataclass
+class TruthResult:
+    statement: str
+    predicted_next_token: str
+    truth_direction_norms: list[float]
+    truth_projections: list[float]  # Cosine similarity with truth direction at each layer
+    peak_layer: int
+    peak_truth_score: float
+    internal_verdict: str  # "Believed True", "Believed False", or "Neutral / Ambiguous"
+    interpretation: list[str]
+    note: str = (
+        "Linear representation of truth (RESEARCH.md §2.1; Marks & Tegmark 2023). "
+        "Contrastive true/false pairs define the truth direction at each depth; the statement's "
+        "residual vector is projected onto this axis to probe internal belief vs surface tokens."
+    )
+
+
+FACTUAL_TRUTH_PAIRS = [
+    ("The earth revolves around the sun.", "The sun revolves around the earth."),
+    ("Paris is the capital of France.", "Rome is the capital of France."),
+    ("Water boils at one hundred degrees Celsius.", "Water freezes at one hundred degrees Celsius."),
+    ("Two plus two equals four.", "Two plus two equals five."),
+    ("Dogs are mammals.", "Dogs are reptiles."),
+    ("Gold is a metal.", "Gold is a gas."),
+    ("Mount Everest is the highest mountain on Earth.", "Mount Fuji is the highest mountain on Earth."),
+    ("Humans need oxygen to survive.", "Humans need nitrogen alone to survive."),
+]
+
+
+def run_truth(lab: Lab, statement: str = "The earth revolves around the sun.") -> TruthResult:
+    L = lab.n_layer
+    truth_dirs: list[torch.Tensor] = []
+    for layer in range(L):
+        diffs = []
+        with torch.no_grad():
+            for t_stmt, f_stmt in FACTUAL_TRUTH_PAIRS:
+                ht = lab.model(lab.ids(t_stmt), output_hidden_states=True).hidden_states[layer + 1][0, -1]
+                hf = lab.model(lab.ids(f_stmt), output_hidden_states=True).hidden_states[layer + 1][0, -1]
+                diffs.append(ht - hf)
+        v_truth = torch.stack(diffs).mean(dim=0)
+        truth_dirs.append(v_truth)
+
+    proj_scores: list[float] = []
+    norms: list[float] = []
+    ids = lab.ids(statement)
+    with torch.no_grad():
+        out = lab.model(ids, output_hidden_states=True)
+        pred = lab.tok.decode([int(out.logits[0, -1].argmax())])
+        for layer in range(L):
+            h = out.hidden_states[layer + 1][0, -1]
+            vt = truth_dirs[layer]
+            norm_vt = float(vt.norm())
+            norms.append(round(norm_vt, 3))
+            cos = float((h @ vt) / ((h.norm() * vt.norm()) + 1e-9))
+            proj_scores.append(round(cos, 3))
+
+    peak_idx = int(np.argmax(np.abs(proj_scores)))
+    peak_score = proj_scores[peak_idx]
+
+    if peak_score >= 0.12:
+        verdict = "Believed True"
+    elif peak_score <= -0.12:
+        verdict = "Believed False"
+    else:
+        verdict = "Neutral / Ambiguous"
+
+    mid_avg = float(np.mean(proj_scores[L // 4: 3 * L // 4])) if L >= 4 else float(np.mean(proj_scores))
+    interp = [
+        f'Statement: "{statement}" — evaluated against contrastive truth subspace across {L} layers.',
+        f'Peak truth projection at layer {peak_idx}: cosine {peak_score:+.3f} → internal verdict: {verdict}.',
+        f'Mean mid-layer truth alignment (layers {L // 4}..{3 * L // 4}): {mid_avg:+.3f}. ' + (
+            "Internal representation strongly aligns with factual truth directions." if verdict == "Believed True" else
+            "Internal representation is opposed to factual truth directions (counterfactual/falsehood)." if verdict == "Believed False" else
+            "Statement has weak or indeterminate projection onto factual truth axes."
+        ),
+    ]
+
+    return TruthResult(
+        statement=statement, predicted_next_token=pred,
+        truth_direction_norms=norms, truth_projections=proj_scores,
+        peak_layer=peak_idx, peak_truth_score=peak_score,
+        internal_verdict=verdict, interpretation=interp,
+    )
+
+
 # ─── HTML report ────────────────────────────────────────────────────────────
 
 
@@ -683,7 +874,9 @@ def _heat(value: float, lo: float, hi: float) -> str:
 
 def render_html(model_name: str, jac: JacobianResult, lens: LensResult,
                 patch: PatchResult, steer: SteerResult, attn: AttentionResult,
-                elapsed_s: float, reason: "ReasoningResult | None" = None) -> str:
+                elapsed_s: float, reason: "ReasoningResult | None" = None,
+                delib: "DeliberationResult | None" = None,
+                truth: "TruthResult | None" = None) -> str:
     e = html.escape
     css = """
     :root{--ink:#111827;--mut:#6b7280;--line:#e5e7eb;--brand:#4f46e5;--bg:#fafafa}
@@ -795,11 +988,36 @@ def render_html(model_name: str, jac: JacobianResult, lens: LensResult,
                              f"<td>{L['answer_prob']} (r{L['answer_rank']})</td></tr>")
         parts.append(f"</table><div class='note' style='margin-top:10px'>{e(reason.interpretation[1])}</div></div>")
 
+    if delib is not None:
+        parts.append("<h2>9 · Deliberation dynamics — layerwise entropy trajectory</h2>")
+        parts.append(f"<div class='note'>{e(delib.note)}</div><div class='card'>")
+        infl = f"layer {delib.inflection_layer}" if delib.inflection_layer is not None else "unresolved"
+        parts.append(f"<div class='sub'>“{e(delib.prompt)}” → <b class='tag'>{e(delib.predicted)}</b> · "
+                     f"cognition pattern: <b class='tag'>{e(delib.cognition_pattern)}</b> · "
+                     f"entropy drop: <b>{delib.initial_entropy} → {delib.final_entropy} bits</b> ({infl})</div>")
+        parts.append("<table style='margin-top:8px'><tr><th>layer</th><th>entropy (bits)</th><th>top token (p)</th><th>margin over runner-up</th></tr>")
+        for L in delib.layers:
+            parts.append(f"<tr><td>{'emb' if L.layer == 0 else str(L.layer)}</td><td>{L.entropy_bits}</td>"
+                         f"<td class='mono'>{e(L.top1_token)} ({L.top1_prob})</td><td>{L.margin_top2}</td></tr>")
+        parts.append(f"</table><div class='note' style='margin-top:10px'>{e(delib.interpretation[1])}</div></div>")
+
+    if truth is not None:
+        parts.append("<h2>10 · Latent truth & belief subspace — probing internal representations</h2>")
+        parts.append(f"<div class='note'>{e(truth.note)}</div><div class='card'>")
+        parts.append(f"<div class='sub'>statement: “{e(truth.statement)}” · internal verdict: "
+                     f"<b class='tag'>{e(truth.internal_verdict)}</b> · "
+                     f"peak layer {truth.peak_layer} (cosine {truth.peak_truth_score:+.3f})</div>")
+        parts.append("<table style='margin-top:8px'><tr><th>layer</th><th>truth projection (cos)</th><th>truth vector norm</th></tr>")
+        for layer_idx, (cos, norm) in enumerate(zip(truth.truth_projections, truth.truth_direction_norms)):
+            parts.append(f"<tr><td>L{layer_idx}</td><td>{cos:+.3f}</td><td>{norm}</td></tr>")
+        parts.append(f"</table><div class='note' style='margin-top:10px'>{e(truth.interpretation[1])}</div></div>")
+
     parts.append(
         "<footer>Every experiment here runs on locally held open weights; nothing probes a hosted "
         "model's internals. Methods and sources: <span class='mono'>lab/RESEARCH.md</span> — attribution "
         "graphs &amp; circuit tracing, concept injection (introspection), persona vectors, Jacobian "
-        "scopes, causal tracing, logit lens, induction heads, multi-hop reasoning traces.</footer></main>")
+        "scopes, causal tracing, logit lens, induction heads, multi-hop reasoning traces, deliberation "
+        "entropy trajectories, latent truth subspaces.</footer></main>")
     return "<!doctype html><meta charset='utf-8'><title>Model Mind Lab</title>" + "".join(parts)
 
 
@@ -812,14 +1030,17 @@ IOI_CORRUPT = "When John and Mary went to the store, Mary gave a drink to"
 REASON_PROMPT = "The capital of the state containing Dallas is the city of"
 REASON_BRIDGE = " Texas"
 REASON_ANSWER = " Austin"
+DEFAULT_STATEMENT = "The earth revolves around the sun."
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("experiment", choices=["report", "jacobian", "lens", "patch", "steer",
-                                            "attention", "ablation", "knockout", "reasoning"])
+                                            "attention", "ablation", "knockout", "reasoning",
+                                            "deliberation", "truth"])
     ap.add_argument("--model", default="gpt2")
     ap.add_argument("--prompt", default=DEFAULT_PROMPT)
+    ap.add_argument("--statement", default=DEFAULT_STATEMENT, help="truth probe target statement")
     ap.add_argument("--clean", default=IOI_CLEAN)
     ap.add_argument("--corrupt", default=IOI_CORRUPT)
     ap.add_argument("--answer", default=" Mary")
@@ -841,9 +1062,10 @@ def main() -> None:
 
     if args.experiment == "report":
         steps = ["jacobian", "logit lens", "activation patching", "concept injection",
-                 "induction heads", "neuron ablation", "attention knockout", "reasoning trace"]
+                 "induction heads", "neuron ablation", "attention knockout", "reasoning trace",
+                 "deliberation dynamics", "latent truth subspace"]
         def step(i):
-            sys.stderr.write(f"[mindlab] {i}/8 {steps[i - 1]}…\n")
+            sys.stderr.write(f"[mindlab] {i}/10 {steps[i - 1]}…\n")
         step(1); jac = run_jacobian(lab, args.prompt)
         step(2); lens = run_lens(lab, args.prompt)
         step(3); patch = run_patch(lab, args.clean, args.corrupt, args.answer, args.foil)
@@ -852,14 +1074,17 @@ def main() -> None:
         step(6); abl = run_ablation(lab, args.prompt, layer)
         step(7); ko = run_knockout(lab, args.clean, args.answer, args.foil)
         step(8); reason = run_reasoning(lab, REASON_PROMPT, REASON_BRIDGE, REASON_ANSWER)
+        step(9); delib = run_deliberation(lab, args.prompt)
+        step(10); truth = run_truth(lab, args.statement)
         results = {"model": args.model, "jacobian": asdict(jac), "lens": asdict(lens),
                    "patch": asdict(patch), "steer": asdict(steer), "attention": asdict(attn),
-                   "ablation": asdict(abl), "knockout": asdict(ko), "reasoning": asdict(reason)}
+                   "ablation": asdict(abl), "knockout": asdict(ko), "reasoning": asdict(reason),
+                   "deliberation": asdict(delib), "truth": asdict(truth)}
         if args.interactive:
             from interactive import render_interactive
             html_text = render_interactive(args.model, results, time.time() - t0)
         else:
-            html_text = render_html(args.model, jac, lens, patch, steer, attn, time.time() - t0, reason)
+            html_text = render_html(args.model, jac, lens, patch, steer, attn, time.time() - t0, reason, delib, truth)
         with open(args.out, "w") as f:
             f.write(html_text)
         with open(args.out.replace(".html", ".json"), "w") as f:
@@ -885,6 +1110,10 @@ def main() -> None:
         rp = REASON_PROMPT if args.prompt == DEFAULT_PROMPT else args.prompt
         ra = REASON_ANSWER if args.answer == " Mary" else args.answer
         result = run_reasoning(lab, rp, args.bridge, ra)
+    elif args.experiment == "deliberation":
+        result = run_deliberation(lab, args.prompt)
+    elif args.experiment == "truth":
+        result = run_truth(lab, args.statement)
     else:
         result = run_attention(lab)
     json.dump(asdict(result), sys.stdout, indent=2)

@@ -110,6 +110,7 @@ TEMPLATE = r"""<!doctype html><meta charset="utf-8">
   <nav aria-label="Experiments">
     <a href="#f1">1 · Jacobian</a><a href="#f2">2 · Logit lens</a><a href="#f3">3 · Patching</a>
     <a href="#f4">4 · Injection</a><a href="#f5">5 · Induction</a><a href="#f6">6 · Ablation</a><a href="#f7">7 · Knockout</a><a href="#f8">8 · Reasoning</a>
+    <a href="#f9">9 · Deliberation</a><a href="#f10">10 · Truth</a>
   </nav>
 
   <section id="f1"><div class="fig">Fig. 1 · The Jacobian space</div>
@@ -184,6 +185,24 @@ TEMPLATE = r"""<!doctype html><meta charset="utf-8">
         <span class="lg"><span class="sw" style="background:var(--teal)"></span>answer</span></div>
       <svg id="rsvg" viewBox="0 0 640 250" role="img" aria-label="bridge and answer probability by layer"></svg>
       <p class="note" id="rnote"></p></div></section>
+
+  <section id="f9"><div class="fig">Fig. 9 · Deliberation dynamics</div>
+    <h2>Watching uncertainty resolve across depth</h2>
+    <p class="what">Shannon entropy H(l) and top margin tracked layer by layer via logit lens. Reveals whether
+    a decision is an immediate associative lookup, a deliberative phase transition, or unresolved uncertainty.</p>
+    <div class="card"><div class="sub" id="d9sub"></div>
+      <svg id="dsvg" viewBox="0 0 640 240" role="img" aria-label="entropy across layers"></svg>
+      <div class="bars" id="dbars" style="margin-top:12px"></div>
+      <p class="note" id="dnote"></p></div></section>
+
+  <section id="f10"><div class="fig">Fig. 10 · Latent truth &amp; belief subspace</div>
+    <h2>Probing internal truth representation</h2>
+    <p class="what">Projection of the statement's residual vectors onto the contrastive truth direction at each
+    depth. Measures whether internal representations distinguish factual truth from falsehood.</p>
+    <div class="card"><div class="sub" id="t10sub"></div>
+      <svg id="tsvg" viewBox="0 0 640 220" role="img" aria-label="truth projection across layers"></svg>
+      <div class="bars" id="tbars" style="margin-top:12px"></div>
+      <p class="note" id="tnote"></p></div></section>
 
   <footer id="foot"></footer>
 </main>
@@ -333,7 +352,48 @@ function drawR(){$("#rsvg").innerHTML=rsvg();
   $("#rsvg").querySelectorAll("circle").forEach(c=>{c.onmousemove=(e)=>showTip(e,c.dataset.t);c.onmouseleave=hideTip;});}
 $("#rnote").innerHTML = R.interpretation.map(esc).join(" ");
 
-function render(){drawJ();drawL();drawA();drawR();
+// ── Fig 9: Deliberation ──
+function drawD(){
+  if (!DATA.deliberation) return;
+  const DL=DATA.deliberation, DLL=DL.layers, nDL=DLL.length;
+  const maxH=Math.max(...DLL.map(l=>l.entropy_bits),1);
+  const inflTxt=DL.inflection_layer!=null?`inflection at layer ${DL.inflection_layer}`:'unresolved';
+  $("#d9sub").innerHTML=`“${esc(DL.prompt)}” → <b class="annot">${esc(DL.predicted)}</b> · pattern: <b class="annot">${esc(DL.cognition_pattern)}</b> · ${inflTxt}`;
+  function dsvg(){const W=640,H=240,l=46,r=14,t=14,b=32;
+    const X=i=>l+(W-l-r)*i/(nDL-1), Y=h=>H-b-(H-b-t)*h/(maxH*1.08);let s="";
+    for(const g of [0,Math.round(maxH/2),Math.round(maxH)]){s+=`<line class="gridline" x1="${l}" x2="${W-r}" y1="${Y(g)}" y2="${Y(g)}"/><text x="${l-6}" y="${Y(g)+3}" text-anchor="end">${g}</text>`;}
+    s+=`<polyline fill="none" stroke="var(--teal)" stroke-width="2.5" points="${DLL.map((v,i)=>X(i)+","+Y(v.entropy_bits)).join(" ")}"/>`;
+    DLL.forEach((v,i)=>s+=`<circle cx="${X(i)}" cy="${Y(v.entropy_bits)}" r="3" fill="var(--teal)" data-t="layer ${v.layer}: entropy ${v.entropy_bits} bits · top: ${esc(v.top1_token)} (${v.top1_prob})"></circle>`);
+    if(DL.inflection_layer!=null) s+=`<line x1="${X(DL.inflection_layer)}" x2="${X(DL.inflection_layer)}" y1="${t}" y2="${H-b}" stroke="var(--copper)" stroke-dasharray="3 3" stroke-width="1.5"/><text x="${X(DL.inflection_layer)+4}" y="${t+10}" fill="var(--copper)">inflection</text>`;
+    s+=`<text x="${l}" y="${H-8}">emb</text><text x="${W-r}" y="${H-8}" text-anchor="end">L${nDL-1}</text>`;
+    s+=`<text x="14" y="${t+6}" transform="rotate(-90 14 ${H/2})" text-anchor="middle">entropy (bits)</text>`;return s;}
+  $("#dsvg").innerHTML=dsvg();
+  $("#dsvg").querySelectorAll("circle").forEach(c=>{c.onmousemove=(e)=>showTip(e,c.dataset.t);c.onmouseleave=hideTip;});
+  $("#dbars").innerHTML=DLL.slice(1).map(l=>`<span class="rowlbl">L${l.layer} ${esc(l.top1_token)}</span>
+    <div class="track"><div class="fill" style="width:${(l.top1_prob*100).toFixed(1)}%"></div></div><span class="val">margin ${l.margin_top2}</span>`).join("");
+  $("#dnote").innerHTML=DL.interpretation.map(esc).join(" ");
+}
+
+// ── Fig 10: Truth ──
+function drawT(){
+  if (!DATA.truth) return;
+  const TR=DATA.truth, TP=TR.truth_projections, nTR=TP.length;
+  $("#t10sub").innerHTML=`statement: “${esc(TR.statement)}” · internal verdict: <b class="annot">${esc(TR.internal_verdict)}</b> · peak layer ${TR.peak_layer} (cosine ${TR.peak_truth_score>=0?'+':''}${TR.peak_truth_score})`;
+  function tsvg(){const W=640,H=220,l=46,r=14,t=14,b=32;
+    const X=i=>l+(W-l-r)*i/(nTR-1), Y=c=>H/2 - (c * (H/2 - t - 4));let s="";
+    s+=`<line class="gridline" x1="${l}" x2="${W-r}" y1="${H/2}" y2="${H/2}" stroke-dasharray="2 2"/><text x="${l-6}" y="${H/2+3}" text-anchor="end">0.0</text>`;
+    s+=`<polyline fill="none" stroke="var(--teal)" stroke-width="2.5" points="${TP.map((v,i)=>X(i)+","+Y(v)).join(" ")}"/>`;
+    TP.forEach((v,i)=>s+=`<circle cx="${X(i)}" cy="${Y(v)}" r="3" fill="${v>=0?'var(--teal)':'var(--copper)'}" data-t="layer ${i}: truth projection cosine ${v>=0?'+':''}${v}"></circle>`);
+    s+=`<text x="${l}" y="${H-8}">L0</text><text x="${W-r}" y="${H-8}" text-anchor="end">L${nTR-1}</text>`;
+    s+=`<text x="14" y="${t+6}" transform="rotate(-90 14 ${H/2})" text-anchor="middle">cos projection</text>`;return s;}
+  $("#tsvg").innerHTML=tsvg();
+  $("#tsvg").querySelectorAll("circle").forEach(c=>{c.onmousemove=(e)=>showTip(e,c.dataset.t);c.onmouseleave=hideTip;});
+  $("#tbars").innerHTML=TP.map((v,i)=>`<span class="rowlbl">L${i}</span>
+    <div class="track"><div class="fill ${v<0?'neg':''}" style="width:${(Math.abs(v)*100).toFixed(1)}%"></div></div><span class="val">${v>=0?'+':''}${v}</span>`).join("");
+  $("#tnote").innerHTML=TR.interpretation.map(esc).join(" ");
+}
+
+function render(){drawJ();drawL();drawA();drawR();drawD();drawT();
   $("#pheat").querySelectorAll(".cell").forEach(c=>c.style.background=heat(Math.max(0,PT.recovery[+c.dataset.l][+c.dataset.p])));
   $("#koheat").querySelectorAll(".cell").forEach(c=>c.style.background=diverge(KO.importance[+c.dataset.l][+c.dataset.h]/koAbs));}
 render();
@@ -407,7 +467,8 @@ PROBES_TEMPLATE = r"""<!doctype html><meta charset="utf-8">
   <h1 id="headline"></h1>
   <div class="meta" id="meta"></div>
   <nav aria-label="Probes"><a href="#p1">1 · Decision geometry</a><a href="#p2">2 · Calibration</a>
-    <a href="#p3">3 · Concept transport</a><a href="#p4">4 · Localization</a></nav>
+    <a href="#p3">3 · Concept transport</a><a href="#p4">4 · Localization</a>
+    <a href="#p5">5 · Deliberation</a><a href="#p6">6 · Truth</a></nav>
 
   <section id="p1"><div class="fig">Probe 1 · Decision geometry</div>
     <h2>Splice's instrument, pointed at the model</h2>
@@ -442,6 +503,24 @@ PROBES_TEMPLATE = r"""<!doctype html><meta charset="utf-8">
       <div class="bars" id="l-heads"></div>
       <div class="legend"><span class="lg"><span class="sw" style="background:var(--teal)"></span>supports the answer</span>
         <span class="lg"><span class="sw" style="background:var(--copper)"></span>opposes it</span></div></div></section>
+
+  <section id="p5"><div class="fig">Probe 5 · Deliberation dynamics</div>
+    <h2>Watching uncertainty resolve across depth</h2>
+    <p class="what">Shannon entropy H(l) and top margin tracked layer by layer via logit lens. Reveals whether
+    a decision is an immediate associative lookup, a deliberative phase transition, or unresolved uncertainty.</p>
+    <div class="card"><div class="sub" id="d-sub"></div>
+      <svg id="d-svg" viewBox="0 0 640 240" role="img" aria-label="entropy across layers"></svg>
+      <div class="bars" id="d-bars" style="margin-top:12px"></div>
+      <p class="note" id="d-note"></p></div></section>
+
+  <section id="p6"><div class="fig">Probe 6 · Latent truth &amp; belief subspace</div>
+    <h2>Probing internal truth representation</h2>
+    <p class="what">Projection of the statement's residual vectors onto the contrastive truth direction at each
+    depth. Measures whether internal representations distinguish factual truth from falsehood.</p>
+    <div class="card"><div class="sub" id="t-truth-sub"></div>
+      <svg id="t-truth-svg" viewBox="0 0 640 220" role="img" aria-label="truth projection across layers"></svg>
+      <div class="bars" id="t-truth-bars" style="margin-top:12px"></div>
+      <p class="note" id="t-truth-note"></p></div></section>
 
   <footer id="foot"></footer>
 </main>
@@ -517,12 +596,53 @@ $("#l-heads").innerHTML=Lz.top_causal_heads.map(h=>`<span class="rowlbl">${h.hea
   <span class="val">${h.importance>=0?'+':''}${h.importance}</span>`).join("");
 $("#l-note").innerHTML = Lz.interpretation.map(esc).join(" ");
 
-function render(){drawScatter();drawLoc();
+// Probe 5: deliberation
+function drawDProbe(){
+  if (!DATA.deliberation) return;
+  const DL=DATA.deliberation, DLL=DL.layers, nDL=DLL.length;
+  const maxH=Math.max(...DLL.map(l=>l.entropy_bits),1);
+  const inflTxt=DL.inflection_layer!=null?`inflection at layer ${DL.inflection_layer}`:'unresolved';
+  $("#d-sub").innerHTML=`“${esc(DL.prompt)}” → <b class="annot">${esc(DL.predicted)}</b> · pattern: <b class="annot">${esc(DL.cognition_pattern)}</b> · ${inflTxt}`;
+  function dsvg(){const W=640,H=240,l=46,r=14,t=14,b=32;
+    const X=i=>l+(W-l-r)*i/(nDL-1), Y=h=>H-b-(H-b-t)*h/(maxH*1.08);let s="";
+    for(const g of [0,Math.round(maxH/2),Math.round(maxH)]){s+=`<line class="gridline" x1="${l}" x2="${W-r}" y1="${Y(g)}" y2="${Y(g)}"/><text x="${l-6}" y="${Y(g)+3}" text-anchor="end">${g}</text>`;}
+    s+=`<polyline fill="none" stroke="var(--teal)" stroke-width="2.5" points="${DLL.map((v,i)=>X(i)+","+Y(v.entropy_bits)).join(" ")}"/>`;
+    DLL.forEach((v,i)=>s+=`<circle cx="${X(i)}" cy="${Y(v.entropy_bits)}" r="3" fill="var(--teal)" data-t="layer ${v.layer}: entropy ${v.entropy_bits} bits · top: ${esc(v.top1_token)} (${v.top1_prob})"></circle>`);
+    if(DL.inflection_layer!=null) s+=`<line x1="${X(DL.inflection_layer)}" x2="${X(DL.inflection_layer)}" y1="${t}" y2="${H-b}" stroke="var(--copper)" stroke-dasharray="3 3" stroke-width="1.5"/><text x="${X(DL.inflection_layer)+4}" y="${t+10}" fill="var(--copper)">inflection</text>`;
+    s+=`<text x="${l}" y="${H-8}">emb</text><text x="${W-r}" y="${H-8}" text-anchor="end">L${nDL-1}</text>`;
+    s+=`<text x="14" y="${t+6}" transform="rotate(-90 14 ${H/2})" text-anchor="middle">entropy (bits)</text>`;return s;}
+  $("#d-svg").innerHTML=dsvg();
+  $("#d-svg").querySelectorAll("circle").forEach(c=>{c.onmousemove=(e)=>showTip(e,c.dataset.t);c.onmouseleave=hideTip;});
+  $("#d-bars").innerHTML=DLL.slice(1).map(l=>`<span class="rowlbl">L${l.layer} ${esc(l.top1_token)}</span>
+    <div class="track"><div class="fill" style="width:${(l.top1_prob*100).toFixed(1)}%"></div></div><span class="val">margin ${l.margin_top2}</span>`).join("");
+  $("#d-note").innerHTML=DL.interpretation.map(esc).join(" ");
+}
+
+// Probe 6: truth
+function drawTProbe(){
+  if (!DATA.truth) return;
+  const TR=DATA.truth, TP=TR.truth_projections, nTR=TP.length;
+  $("#t-truth-sub").innerHTML=`statement: “${esc(TR.statement)}” · internal verdict: <b class="annot">${esc(TR.internal_verdict)}</b> · peak layer ${TR.peak_layer} (cosine ${TR.peak_truth_score>=0?'+':''}${TR.peak_truth_score})`;
+  function tsvg(){const W=640,H=220,l=46,r=14,t=14,b=32;
+    const X=i=>l+(W-l-r)*i/(nTR-1), Y=c=>H/2 - (c * (H/2 - t - 4));let s="";
+    s+=`<line class="gridline" x1="${l}" x2="${W-r}" y1="${H/2}" y2="${H/2}" stroke-dasharray="2 2"/><text x="${l-6}" y="${H/2+3}" text-anchor="end">0.0</text>`;
+    s+=`<polyline fill="none" stroke="var(--teal)" stroke-width="2.5" points="${TP.map((v,i)=>X(i)+","+Y(v)).join(" ")}"/>`;
+    TP.forEach((v,i)=>s+=`<circle cx="${X(i)}" cy="${Y(v)}" r="3" fill="${v>=0?'var(--teal)':'var(--copper)'}" data-t="layer ${i}: truth projection cosine ${v>=0?'+':''}${v}"></circle>`);
+    s+=`<text x="${l}" y="${H-8}">L0</text><text x="${W-r}" y="${H-8}" text-anchor="end">L${nTR-1}</text>`;
+    s+=`<text x="14" y="${t+6}" transform="rotate(-90 14 ${H/2})" text-anchor="middle">cos projection</text>`;return s;}
+  $("#t-truth-svg").innerHTML=tsvg();
+  $("#t-truth-svg").querySelectorAll("circle").forEach(c=>{c.onmousemove=(e)=>showTip(e,c.dataset.t);c.onmouseleave=hideTip;});
+  $("#t-truth-bars").innerHTML=TP.map((v,i)=>`<span class="rowlbl">L${i}</span>
+    <div class="track"><div class="fill ${v<0?'neg':''}" style="width:${(Math.abs(v)*100).toFixed(1)}%"></div></div><span class="val">${v>=0?'+':''}${v}</span>`).join("");
+  $("#t-truth-note").innerHTML=TR.interpretation.map(esc).join(" ");
+}
+
+function render(){drawScatter();drawLoc();drawDProbe();drawTProbe();
   $("#t-heat").querySelectorAll(".cell").forEach(c=>c.style.background=heat(Math.max(0,AL[+c.dataset.i][+c.dataset.j])));
   // g-chips + heat re-tint on theme change
   $("#g-chips").innerHTML=$("#g-chips").innerHTML;}
 render();
-new MutationObserver(()=>{drawScatter();drawLoc();$("#t-heat").querySelectorAll(".cell").forEach(c=>c.style.background=heat(Math.max(0,AL[+c.dataset.i][+c.dataset.j])));
+new MutationObserver(()=>{drawScatter();drawLoc();drawDProbe();drawTProbe();$("#t-heat").querySelectorAll(".cell").forEach(c=>c.style.background=heat(Math.max(0,AL[+c.dataset.i][+c.dataset.j])));
   $("#g-chips").querySelectorAll(".pill").forEach((p,idx)=>{const t=G.per_token[idx];p.style.background=t.deletion_flips?`color-mix(in srgb,var(--copper) 55%,var(--card))`:heat(t.flip_distance!=null?Math.max(0,1-Math.min(1,t.flip_distance)):0.1);});
 }).observe(document.documentElement,{attributes:true,attributeFilter:["data-theme"]});
 </script>
